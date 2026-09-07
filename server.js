@@ -994,7 +994,7 @@ async function main() {
 
   server.listen(config.port, '127.0.0.1', () => {
     const s = metrics.summary(db);
-    console.log(`Token-Ledger laeuft auf http://127.0.0.1:${config.port}`);
+    console.log(`devbill laeuft auf http://127.0.0.1:${config.port}`);
     console.log(
       `Daten: ${s.requests} Requests, ${(s.total_tokens / 1e6).toFixed(0)} Mio Tokens, ` +
       `$${s.cost_usd.toFixed(2)} (${s.first_day} bis ${s.last_day})`

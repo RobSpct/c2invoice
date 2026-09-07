@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Token-Ledger</title>
+<title>devbill</title>
 <!-- Inline statt Datei: spart den 404 auf /favicon.ico ohne zusaetzliches Asset. -->
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230a0a0b'/%3E%3Crect x='7' y='17' width='4' height='9' fill='%23f97316'/%3E%3Crect x='14' y='11' width='4' height='15' fill='%23f97316'/%3E%3Crect x='21' y='6' width='4' height='20' fill='%23f97316'/%3E%3C/svg%3E">
 <!-- Fira Sans fuer Labels, Fira Code fuer Zahlen. Laedt das Dashboard offline
@@ -617,19 +617,19 @@
 <div class="wrap">
 
   <header>
-    <h1>Token-Ledger</h1>
-    <span class="sub" id="zeitraum">wird geladen…</span>
+    <h1>devbill</h1>
+    <span class="sub" id="zeitraum" data-i18n>wird geladen…</span>
   </header>
 
   <nav class="tabs" role="tablist">
-    <button role="tab" aria-selected="true"  data-view="live">Live</button>
-    <button role="tab" aria-selected="false" data-view="ueberblick">Überblick</button>
-    <button role="tab" aria-selected="false" data-view="tickets">Tickets</button>
-    <button role="tab" aria-selected="false" data-view="werkzeuge">Werkzeuge</button>
-    <button role="tab" aria-selected="false" data-view="kontakte">Kontakte</button>
-    <button role="tab" aria-selected="false" data-view="angebote">Angebote</button>
-    <button role="tab" aria-selected="false" data-view="rechnungen">Rechnungen</button>
-    <button role="tab" aria-selected="false" data-view="einstellungen">Einstellungen</button>
+    <button role="tab" aria-selected="true"  data-view="live" data-i18n>Live</button>
+    <button role="tab" aria-selected="false" data-view="ueberblick" data-i18n>Überblick</button>
+    <button role="tab" aria-selected="false" data-view="tickets" data-i18n>Tickets</button>
+    <button role="tab" aria-selected="false" data-view="werkzeuge" data-i18n>Werkzeuge</button>
+    <button role="tab" aria-selected="false" data-view="kontakte" data-i18n>Kontakte</button>
+    <button role="tab" aria-selected="false" data-view="angebote" data-i18n>Angebote</button>
+    <button role="tab" aria-selected="false" data-view="rechnungen" data-i18n>Rechnungen</button>
+    <button role="tab" aria-selected="false" data-view="einstellungen" data-i18n>Einstellungen</button>
   </nav>
 
   <div class="banner" id="banner"></div>
@@ -638,34 +638,33 @@
   <section class="view active" id="view-live">
     <div class="kpis">
       <div class="kpi">
-        <div class="label">Tokens heute</div>
+        <div class="label" data-i18n>Tokens heute</div>
         <div class="value" id="l-tokens">–</div>
         <div class="hint" id="l-tokens-hint"></div>
       </div>
       <div class="kpi usd">
-        <div class="label">API-Gegenwert heute</div>
+        <div class="label" data-i18n>API-Gegenwert heute</div>
         <div class="value" id="l-kosten">–</div>
-        <div class="hint">API-Gegenwert</div>
+        <div class="hint" data-i18n>API-Gegenwert</div>
       </div>
       <div class="kpi usd">
-        <div class="label">Verbrauchsrate</div>
+        <div class="label" data-i18n>Verbrauchsrate</div>
         <div class="value" id="l-burn">–</div>
-        <div class="hint" id="l-burn-hint">letzte 60 Min hochgerechnet</div>
+        <div class="hint" id="l-burn-hint" data-i18n>letzte 60 Min hochgerechnet</div>
       </div>
       <div class="kpi">
-        <div class="label">Requests heute</div>
+        <div class="label" data-i18n>Requests heute</div>
         <div class="value" id="l-requests">–</div>
         <div class="hint" id="l-window-hint"></div>
       </div>
     </div>
 
     <div class="card">
-      <h2>Aktive Sitzungen <span class="note" id="l-fenster">letzte 60 Minuten</span></h2>
-      <p class="note">Arbeit ohne Ticket-Branch trägt keinen Vorgang und bleibt damit
-        unabrechenbar. Im Feld <b>Vorgang</b> lässt sich eine Sitzung von Hand buchen —
-        ein Jira-Schlüssel oder ein frei gewählter Name. Leeren stellt die automatische
-        Zuordnung wieder her.</p>
-      <div id="l-sessions"><div class="empty">wird geladen…</div></div>
+      <h2><span data-i18n>Aktive Sitzungen</span> <span class="note" id="l-fenster" data-i18n>letzte 60 Minuten</span></h2>
+      <p class="note"><span data-i18n>Arbeit ohne Ticket-Branch trägt keinen Vorgang und bleibt damit unabrechenbar. Im Feld</span>
+        <b data-i18n>Vorgang</b>
+        <span data-i18n>lässt sich eine Sitzung von Hand buchen — ein Jira-Schlüssel oder ein frei gewählter Name. Leeren stellt die automatische Zuordnung wieder her.</span></p>
+      <div id="l-sessions"><div class="empty" data-i18n>wird geladen…</div></div>
       <div id="l-buchung-status" class="status"></div>
     </div>
 
@@ -676,51 +675,51 @@
   <section class="view" id="view-ueberblick">
     <div class="kpis">
       <div class="kpi">
-        <div class="label">Tokens gesamt</div>
+        <div class="label" data-i18n>Tokens gesamt</div>
         <div class="value" id="s-tokens">–</div>
         <div class="hint" id="s-tokens-hint"></div>
       </div>
       <div class="kpi usd">
-        <div class="label">API-Gegenwert</div>
+        <div class="label" data-i18n>API-Gegenwert</div>
         <div class="value" id="s-kosten">–</div>
-        <div class="hint">so viel hätte die API gekostet</div>
+        <div class="hint" data-i18n>so viel hätte die API gekostet</div>
       </div>
       <div class="kpi">
-        <div class="label">Aktive Stunden</div>
+        <div class="label" data-i18n>Aktive Stunden</div>
         <div class="value" id="s-stunden">–</div>
         <div class="hint" id="s-stunden-hint"></div>
       </div>
       <div class="kpi">
-        <div class="label">Requests</div>
+        <div class="label" data-i18n>Requests</div>
         <div class="value" id="s-requests">–</div>
         <div class="hint" id="s-zeitraum"></div>
       </div>
     </div>
 
     <div class="card">
-      <h2>API-Gegenwert im Verlauf <span class="note" id="c-days-note">in USD</span></h2>
-      <div class="zeitraum-schalter" role="group" aria-label="Körnung des Verlaufs">
-        <button type="button" data-koernung="tag" aria-pressed="true">Tag</button>
-        <button type="button" data-koernung="monat" aria-pressed="false">Monat</button>
-        <button type="button" data-koernung="jahr" aria-pressed="false">Jahr</button>
+      <h2><span data-i18n>API-Gegenwert im Verlauf</span> <span class="note" id="c-days-note">in USD</span></h2>
+      <div class="zeitraum-schalter" role="group" aria-label="Körnung des Verlaufs" data-i18n-aria-label>
+        <button type="button" data-koernung="tag" aria-pressed="true" data-i18n>Tag</button>
+        <button type="button" data-koernung="monat" aria-pressed="false" data-i18n>Monat</button>
+        <button type="button" data-koernung="jahr" aria-pressed="false" data-i18n>Jahr</button>
       </div>
-      <div id="c-days"><div class="empty">wird geladen…</div></div>
+      <div id="c-days"><div class="empty" data-i18n>wird geladen…</div></div>
     </div>
 
     <div class="card">
-      <h2>Verteilung nach Modell <span class="note">API-Gegenwert in USD — Modell anklicken, um die Projekte darunter zu filtern</span></h2>
-      <div id="c-models"><div class="empty">wird geladen…</div></div>
+      <h2><span data-i18n>Verteilung nach Modell</span> <span class="note" data-i18n>API-Gegenwert in USD — Modell anklicken, um die Projekte darunter zu filtern</span></h2>
+      <div id="c-models"><div class="empty" data-i18n>wird geladen…</div></div>
     </div>
 
     <div class="card">
-      <h2>Nach Projekt<span id="s-projects-kopf"></span></h2>
-      <div id="s-projects"><div class="empty">wird geladen…</div></div>
+      <h2><span data-i18n>Nach Projekt</span><span id="s-projects-kopf"></span></h2>
+      <div id="s-projects"><div class="empty" data-i18n>wird geladen…</div></div>
     </div>
 
     <div class="card">
       <p class="info" id="cache-info">
-        <b>Zur Einordnung:</b> Der weitaus größte Teil der Token-Summe sind
-        <b>Cache-Read-Tokens</b> — wiederverwendeter Kontext, der pro Token nur
+        <b data-i18n>Zur Einordnung:</b> Der weitaus größte Teil der Token-Summe sind
+        <b data-i18n>Cache-Read-Tokens</b> — wiederverwendeter Kontext, der pro Token nur
         rund ein Zehntel eines normalen Input-Tokens kostet. Die große
         Gesamtzahl bedeutet also nicht entsprechend große Kosten; maßgeblich
         ist der API-Gegenwert in USD, nicht die Token-Zahl.
@@ -732,12 +731,12 @@
   <section class="view" id="view-tickets">
     <div class="toolbar">
       <span class="faint" id="t-count"></span>
-      <a class="btn" href="/api/export.csv" download>CSV exportieren</a>
+      <a class="btn" href="/api/export.csv" download data-i18n>CSV exportieren</a>
     </div>
 
     <div class="card">
-      <h2>Tickets <span class="note">Spaltenkopf klicken zum Sortieren, Zeile klicken für Details</span></h2>
-      <div id="t-table"><div class="empty">wird geladen…</div></div>
+      <h2><span data-i18n>Tickets</span> <span class="note" data-i18n>Spaltenkopf klicken zum Sortieren, Zeile klicken für Details</span></h2>
+      <div id="t-table"><div class="empty" data-i18n>wird geladen…</div></div>
     </div>
 
     <div class="card" id="detail"></div>
@@ -747,41 +746,40 @@
   <section class="view" id="view-werkzeuge">
     <div class="kpis">
       <div class="kpi">
-        <div class="label">Tokens Werkzeuge</div>
+        <div class="label" data-i18n>Tokens Werkzeuge</div>
         <div class="value" id="w-tokens">–</div>
         <div class="hint" id="w-tokens-hint"></div>
       </div>
       <div class="kpi usd">
-        <div class="label">API-Gegenwert Werkzeuge</div>
+        <div class="label" data-i18n>API-Gegenwert Werkzeuge</div>
         <div class="value" id="w-kosten">–</div>
         <div class="hint" id="w-anteil"></div>
       </div>
       <div class="kpi">
-        <div class="label">Aufrufe</div>
+        <div class="label" data-i18n>Aufrufe</div>
         <div class="value" id="w-requests">–</div>
-        <div class="hint">im gewählten Zeitraum</div>
+        <div class="hint" data-i18n>im gewählten Zeitraum</div>
       </div>
     </div>
 
     <!-- Drei Schnitte durch DIESELBE Summe. Ohne diesen Hinweis liest man die
          laengere Projekttabelle als "mehr" und sucht einen Rechenfehler. -->
-    <p class="note w-hinweis">Die drei Tabellen zeigen denselben Verbrauch aus
-      drei Blickwinkeln — jede summiert sich auf <b id="w-summe-hinweis">–</b>.</p>
+    <p class="note w-hinweis"><span data-i18n>Die drei Tabellen zeigen denselben Verbrauch aus drei Blickwinkeln — jede summiert sich auf</span> <b id="w-summe-hinweis">–</b>.</p>
 
     <div class="card">
-      <h2>Nach Werkzeug <span class="note">welches Werkzeug den Verbrauch erzeugt hat</span></h2>
-      <div id="w-table"><div class="empty">wird geladen…</div></div>
+      <h2><span data-i18n>Nach Werkzeug</span> <span class="note" data-i18n>welches Werkzeug den Verbrauch erzeugt hat</span></h2>
+      <div id="w-table"><div class="empty" data-i18n>wird geladen…</div></div>
     </div>
 
     <div class="card">
-      <h2>Zugeordnet auf Projekte
-        <span class="note">dieselbe Summe, aufgeteilt auf die begleiteten Projekte</span></h2>
-      <div id="w-projekte"><div class="empty">wird geladen…</div></div>
+      <h2><span data-i18n>Zugeordnet auf Projekte</span>
+        <span class="note" data-i18n>dieselbe Summe, aufgeteilt auf die begleiteten Projekte</span></h2>
+      <div id="w-projekte"><div class="empty" data-i18n>wird geladen…</div></div>
     </div>
 
     <div class="card">
-      <h2>Nach Modell <span class="note">dieselbe Summe, aufgeteilt nach Modell</span></h2>
-      <div id="w-modelle"><div class="empty">wird geladen…</div></div>
+      <h2><span data-i18n>Nach Modell</span> <span class="note" data-i18n>dieselbe Summe, aufgeteilt nach Modell</span></h2>
+      <div id="w-modelle"><div class="empty" data-i18n>wird geladen…</div></div>
     </div>
 
     <div class="card note" id="w-erklaerung"></div>
@@ -790,20 +788,18 @@
          Hintergrunddienste mit eigener Sitzung, deren Kosten einem Vorgang
          zugeschlagen werden. Hier steht der Verbrauch der eigenen Sitzungen,
          nur anders gruppiert — er ist in den Projektzahlen bereits enthalten. -->
-    <h2 class="w-abschnitt">Woher die Requests kamen</h2>
-    <p class="note w-hinweis">Andere Sicht auf Tokens, die bereits in den
-      Projekt- und Vorgangszahlen stecken. <b>Ändert keine Abrechnung</b> —
-      dient nur der Frage, was wie intensiv genutzt wird.</p>
+    <h2 class="w-abschnitt" data-i18n>Woher die Requests kamen</h2>
+    <p class="note w-hinweis"><span data-i18n>Andere Sicht auf Tokens, die bereits in den Projekt- und Vorgangszahlen stecken.</span> <b data-i18n>Ändert keine Abrechnung</b> <span data-i18n>— dient nur der Frage, was wie intensiv genutzt wird.</span></p>
 
     <div class="card">
-      <h2>Nach MCP-Server <span class="note">der Aufruf hat den Request ausgelöst — Zeile anklicken für die einzelnen Werkzeuge</span></h2>
-      <div id="h-mcp"><div class="empty">wird geladen…</div></div>
+      <h2><span data-i18n>Nach MCP-Server</span> <span class="note" data-i18n>der Aufruf hat den Request ausgelöst — Zeile anklicken für die einzelnen Werkzeuge</span></h2>
+      <div id="h-mcp"><div class="empty" data-i18n>wird geladen…</div></div>
     </div>
 
     <div class="card">
-      <h2>Requests im Kontext eines Skills
-        <span class="note">nicht die Kosten des Skills — siehe Hinweis unten</span></h2>
-      <div id="h-skill"><div class="empty">wird geladen…</div></div>
+      <h2><span data-i18n>Requests im Kontext eines Skills</span>
+        <span class="note" data-i18n>nicht die Kosten des Skills — siehe Hinweis unten</span></h2>
+      <div id="h-skill"><div class="empty" data-i18n>wird geladen…</div></div>
     </div>
 
     <div class="card note" id="h-erklaerung"></div>
@@ -815,50 +811,50 @@
          Wer abrechnen will, sucht das hier, nicht dort. -->
     <div class="card" id="r-angebote-karte" hidden>
       <h2>Abrechenbare Angebote
-        <span class="note">angenommen und noch nicht abgerechnet</span></h2>
+        <span class="note" data-i18n>angenommen und noch nicht abgerechnet</span></h2>
       <div id="r-angebote"></div>
       <div class="saetze-status" id="ra-status"></div>
     </div>
 
     <div class="card">
-      <h2>Neue Rechnung <span class="note">Zeitraum wählen, Vorgänge auswählen, Rechnung erstellen</span></h2>
+      <h2><span data-i18n>Neue Rechnung</span> <span class="note" data-i18n>Zeitraum wählen, Vorgänge auswählen, Rechnung erstellen</span></h2>
       <div class="r-zeitraum">
-        <label for="r-von">Leistung von</label>
+        <label for="r-von" data-i18n>Leistung von</label>
         <input type="date" id="r-von">
-        <label for="r-bis">bis</label>
+        <label for="r-bis" data-i18n>bis</label>
         <input type="date" id="r-bis">
-        <button class="btn" id="r-laden">Vorgänge laden</button>
-        <label for="r-kunde">Kunde</label>
+        <button class="btn" id="r-laden" data-i18n>Vorgänge laden</button>
+        <label for="r-kunde" data-i18n>Kunde</label>
         <select id="r-kunde" class="feld">
-          <option value="">alle Vorgänge</option>
+          <option value="" data-i18n>alle Vorgänge</option>
         </select>
       </div>
-      <div id="r-tickets"><div class="empty">Zeitraum wählen und laden.</div></div>
+      <div id="r-tickets"><div class="empty" data-i18n>Zeitraum wählen und laden.</div></div>
     </div>
 
     <div class="card" id="r-formular" hidden>
-      <h2>Empfänger</h2>
+      <h2 data-i18n>Empfänger</h2>
       <div class="r-empfaenger">
-        <label for="r-name">Name <span class="note">Pflichtangabe — tippen sucht in den Kontakten</span></label>
+        <label for="r-name"><span data-i18n>Name</span> <span class="note" data-i18n>Pflichtangabe — tippen sucht in den Kontakten</span></label>
         <div class="picker">
           <input type="text" id="r-name" autocomplete="off" role="combobox"
                  aria-expanded="false" aria-autocomplete="list" aria-controls="r-name-liste">
           <ul class="vorschlaege" id="r-name-liste" role="listbox" hidden></ul>
         </div>
-        <label for="r-anschrift">Anschrift <span class="note">eine Zeile je Adresszeile</span></label>
+        <label for="r-anschrift"><span data-i18n>Anschrift</span> <span class="note" data-i18n>eine Zeile je Adresszeile</span></label>
         <textarea id="r-anschrift" rows="3"></textarea>
       </div>
       <div class="r-abschluss">
         <div id="r-summe" class="r-summe">–</div>
-        <button class="btn" id="r-erstellen">Rechnung erstellen</button>
+        <button class="btn" id="r-erstellen" data-i18n>Rechnung erstellen</button>
       </div>
       <div class="saetze-status" id="r-status"></div>
     </div>
 
     <div class="card">
       <h2>Gestellte Rechnungen
-        <span class="note">unveränderlich — Korrektur erfolgt per Storno</span></h2>
-      <div id="r-liste"><div class="empty">wird geladen…</div></div>
+        <span class="note" data-i18n>unveränderlich — Korrektur erfolgt per Storno</span></h2>
+      <div id="r-liste"><div class="empty" data-i18n>wird geladen…</div></div>
     </div>
   </section>
 
@@ -866,65 +862,65 @@
   <!-- ============ KONTAKTE ============ -->
   <section class="view" id="view-kontakte">
     <div class="card">
-      <h2 id="k-titel">Neuer Kontakt <span class="note">Leads werden zu Kunden, sobald sie ein Angebot annehmen</span></h2>
+      <h2 id="k-titel">Neuer Kontakt <span class="note" data-i18n>Leads werden zu Kunden, sobald sie ein Angebot annehmen</span></h2>
       <div class="k-formular">
         <div class="breit">
-          <label for="k-firma">Firma <span class="note">Pflichtangabe</span></label>
+          <label for="k-firma"><span data-i18n>Firma</span> <span class="note" data-i18n>Pflichtangabe</span></label>
           <input type="text" id="k-firma" class="feld" maxlength="200" autocomplete="off">
         </div>
         <div>
-          <label for="k-vorname">Vorname <span class="note">Ansprechpartner</span></label>
+          <label for="k-vorname"><span data-i18n>Vorname</span> <span class="note" data-i18n>Ansprechpartner</span></label>
           <input type="text" id="k-vorname" class="feld" maxlength="80" autocomplete="off">
         </div>
         <div>
-          <label for="k-nachname">Nachname</label>
+          <label for="k-nachname" data-i18n>Nachname</label>
           <input type="text" id="k-nachname" class="feld" maxlength="80" autocomplete="off">
         </div>
         <div class="breit">
-          <label for="k-anschrift">Anschrift <span class="note">eine Zeile je Adresszeile, höchstens 6</span></label>
+          <label for="k-anschrift"><span data-i18n>Anschrift</span> <span class="note" data-i18n>eine Zeile je Adresszeile, höchstens 6</span></label>
           <textarea id="k-anschrift" class="feld" rows="3"></textarea>
         </div>
         <div>
-          <label for="k-steuernummer">Steuernummer</label>
+          <label for="k-steuernummer" data-i18n>Steuernummer</label>
           <input type="text" id="k-steuernummer" class="feld" maxlength="40" autocomplete="off">
         </div>
         <div>
-          <label for="k-ustIdNr">USt-IdNr.</label>
+          <label for="k-ustIdNr"><span data-i18n>USt-IdNr.</span></label>
           <input type="text" id="k-ustIdNr" class="feld" maxlength="40" autocomplete="off">
         </div>
         <div>
-          <label for="k-email">E-Mail</label>
+          <label for="k-email" data-i18n>E-Mail</label>
           <input type="email" id="k-email" class="feld" maxlength="120" autocomplete="off">
         </div>
         <div>
-          <label for="k-status">Status</label>
+          <label for="k-status" data-i18n>Status</label>
           <select id="k-status" class="feld">
-            <option value="lead">Lead</option>
-            <option value="kunde">Kunde</option>
+            <option value="lead" data-i18n>Lead</option>
+            <option value="kunde" data-i18n>Kunde</option>
           </select>
         </div>
         <div class="breit">
-          <label>Projekte dieses Kunden
-            <span class="note">steuert, welche Vorgänge im Reiter Rechnungen vorgeschlagen werden. Bereits vergebene Projekte stehen nicht zur Wahl — erst beim bisherigen Kunden entfernen.</span></label>
+          <label><span data-i18n>Projekte dieses Kunden</span>
+            <span class="note" data-i18n>steuert, welche Vorgänge im Reiter Rechnungen vorgeschlagen werden. Bereits vergebene Projekte stehen nicht zur Wahl — erst beim bisherigen Kunden entfernen.</span></label>
           <div class="k-zuordnung">
             <div>
-              <div class="k-spalte-titel" id="k-frei-titel">Freie Projekte</div>
+              <div class="k-spalte-titel" id="k-frei-titel" data-i18n>Freie Projekte</div>
               <ul class="k-spalte" id="k-frei" role="listbox" aria-labelledby="k-frei-titel"></ul>
             </div>
             <div>
-              <div class="k-spalte-titel" id="k-zug-titel">Zugeordnet</div>
+              <div class="k-spalte-titel" id="k-zug-titel" data-i18n>Zugeordnet</div>
               <ul class="k-spalte" id="k-zugeordnet" role="listbox" aria-labelledby="k-zug-titel"></ul>
             </div>
           </div>
         </div>
         <div class="breit">
-          <label for="k-notiz">Notiz</label>
+          <label for="k-notiz" data-i18n>Notiz</label>
           <textarea id="k-notiz" class="feld" rows="2" maxlength="500"></textarea>
         </div>
       </div>
       <div class="r-abschluss">
-        <button class="btn" id="k-abbrechen" hidden>Abbrechen</button>
-        <button class="btn" id="k-speichern">Kontakt anlegen</button>
+        <button class="btn" id="k-abbrechen" hidden data-i18n>Abbrechen</button>
+        <button class="btn" id="k-speichern" data-i18n>Kontakt anlegen</button>
       </div>
       <div class="saetze-status" id="k-status-text"></div>
     </div>
@@ -932,18 +928,18 @@
     <!-- Eine Liste statt zweier Tabellen untereinander: bei vielen Kontakten
          war das Suchen ein Scrollen zwischen zwei Bloecken. -->
     <div class="card">
-      <h2>Kontakte <span class="note">Leads werden zu Kunden, sobald sie ein Angebot annehmen</span></h2>
+      <h2><span data-i18n>Kontakte</span> <span class="note" data-i18n>Leads werden zu Kunden, sobald sie ein Angebot annehmen</span></h2>
       <div class="k-werkzeuge">
-        <input type="search" id="k-suche" class="feld" placeholder="Firma, Person oder E-Mail suchen…"
-               autocomplete="off" aria-label="Kontakte durchsuchen">
-        <div class="k-filter" role="group" aria-label="Nach Status filtern">
-          <button class="chip" data-filter="alle" aria-pressed="true">Alle</button>
-          <button class="chip" data-filter="lead" aria-pressed="false">Leads</button>
-          <button class="chip" data-filter="kunde" aria-pressed="false">Kunden</button>
+        <input type="search" id="k-suche" class="feld" placeholder="Firma, Person oder E-Mail suchen…" data-i18n-placeholder
+               autocomplete="off" aria-label="Kontakte durchsuchen" data-i18n-aria-label>
+        <div class="k-filter" role="group" aria-label="Nach Status filtern" data-i18n-aria-label>
+          <button class="chip" data-filter="alle" aria-pressed="true" data-i18n>Alle</button>
+          <button class="chip" data-filter="lead" aria-pressed="false" data-i18n>Leads</button>
+          <button class="chip" data-filter="kunde" aria-pressed="false" data-i18n>Kunden</button>
         </div>
       </div>
       <div class="k-split">
-        <div class="k-liste" id="k-liste"><div class="empty">wird geladen…</div></div>
+        <div class="k-liste" id="k-liste"><div class="empty" data-i18n>wird geladen…</div></div>
         <div class="k-detail" id="k-detail"></div>
       </div>
     </div>
@@ -951,55 +947,55 @@
 
   <section class="view" id="view-angebote">
     <div class="card">
-      <h2>Neues Angebot <span class="note">Schätzung vor dem Auftrag — abgerechnet wird später nach tatsächlichem Aufwand</span></h2>
+      <h2><span data-i18n>Neues Angebot</span> <span class="note" data-i18n>Schätzung vor dem Auftrag — abgerechnet wird später nach tatsächlichem Aufwand</span></h2>
 
-      <h3 class="unter">Positionen</h3>
+      <h3 class="unter" data-i18n>Positionen</h3>
       <div id="a-posten"></div>
       <div class="toolbar">
         <div class="a-posten-werkzeuge">
-          <button class="btn" id="a-posten-plus">Position hinzufügen</button>
-          <label for="a-vorlage" class="note">oder aus Vorlage</label>
+          <button class="btn" id="a-posten-plus" data-i18n>Position hinzufügen</button>
+          <label for="a-vorlage" class="note" data-i18n>oder aus Vorlage</label>
           <select id="a-vorlage">
-            <option value="">Vorlage wählen…</option>
+            <option value="" data-i18n>Vorlage wählen…</option>
           </select>
         </div>
       </div>
 
-      <h3 class="unter">Erfasste Vorgänge übernehmen <span class="note">optional, für Nachträge und Folgeaufträge</span></h3>
+      <h3 class="unter"><span data-i18n>Erfasste Vorgänge übernehmen</span> <span class="note" data-i18n>optional, für Nachträge und Folgeaufträge</span></h3>
       <div class="r-zeitraum">
-        <label for="a-von">von</label>
+        <label for="a-von" data-i18n>von</label>
         <input type="date" id="a-von">
-        <label for="a-bis">bis</label>
+        <label for="a-bis" data-i18n>bis</label>
         <input type="date" id="a-bis">
-        <button class="btn" id="a-laden">Vorgänge laden</button>
+        <button class="btn" id="a-laden" data-i18n>Vorgänge laden</button>
       </div>
-      <div id="a-tickets"><div class="empty">Zeitraum wählen, wenn erfasste Arbeit ins Angebot soll.</div></div>
+      <div id="a-tickets"><div class="empty" data-i18n>Zeitraum wählen, wenn erfasste Arbeit ins Angebot soll.</div></div>
     </div>
 
     <div class="card">
-      <h2>Empfänger</h2>
+      <h2 data-i18n>Empfänger</h2>
       <div class="r-empfaenger">
-        <label for="a-name">Name <span class="note">Pflichtangabe — tippen sucht in den Kontakten</span></label>
+        <label for="a-name"><span data-i18n>Name</span> <span class="note" data-i18n>Pflichtangabe — tippen sucht in den Kontakten</span></label>
         <div class="picker">
           <input type="text" id="a-name" autocomplete="off" role="combobox"
                  aria-expanded="false" aria-autocomplete="list" aria-controls="a-name-liste">
           <ul class="vorschlaege" id="a-name-liste" role="listbox" hidden></ul>
         </div>
-        <label for="a-anschrift">Anschrift <span class="note">eine Zeile je Adresszeile</span></label>
+        <label for="a-anschrift"><span data-i18n>Anschrift</span> <span class="note" data-i18n>eine Zeile je Adresszeile</span></label>
         <textarea id="a-anschrift" rows="3"></textarea>
-        <label for="a-gueltig">Bindefrist <span class="note">Tage ab heute</span></label>
+        <label for="a-gueltig"><span data-i18n>Bindefrist</span> <span class="note" data-i18n>Tage ab heute</span></label>
         <input type="number" id="a-gueltig" value="30" min="1" max="365" class="feld">
       </div>
       <div class="r-abschluss">
         <div id="a-summe" class="r-summe">–</div>
-        <button class="btn" id="a-erstellen">Angebot erstellen</button>
+        <button class="btn" id="a-erstellen" data-i18n>Angebot erstellen</button>
       </div>
       <div class="saetze-status" id="a-status"></div>
     </div>
 
     <div class="card">
-      <h2>Angebote <span class="note">freibleibend — löschen ist erlaubt, anders als bei Rechnungen</span></h2>
-      <div id="a-liste"><div class="empty">wird geladen…</div></div>
+      <h2><span data-i18n>Angebote</span> <span class="note" data-i18n>freibleibend — löschen ist erlaubt, anders als bei Rechnungen</span></h2>
+      <div id="a-liste"><div class="empty" data-i18n>wird geladen…</div></div>
     </div>
   </section>
 
@@ -1007,38 +1003,51 @@
   <section class="view" id="view-einstellungen">
     <!-- Klappbare Abschnitte: alles gleichzeitig sichtbar war zu viel. Wer
          Vorlagen pflegt, soll nicht nebenbei Stammdatenfelder vor sich haben. -->
+    <!-- Sprache steht bewusst ganz oben: wer die Oberflaeche nicht lesen
+         kann, soll nicht erst durch drei Klappabschnitte suchen. -->
+    <div class="card">
+      <div class="saetze-kopf">
+        <b data-i18n>Sprache</b>
+        <span class="note" data-i18n>Rechnungen bleiben deutsch</span>
+      </div>
+      <div class="zeitraum-schalter" role="group" aria-label="Sprache" data-i18n-aria-label>
+        <button type="button" data-sprache="de" aria-pressed="true" data-i18n>Deutsch</button>
+        <button type="button" data-sprache="en" aria-pressed="false" data-i18n>Englisch</button>
+      </div>
+    </div>
+
     <div class="card">
       <details class="klapp" open>
-        <summary>Werte und Grenzen <span class="note">werden in config.json geschrieben und wirken sofort</span></summary>
+        <summary><span data-i18n>Werte und Grenzen</span> <span class="note" data-i18n>werden in config.json geschrieben und wirken sofort</span></summary>
         <div class="klapp-inhalt">
-          <div id="e-felder"><div class="empty">wird geladen…</div></div>
+          <div id="e-felder"><div class="empty" data-i18n>wird geladen…</div></div>
           <div class="e-abschluss">
             <div class="saetze-status" id="e-status"></div>
-            <button class="btn" id="e-speichern">Speichern</button>
+            <button class="btn" id="e-speichern" data-i18n>Speichern</button>
           </div>
         </div>
       </details>
 
       <details class="klapp">
         <summary>Stundensätze je Projekt
-          <span class="note">eigener Satz, Rabatt oder beides</span></summary>
+          <span class="note" data-i18n>eigener Satz, Rabatt oder beides</span></summary>
         <div class="klapp-inhalt">
-          <div id="s-saetze"><div class="empty">wird geladen…</div></div>
+          <div id="s-saetze"><div class="empty" data-i18n>wird geladen…</div></div>
           <div class="saetze-status" id="s-saetze-status"></div>
         </div>
       </details>
 
       <details class="klapp">
         <summary>Positionsvorlagen
-          <span class="note">wiederkehrende Leistungen für Angebote</span></summary>
+          <span class="note" data-i18n>wiederkehrende Leistungen für Angebote</span></summary>
         <div class="klapp-inhalt">
-          <div id="v-liste"><div class="empty">wird geladen…</div></div>
+          <div id="v-liste"><div class="empty" data-i18n>wird geladen…</div></div>
           <div class="v-neu">
             <input type="text" id="v-bezeichnung" class="feld" maxlength="200"
-                   placeholder="z. B. Fehlersuche und Behebung" aria-label="Bezeichnung der Vorlage">
+                   placeholder="z. B. Fehlersuche und Behebung" data-i18n-placeholder aria-label="Bezeichnung der Vorlage" data-i18n-aria-label>
             <input type="number" id="v-satz" class="feld" step="0.01" min="0" max="10000"
-                   placeholder="Satz" aria-label="Stundensatz, leer lassen für den Standardsatz">
-            <button class="btn" id="v-anlegen">Vorlage anlegen</button>
+                   placeholder="Satz" data-i18n-placeholder aria-label="Stundensatz, leer lassen für den Standardsatz" data-i18n-aria-label>
+            <button class="btn" id="v-anlegen" data-i18n>Vorlage anlegen</button>
           </div>
           <div class="saetze-status" id="v-status"></div>
         </div>
@@ -1046,18 +1055,18 @@
 
       <details class="klapp">
         <summary>Rechnungs-Stammdaten
-          <span class="note">§ 14 UStG verlangt Name, Anschrift und Steuernummer oder USt-IdNr.</span></summary>
+          <span class="note" data-i18n>§ 14 UStG verlangt Name, Anschrift und Steuernummer oder USt-IdNr.</span></summary>
         <div class="klapp-inhalt">
-          <div id="sd-felder"><div class="empty">wird geladen…</div></div>
+          <div id="sd-felder"><div class="empty" data-i18n>wird geladen…</div></div>
           <div class="e-abschluss">
             <div class="saetze-status" id="sd-status"></div>
-            <button class="btn" id="sd-speichern">Speichern</button>
+            <button class="btn" id="sd-speichern" data-i18n>Speichern</button>
           </div>
         </div>
       </details>
 
       <details class="klapp">
-        <summary>Nicht hier änderbar <span class="note">bewusst der Datei vorbehalten</span></summary>
+        <summary><span data-i18n>Nicht hier änderbar</span> <span class="note" data-i18n>bewusst der Datei vorbehalten</span></summary>
         <div class="klapp-inhalt">
           <p class="hinweis">
             Jira-Zugang, Token-Variablen und Pfade stehen in <code>config.json</code>. Sie öffnen
@@ -1075,11 +1084,328 @@
 'use strict';
 
 /* =========================================================
-   Formatierung — durchgehend deutsch
+   Sprache — Oberflaeche deutsch oder englisch
+
+   Das Rechnungsdokument bleibt bewusst deutsch: die Pflichtangaben nach
+   § 14 UStG haengen an deutschen Begriffen, eine uebersetzte Rechnung
+   waere nicht mehr rechtssicher. Uebersetzt wird nur die Bedienung.
+
+   Zahlen und Datum wechseln mit: englischer Text neben "2.974,95" liest
+   sich falsch, und "07.09.2026" heisst auf Englisch der 9. Juli.
    ========================================================= */
-const nf0 = new Intl.NumberFormat('de-DE', { maximumFractionDigits: 0 });
-const nf1 = new Intl.NumberFormat('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-const nf2 = new Intl.NumberFormat('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const SPRACHEN = ['de', 'en'];
+function leseSprache() {
+  try {
+    const g = localStorage.getItem('devbill.sprache');
+    if (SPRACHEN.includes(g)) return g;
+  } catch { /* privater Modus: dann eben die Voreinstellung */ }
+  return (navigator.language || '').toLowerCase().startsWith('de') ? 'de' : 'en';
+}
+let SPRACHE = leseSprache();
+const istDE = () => SPRACHE === 'de';
+
+// Der Schluessel ist der deutsche Text. So bleibt der Quelltext lesbar,
+// und ein fehlender Eintrag faellt auf Deutsch zurueck statt auf einen
+// Platzhalter wie "ui.tab.overview".
+const EN = Object.create(null);
+EN["Live"] = "Live";
+EN["Überblick"] = "Overview";
+EN["Tickets"] = "Jobs";
+EN["Werkzeuge"] = "Tools";
+EN["Kontakte"] = "Contacts";
+EN["Angebote"] = "Quotes";
+EN["Rechnungen"] = "Invoices";
+EN["Einstellungen"] = "Settings";
+EN["wird geladen…"] = "loading…";
+EN["Tokens heute"] = "Tokens today";
+EN["Tokens gesamt"] = "Total tokens";
+EN["Tokens Werkzeuge"] = "Tool tokens";
+EN["Tokens lokal"] = "Local tokens";
+EN["API-Gegenwert"] = "API equivalent";
+EN["API-Gegenwert heute"] = "API equivalent today";
+EN["API-Gegenwert Werkzeuge"] = "API equivalent, tools";
+EN["API-Gegenwert im Verlauf"] = "API equivalent over time";
+EN["API-Gegenwert USD"] = "API equivalent USD";
+EN["API-Gegenwert nach Modell"] = "API equivalent by model";
+EN["Verbrauchsrate"] = "Burn rate";
+EN["Requests"] = "Requests";
+EN["Requests heute"] = "Requests today";
+EN["Aktive Stunden"] = "Active hours";
+EN["Aktive Sitzungen"] = "Active sessions";
+EN["Aktive Std."] = "Active hrs";
+EN["Arbeitswert EUR"] = "Billable value EUR";
+EN["Arbeitswert, noch nicht abgerechnet"] = "Billable value, not yet invoiced";
+EN["Cache-Read-Tokens"] = "cache read tokens";
+EN["Cache gelesen"] = "Cache read";
+EN["Cache geschrieben"] = "Cache written";
+EN["Abo-Anteil"] = "Subscription share";
+EN["letzte 60 Minuten"] = "last 60 minutes";
+EN["letzte 60 Min hochgerechnet"] = "extrapolated from the last 60 min";
+EN["so viel hätte die API gekostet"] = "what the API would have cost";
+EN["im gewählten Zeitraum"] = "in the selected period";
+EN["Zur Einordnung:"] = "For context:";
+EN["Nach Projekt"] = "By project";
+EN["Nach Modell"] = "By model";
+EN["Nach Werkzeug"] = "By tool";
+EN["Nach MCP-Server"] = "By MCP server";
+EN["Verteilung nach Modell"] = "Distribution by model";
+EN["Woher die Requests kamen"] = "Where the requests came from";
+EN["welches Werkzeug den Verbrauch erzeugt hat"] = "which tool caused the usage";
+EN["dieselbe Summe, aufgeteilt nach Modell"] = "the same total, split by model";
+EN["dieselbe Summe, aufgeteilt auf die begleiteten Projekte"] = "the same total, split across the projects it accompanied";
+EN["nicht die Kosten des Skills — siehe Hinweis unten"] = "not the cost of the skill — see the note below";
+EN["API-Gegenwert in USD — Modell anklicken, um die Projekte darunter zu filtern"] = "API equivalent in USD — click a model to filter the projects below";
+EN["Tag"] = "Day";
+EN["Monat"] = "Month";
+EN["Jahr"] = "Year";
+EN["Alle"] = "All";
+EN["von"] = "from";
+EN["bis"] = "to";
+EN["Kunde"] = "Client";
+EN["Kunden"] = "Clients";
+EN["Lead"] = "Lead";
+EN["Leads"] = "Leads";
+EN["Zugeordnet"] = "Assigned";
+EN["Status"] = "Status";
+EN["Vorgang"] = "Job";
+EN["Vorgänge laden"] = "Load jobs";
+EN["Vorgänge ausblenden"] = "Hide jobs";
+EN["alle Vorgänge"] = "all jobs";
+EN["Aufrufe"] = "Calls";
+EN["Speichern"] = "Save";
+EN["Abbrechen"] = "Cancel";
+EN["Änderungen speichern"] = "Save changes";
+EN["Spaltenkopf klicken zum Sortieren, Zeile klicken für Details"] = "Click a column header to sort, click a row for details";
+EN["Projekt"] = "Project";
+EN["Modell"] = "Model";
+EN["Branch"] = "Branch";
+EN["Tokens"] = "Tokens";
+EN["Zeitraum"] = "Period";
+EN["Buchen"] = "Book";
+EN["Ansehen"] = "View";
+EN["Name"] = "Name";
+EN["Vorname"] = "First name";
+EN["Nachname"] = "Last name";
+EN["Firma"] = "Company";
+EN["E-Mail"] = "Email";
+EN["Anschrift"] = "Address";
+EN["Notiz"] = "Note";
+EN["Ansprechpartner"] = "Contact person";
+EN["Empfänger"] = "Recipient";
+EN["Kontakt anlegen"] = "Add contact";
+EN["Kontakt bearbeiten"] = "Edit contact";
+EN["Neuer Kontakt"] = "New contact";
+EN["Kontakte durchsuchen"] = "Search contacts";
+EN["Firma, Person oder E-Mail suchen…"] = "Search company, person or email…";
+EN["Freie Projekte"] = "Unassigned projects";
+EN["Noch kein Kontakt erfasst."] = "No contacts yet.";
+EN["Noch kein Projekt zugeordnet."] = "No project assigned yet.";
+EN["Alle übrigen Projekte sind vergeben."] = "All remaining projects are taken.";
+EN["Leads werden zu Kunden, sobald sie ein Angebot annehmen"] = "Leads become clients once they accept a quote";
+EN["Positionen"] = "Line items";
+EN["Position hinzufügen"] = "Add line item";
+EN["Neues Angebot"] = "New quote";
+EN["Angebot erstellen"] = "Create quote";
+EN["Neue Rechnung"] = "New invoice";
+EN["Rechnung erstellen"] = "Create invoice";
+EN["Bindefrist"] = "Valid for";
+EN["Tage ab heute"] = "days from today";
+EN["Tage ab Rechnungsdatum bis zur Fälligkeit."] = "Days from the invoice date until payment is due.";
+EN["Leistung von"] = "Service period from";
+EN["Erfasste Vorgänge übernehmen"] = "Include recorded jobs";
+EN["Vorlage wählen…"] = "Choose a template…";
+EN["Vorlage anlegen"] = "Add template";
+EN["Vorlage angelegt."] = "Template created.";
+EN["Vorlage gespeichert."] = "Template saved.";
+EN["Vorlage gelöscht."] = "Template deleted.";
+EN["Bezeichnung der Vorlage"] = "Template name";
+EN["wiederkehrende Leistungen für Angebote"] = "recurring services for quotes";
+EN["oder aus Vorlage"] = "or from a template";
+EN["z. B. Fehlersuche und Behebung"] = "e.g. debugging and fixes";
+EN["Noch kein Vorgang ausgewählt."] = "No job selected yet.";
+EN["Zeitraum wählen und laden."] = "Choose a period and load.";
+EN["Zeitraum wählen, Vorgänge auswählen, Rechnung erstellen"] = "Choose a period, select jobs, create the invoice";
+EN["Zeitraum wählen, wenn erfasste Arbeit ins Angebot soll."] = "Choose a period if recorded work should go into the quote.";
+EN["Schätzung vor dem Auftrag — abgerechnet wird später nach tatsächlichem Aufwand"] = "An estimate before the job — billing follows actual effort later";
+EN["unveränderlich — Korrektur erfolgt per Storno"] = "immutable — corrections are issued as a cancellation";
+EN["freibleibend — löschen ist erlaubt, anders als bei Rechnungen"] = "non-binding — deleting is allowed, unlike invoices";
+EN["angenommen und noch nicht abgerechnet"] = "accepted and not yet invoiced";
+EN["optional, für Nachträge und Folgeaufträge"] = "optional, for add-ons and follow-up work";
+EN["Nach Status filtern"] = "Filter by status";
+EN["gestellte Rechnung"] = "invoice issued";
+EN["kein Erlös"] = "no revenue";
+EN["noch nicht abgerechnet"] = "not yet invoiced";
+EN["CSV exportieren"] = "Export CSV";
+EN["Werte und Grenzen"] = "Values and limits";
+EN["Nicht hier änderbar"] = "Not editable here";
+EN["bewusst der Datei vorbehalten"] = "deliberately left to the file";
+EN["werden in config.json geschrieben und wirken sofort"] = "are written to config.json and take effect immediately";
+EN["eigener Satz, Rabatt oder beides"] = "custom rate, discount, or both";
+EN["Satz"] = "Rate";
+EN["Stundensatz, leer lassen für den Standardsatz"] = "Hourly rate, leave empty for the default";
+EN["Körnung des Verlaufs"] = "Chart granularity";
+EN["Ändert keine Abrechnung"] = "Does not change any billing";
+EN["je Monat in USD"] = "per month in USD";
+EN["Preisquelle "] = "Price source ";
+EN["Sprache"] = "Language";
+EN["Deutsch"] = "German";
+EN["Englisch"] = "English";
+EN["Rechnungen bleiben deutsch"] = "invoices stay German";
+EN["Steuernummer"] = "Tax number";
+EN["Steuernummer oder USt-IdNr."] = "Tax number or VAT ID";
+EN["Steuernummer oder USt-IdNr. — eines von beiden genügt."] = "Tax number or VAT ID — either one is enough.";
+EN["Pflichtangabe"] = "Required";
+EN["Pflichtangabe — tippen sucht in den Kontakten"] = "Required — typing searches your contacts";
+EN["eine Zeile je Adresszeile"] = "one line per address line";
+EN["eine Zeile je Adresszeile, höchstens 6"] = "one line per address line, at most 6";
+EN["§ 14 UStG verlangt Name, Anschrift und Steuernummer oder USt-IdNr."] = "German invoicing law requires a name, an address, and a tax number or VAT ID.";
+EN["Nach § 19 UStG wird keine Umsatzsteuer ausgewiesen."] = "Under the German small business rule, no VAT is shown.";
+EN["Aktiv: keine Umsatzsteuer, dafür der Hinweis nach § 19 UStG auf der Rechnung."] = "On: no VAT, but the small business notice appears on the invoice.";
+EN["Wie du auf der Rechnung stehst — vollständiger Name oder Firmierung."] = "How you appear on the invoice — full name or registered company name.";
+EN["Eine Zeile je Zeile: Straße, dann PLZ und Ort."] = "One line each: street, then postcode and city.";
+EN["Ohne Leerzeichen oder mit — wird beim Speichern vereinheitlicht."] = "With or without spaces — normalised on save.";
+EN["Optional, bei deutschen IBANs meist entbehrlich."] = "Optional, usually unnecessary for German IBANs.";
+EN["Nur nötig, wenn keine Steuernummer angegeben ist oder du innergemeinschaftlich abrechnest."] = "Only needed if you give no tax number, or if you invoice across EU borders.";
+EN["Bleibt das Feld leer, entfällt der Zahlungsblock auf der Rechnung."] = "Leave this empty and the payment block is omitted from the invoice.";
+EN["Bitte den Namen des Empfängers eintragen."] = "Please enter the recipient's name.";
+EN["Der Empfänger braucht mindestens einen Namen."] = "The recipient needs at least a name.";
+EN["Server nicht erreichbar"] = "Server unreachable";
+EN["Abgleich fehlgeschlagen"] = "Sync failed";
+EN["Aktion fehlgeschlagen"] = "Action failed";
+EN["Erstellen fehlgeschlagen"] = "Could not create";
+EN["Speichern fehlgeschlagen"] = "Could not save";
+EN["Fehlgeschlagen: "] = "Failed: ";
+EN["Nicht erstellt: "] = "Not created: ";
+EN["Nicht gebucht: "] = "Not booked: ";
+EN["Nicht gespeichert: "] = "Not saved: ";
+EN["Projektliste konnte nicht geladen werden."] = "Could not load the project list.";
+EN["Details konnten nicht geladen werden."] = "Could not load the details.";
+EN["wird erstellt…"] = "creating…";
+EN["wird gespeichert…"] = "saving…";
+EN["wird übertragen…"] = "transferring…";
+EN["Gespeichert. Die Auswertung rechnet ab sofort damit."] = "Saved. The reporting uses it from now on.";
+EN["Gespeichert. Die Stammdaten sind vollständig."] = "Saved. Your business details are complete.";
+EN["Buchung aufgehoben, die Sitzung folgt wieder der automatischen Zuordnung."] = "Booking removed; the session follows automatic assignment again.";
+EN["Ein Angebot braucht mindestens eine Position oder einen ausgewählten Vorgang."] = "A quote needs at least one line item or a selected job.";
+EN["Neuen Satz zu Jira-Tickets synchen"] = "Sync the new rate to Jira issues";
+EN["Selbstkostensatz fehlt"] = "No cost rate set";
+EN["kein Selbstkostensatz in config.json"] = "no cost rate in config.json";
+EN["keine lokalen Modelle"] = "no local models";
+EN["Auswertung"] = "Reporting";
+EN["Live-Daten"] = "Live data";
+EN["Der Server wurde seit dem Öffnen dieser Seite erneuert. "] = "The server has been updated since this page was opened. ";
+EN["Bitte neu laden (Strg+R), sonst passen Oberfläche und Server nicht zusammen."] = "Please reload (Ctrl+R), otherwise the interface and the server disagree.";
+EN["Ab dieser Pause zählt die Aktivzeit nicht weiter — trennt echte Arbeit von offenen Fenstern."] = "Gaps longer than this stop counting as active time — this separates real work from an idle window.";
+EN["Fester Umrechnungskurs. Gestellte Rechnungen behalten den Kurs, der beim Erstellen galt."] = "Fixed exchange rate. Issued invoices keep the rate that applied when they were created.";
+EN["Monatspreis des Claude-Abos. Wird anteilig auf die Vorgänge verteilt."] = "Monthly price of your Claude subscription. Distributed proportionally across jobs.";
+EN["Angestrebter Gewinnanteil am Erlös. Reiner Soll-Ist-Vergleich, verändert keine Rechnung. 0 blendet den Vergleich aus."] = "Target profit share of revenue. A pure target-versus-actual comparison; it changes no invoice. 0 hides the comparison.";
+EN["Einlesen nach der Umstellung — ältere Sitzungen tragen sie nicht, ihre Logdateien sind fort."] = "Recorded after the change — older sessions do not carry it, their log files are gone.";
+EN["Sie erzeugen keinen eigenen Verbrauch, ihr Beitrag steckt in den übrigen Requests. "] = "They generate no usage of their own; their contribution sits inside the other requests. ";
+EN["Letzte Aktivität"] = "Last activity";
+EN["API-Gegenwert EUR"] = "API equivalent EUR";
+EN["MCP-Server"] = "MCP server";
+EN["Anteil"] = "Share";
+EN["Skill"] = "Skill";
+EN["Rabatt %"] = "Discount %";
+EN["Rabatt"] = "Discount";
+EN["ergibt"] = "gives";
+EN["Gegenwert gesamt"] = "Total equivalent";
+EN["Rechnungsbetrag"] = "Invoice amount";
+EN["Leistung"] = "Service";
+EN["Art"] = "Type";
+EN["Stunden"] = "Hours";
+EN["Satz EUR"] = "Rate EUR";
+EN["Betrag"] = "Amount";
+EN["Betrag EUR"] = "Amount EUR";
+EN["Pauschal"] = "Flat rate";
+EN["Nummer"] = "Number";
+EN["Datum"] = "Date";
+EN["Gültig bis"] = "Valid until";
+EN["Bezeichnung"] = "Description";
+EN["Gilt für Projekte ohne eigenen Satz."] = "Applies to projects without their own rate.";
+EN["Was eine Stunde lokaler Rechenzeit tatsächlich kostet (Strom plus anteilige Abschreibung der Grafikkarte). Geht nur in die Marge ein, nie auf eine Rechnung."] = "What an hour of local compute actually costs (electricity plus a share of the graphics card's depreciation). It only feeds the margin, never an invoice.";
+EN["Lokale Anfragen tragen kein Projekt. Sie werden dem Vorgang zugeschlagen, an dem in diesem Zeitfenster ringsum gearbeitet wurde. Größer als das Fenster für Werkzeuge, weil Vorarbeit der eigentlichen Sitzung oft vorausgeht."] = "Local requests carry no project. They are attributed to whichever job was worked on within this time window. Larger than the window used for tools, because preparatory work often precedes the session itself.";
+EN["Rein darstellend: um welchen Faktor hätte dieselbe Arbeit ohne KI länger gedauert. Ausgewiesen wird nur Zeit, nie ein Betrag. 0 blendet die Angabe aus, sonst sind 1 bis 1,5 zulässig — die Studienlage trägt nicht mehr (Begründung im Kommentar in config.json)."] = "Presentational only: by what factor the same work would have taken longer without AI. Only time is shown, never an amount. 0 hides it; otherwise 1 to 1.5 is allowed — the research does not support more (see the comment in config.json).";
+EN["Links einen Kontakt wählen."] = "Choose a contact on the left.";
+EN["Noch kein Angebot erstellt."] = "No quote created yet.";
+EN["Noch keine Rechnung gestellt."] = "No invoice issued yet.";
+EN["Noch keine Position. Über den Knopf unten hinzufügen."] = "No line items yet. Add one with the button below.";
+EN["Noch keine Vorlage. Wiederkehrende Leistungen hier einmal anlegen."] = "No templates yet. Set up recurring services here once.";
+EN["Kleinunternehmer nach Par. 19 UStG"] = "German small business rule";
+EN["Gilt nur bei Regelbesteuerung. Bereits gestellte Rechnungen behalten ihren Satz."] = "Applies only under standard taxation. Invoices already issued keep their rate.";
+EN["der Aufruf hat den Request ausgelöst — Zeile anklicken für die einzelnen Werkzeuge"] = "the call triggered the request — click a row for the individual tools";
+EN["steuert, welche Vorgänge im Reiter Rechnungen vorgeschlagen werden. Bereits vergebene Projekte stehen nicht zur Wahl — erst beim bisherigen Kunden entfernen."] = "controls which jobs are suggested on the Invoices tab. Projects already assigned are not offered — remove them from the current client first.";
+EN[" Tickets erfasst"] = " jobs recorded";
+EN[" im aktuellen Fenster"] = " in the current window";
+EN["Werkzeugbetrieb "] = "Tool overhead ";
+EN["nicht abrechenbar"] = "not billable";
+EN["ohne "] = "without ";
+EN[" Werkzeugbetrieb · "] = " tool overhead · ";
+EN["aus den letzten 60 Min hochgerechnet"] = "extrapolated from the last 60 min";
+EN["Pausen ab 5 Min zählen nicht"] = "gaps from 5 min do not count";
+EN["Name oder Firma"] = "Name or company";
+EN["Zugeordnet auf Projekte"] = "Attributed to projects";
+EN["Requests im Kontext eines Skills"] = "Requests in the context of a skill";
+EN["Werkzeugbetrieb"] = "Tool overhead";
+EN["je Tag in USD · gesamt "] = "per day in USD · total ";
+EN[" der Token-Summe sind "] = " of the token total are ";
+EN[" — wiederverwendeter Kontext, der pro Token nur rund ein Zehntel eines normalen Input-Tokens kostet. Die große Gesamtzahl bedeutet also nicht entsprechend große Kosten; maßgeblich ist der "] = " — reused context, costing only about a tenth of a normal input token each. So the large total does not mean correspondingly large costs; what matters is the ";
+EN[" in USD, nicht die Token-Zahl."] = " in USD, not the token count.";
+EN["Die drei Tabellen zeigen denselben Verbrauch aus drei Blickwinkeln — jede summiert sich auf"] = "The three tables show the same usage from three angles — each adds up to";
+EN["Andere Sicht auf Tokens, die bereits in den Projekt- und Vorgangszahlen stecken."] = "A different view of tokens already contained in the project and job figures.";
+EN["— dient nur der Frage, was wie intensiv genutzt wird."] = "— it only answers the question of what gets used how heavily.";
+EN["Standard-Stundensatz"] = "Default hourly rate";
+EN["Selbstkostensatz je Stunde"] = "Cost rate per hour";
+EN["Zielmarge in Prozent"] = "Target margin in percent";
+EN["Abo-Preis je Monat"] = "Subscription price per month";
+EN["Umrechnungskurs USD zu EUR"] = "Exchange rate USD to EUR";
+EN["Pausenschwelle in Minuten"] = "Idle threshold in minutes";
+EN["Vergleichsfaktor klassische Entwicklung"] = "Comparison factor, conventional development";
+EN["Pauschale je Million Tokens (lokale Modelle)"] = "Flat rate per million tokens (local models)";
+EN["Selbstkosten je Stunde lokaler Rechenzeit"] = "Cost per hour of local compute";
+EN["Zuordnungsfenster lokaler Modelle in Minuten"] = "Attribution window for local models, in minutes";
+EN["USt-IdNr."] = "VAT ID";
+EN["Bank"] = "Bank";
+EN["IBAN"] = "IBAN";
+EN["BIC"] = "BIC";
+EN["Umsatzsteuersatz in Prozent"] = "VAT rate in percent";
+EN["Zahlungsziel in Tagen"] = "Payment term in days";
+EN["Was eine Arbeitsstunde kostet, bevor Gewinn entsteht — eigene Zeit zu Marktwert plus anteilige Sachkosten. Basis der Marge; steht hier 0, wird nur der Deckungsbeitrag ausgewiesen. Herleitung siehe Kommentar in config.json."] = "What one working hour costs before any profit — your own time at market value plus a share of overheads. This is the basis of the margin; at 0 only the contribution margin is shown. See the comment in config.json for the derivation.";
+EN["Pauschale je Million Tokens für lokal laufende Modelle. Erscheint als eigene Rechnungsposition und folgt dem Projektrabatt. 0 schaltet die Position ab — die Nutzung bleibt dann nur informativ sichtbar."] = "Flat rate per million tokens for locally run models. Appears as its own line item and follows the project discount. 0 disables the line item — usage then remains visible for information only.";
+EN["Projekte dieses Kunden"] = "Projects of this client";
+EN["Werkzeug"] = "Tool";
+EN["Einstellungen nicht geladen"] = "Could not load settings";
+EN["Keine abrechenbaren Vorgänge in diesem Zeitraum."] = "No billable jobs in this period.";
+EN["Projektarbeit"] = "Project work";
+EN["Ticket"] = "Job";
+EN["Arbeit ohne Ticket-Branch trägt keinen Vorgang und bleibt damit unabrechenbar. Im Feld"] = "Work on a branch without a job key carries no job and stays unbillable. In the";
+EN["lässt sich eine Sitzung von Hand buchen — ein Jira-Schlüssel oder ein frei gewählter Name. Leeren stellt die automatische Zuordnung wieder her."] = "field a session can be booked by hand — a Jira key or any name you choose. Clearing it restores automatic attribution.";
+EN["ohne Vorgang"] = "no job";
+EN["Letzter Abgleich "] = "Last sync ";
+EN["Dauer "] = "took ";
+EN[" Ereignisse"] = " events";
+EN["Keine Aktivität in den letzten 60 Minuten"] = "No activity in the last 60 minutes";
+EN["Sobald wieder gearbeitet wird, erscheinen die Sitzungen hier automatisch."] = "Sessions appear here automatically as soon as work resumes.";
+EN["Lokale Modelle"] = "Local models";
+function uebersetze(de) {
+  if (SPRACHE === 'de') return de;
+  const e = EN[de];
+  return e === undefined ? de : e;
+}
+
+/* =========================================================
+   Formatierung — folgt der gewaehlten Sprache
+   ========================================================= */
+let nf0 = new Intl.NumberFormat('de-DE', { maximumFractionDigits: 0 });
+let nf1 = new Intl.NumberFormat('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+let nf2 = new Intl.NumberFormat('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function setzeFormate() {
+  const l = istDE() ? 'de-DE' : 'en-US';
+  nf0 = new Intl.NumberFormat(l, { maximumFractionDigits: 0 });
+  nf1 = new Intl.NumberFormat(l, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  nf2 = new Intl.NumberFormat(l, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+setzeFormate();
 
 const num  = (v) => nf0.format(Number(v) || 0);
 const usd  = (v) => nf2.format(Number(v) || 0) + ' USD';
@@ -1095,31 +1421,44 @@ const hrs  = (v) => nf1.format(Number(v) || 0) + ' h';
 // Große Token-Zahlen kompakt, damit die Kacheln lesbar bleiben.
 function kurz(v) {
   const n = Number(v) || 0;
-  if (n >= 1e9) return nf2.format(n / 1e9) + ' Mrd';
-  if (n >= 1e6) return nf1.format(n / 1e6) + ' Mio';
-  if (n >= 1e4) return nf0.format(Math.round(n / 1e3)) + ' Tsd';
+  // Kurzformen wechseln mit: "Mio" liest sich englisch falsch, und ein
+  // englisches "bn" saehe im Deutschen wie ein Tippfehler aus.
+  const E = istDE()
+    ? { g: ' Mrd', m: ' Mio', k: ' Tsd' }
+    : { g: ' bn',  m: ' m',   k: ' k' };
+  if (n >= 1e9) return nf2.format(n / 1e9) + E.g;
+  if (n >= 1e6) return nf1.format(n / 1e6) + E.m;
+  if (n >= 1e4) return nf0.format(Math.round(n / 1e3)) + E.k;
   return nf0.format(n);
 }
 
 function datum(iso) {
   if (!iso) return '–';
   const p = String(iso).slice(0, 10).split('-');
-  return p.length === 3 ? p[2] + '.' + p[1] + '.' + p[0] : String(iso);
+  if (p.length !== 3) return String(iso);
+  // Englisch: Monat vor Tag. Sonst liest ein Amerikaner den 07.09. als 9. Juli.
+  return istDE() ? p[2] + '.' + p[1] + '.' + p[0] : p[1] + '/' + p[2] + '/' + p[0];
 }
 
 // "vor X" — bewusst grob, exakte Sekunden helfen hier niemandem.
+// Deutsch stellt das Wort voran ("vor 5 Min"), Englisch haengt es an
+// ("5 min ago"). Ein Woerterbuch reicht dafuer nicht, deshalb zwei Formen.
 function vor(iso) {
-  if (!iso) return 'unbekannt';
+  const unbekannt = istDE() ? 'unbekannt' : 'unknown';
+  if (!iso) return unbekannt;
   const ms = Date.now() - Date.parse(iso);
-  if (!Number.isFinite(ms)) return 'unbekannt';
-  if (ms < 0) return 'gerade eben';
+  if (!Number.isFinite(ms)) return unbekannt;
+  if (ms < 0) return istDE() ? 'gerade eben' : 'just now';
   const s = Math.floor(ms / 1000);
-  if (s < 60) return 'vor ' + s + ' Sek';
   const m = Math.floor(s / 60);
-  if (m < 60) return 'vor ' + m + ' Min';
   const h = Math.floor(m / 60);
-  if (h < 24) return 'vor ' + h + ' Std';
-  return 'vor ' + Math.floor(h / 24) + ' Tagen';
+  let zahl, einheit;
+  if (s < 60) { zahl = s; einheit = istDE() ? 'Sek' : 'sec'; }
+  else if (m < 60) { zahl = m; einheit = istDE() ? 'Min' : 'min'; }
+  else if (h < 24) { zahl = h; einheit = istDE() ? 'Std' : 'hr'; }
+  else { zahl = Math.floor(h / 24); einheit = istDE() ? 'Tagen' : 'days'; }
+  return istDE() ? 'vor ' + zahl + ' ' + einheit
+                 : zahl + ' ' + einheit + ' ago';
 }
 
 // Deckungsgleich mit esc() in rechnung.js, einschliesslich des Apostrophs.
@@ -1181,18 +1520,75 @@ function bannerSetzen() {
   // Versionssprung stimmen die angezeigten Zahlen zwar, aber die Bedienung
   // ruft womoeglich Endpunkte auf, die es in der geladenen Seite nicht gibt.
   if (state.codeSprung) {
-    el.textContent = 'Der Server wurde seit dem Öffnen dieser Seite erneuert. ' +
-      'Bitte neu laden (Strg+R), sonst passen Oberfläche und Server nicht zusammen.';
+    el.textContent = uebersetze('Der Server wurde seit dem Öffnen dieser Seite erneuert. ') +
+      uebersetze('Bitte neu laden (Strg+R), sonst passen Oberfläche und Server nicht zusammen.');
     el.classList.add('show');
     return;
   }
   const aus = [];
-  if (state.fehler.summary) aus.push('Auswertung');
-  if (state.fehler.live) aus.push('Live-Daten');
+  if (state.fehler.summary) aus.push(uebersetze('Auswertung'));
+  if (state.fehler.live) aus.push(uebersetze('Live-Daten'));
   if (!aus.length) { el.classList.remove('show'); return; }
   el.textContent = 'Keine Verbindung zum Server (' + aus.join(', ') +
     '). Angezeigt werden die zuletzt geladenen Werte — es wird weiter versucht.';
   el.classList.add('show');
+}
+
+/* =========================================================
+   Sprachwechsel
+
+   Zwei Wege in die Oberflaeche: fest im HTML stehender Text traegt
+   data-i18n und wird hier ersetzt, dynamisch erzeugter Text laeuft
+   ohnehin durch uebersetze() und entsteht beim Neuzeichnen von selbst richtig.
+
+   Der deutsche Text bleibt im HTML stehen und dient als Schluessel. Er
+   wird beim ersten Wechsel in data-de gesichert, damit der Rueckweg nach
+   Deutsch keine zweite Wortliste braucht.
+   ========================================================= */
+function uebersetzeHtml() {
+  for (const el of document.querySelectorAll('[data-i18n]')) {
+    if (!el.dataset.de) el.dataset.de = el.textContent;
+    el.textContent = uebersetze(el.dataset.de);
+  }
+  for (const a of ['title', 'placeholder', 'aria-label']) {
+    const schluessel = 'data-i18n-' + a;
+    for (const el of document.querySelectorAll('[' + schluessel + ']')) {
+      const merk = 'de' + a.replace(/-([a-z])/g, (m, c) => c.toUpperCase());
+      if (!el.dataset[merk]) el.dataset[merk] = el.getAttribute(a) || '';
+      el.setAttribute(a, uebersetze(el.dataset[merk]));
+    }
+  }
+}
+
+function setzeSprache(neu) {
+  if (!SPRACHEN.includes(neu) || neu === SPRACHE) return;
+  SPRACHE = neu;
+  try { localStorage.setItem('devbill.sprache', neu); } catch { /* privater Modus */ }
+  document.documentElement.lang = neu;
+  // Die Saetze-Tabelle baut nur neu auf, wenn sich die Projektliste aendert.
+  // Beim Sprachwechsel aendert sie sich nicht - der Merker muss also weg,
+  // sonst bleiben die Spaltenkoepfe in der alten Sprache stehen.
+  saetzeSignatur = '';
+  setzeFormate();
+  uebersetzeHtml();
+  markiereSprachknopf();
+  // Alles neu zeichnen: die Tabellen bauen ihre Beschriftungen selbst.
+  if (state.summary) { zeichneUeberblick(); zeichneTickets(); zeichneWerkzeuge(); zeichneSaetze(); }
+  if (state.live) zeichneLive();
+  // Die uebrigen Ansichten bauen ihre Beschriftungen ebenfalls selbst.
+  // Jede prueft intern, ob sie ueberhaupt Daten hat.
+  zeichnePosten();
+  zeichneKontakte();
+  zeichneKontaktDetail();
+  zeichneVorlagenListe();
+  zeichneVorlagenAuswahl();
+  zeichneVorgaenge();
+  zeichneProjektzuordnung();
+  // Einmal geladene Abschnitte tragen ihre Beschriftungen aus dem Aufbau.
+  // Ohne Neuladen blieben sie in der Sprache von vorhin stehen.
+  if (eGeladen) { eGeladen = false; ladeEinstellungen(); }
+  if (sdGeladen) { sdGeladen = false; ladeStammdaten(); }
+  bannerSetzen();
 }
 
 async function ladeSummary() {
@@ -1468,11 +1864,15 @@ function zeichneLive() {
     setz('l-tokens-hint', num(t.total_tokens) + ' Tokens');
     setz('l-kosten', usd(t.cost_usd));
     setz('l-burn', usd(d.burn_usd_per_hour) + ' /h');
-    setz('l-burn-hint', 'aus den letzten ' + num(d.window_minutes) + ' Min hochgerechnet');
+    setz('l-burn-hint', istDE()
+      ? 'aus den letzten ' + num(d.window_minutes) + ' Min hochgerechnet'
+      : 'extrapolated from the last ' + num(d.window_minutes) + ' min');
     setz('l-requests', num(t.requests));
     const w = d.window || {};
-    setz('l-window-hint', num(w.requests) + ' im aktuellen Fenster');
-    setz('l-fenster', 'letzte ' + num(d.window_minutes) + ' Minuten');
+    setz('l-window-hint', num(w.requests) + uebersetze(' im aktuellen Fenster'));
+    setz('l-fenster', istDE()
+      ? 'letzte ' + num(d.window_minutes) + ' Minuten'
+      : 'last ' + num(d.window_minutes) + ' minutes');
   }
 
   // Sitzungstabelle
@@ -1488,8 +1888,8 @@ function zeichneLive() {
     aktualisiereBuchungsanzeige(sess);
   } else {
     let h = '<div class="tablewrap"><table><thead><tr>' +
-      '<th>Projekt</th><th>Branch</th><th>Vorgang</th><th>Modell</th>' +
-      '<th>Tokens</th><th>API-Gegenwert USD</th><th>Letzte Aktivität</th>' +
+      '<th>' + uebersetze('Projekt') + '</th><th>' + uebersetze('Branch') + '</th><th>' + uebersetze('Vorgang') + '</th><th>' + uebersetze('Modell') + '</th>' +
+      '<th>' + uebersetze('Tokens') + '</th><th>' + uebersetze('API-Gegenwert USD') + '</th><th>' + uebersetze('Letzte Aktivität') + '</th>' +
       '</tr></thead><tbody>';
     // Eine Sitzung kann mehrere Zeilen haben (je Modell eine). Gebucht wird
     // aber die ganze Sitzung, deshalb bekommt nur ihre erste Zeile das
@@ -1526,9 +1926,9 @@ function zeichneLive() {
                   '<button class="btn schlicht aendern" type="button">Ändern</button></td>'
               : '<td class="buchung">' +
                   '<input class="feld vorgang" value="" data-vorbelegt=""' +
-                  ' placeholder="ohne Vorgang" maxlength="40"' +
+                  ' placeholder="' + uebersetze('ohne Vorgang') + '" maxlength="40"' +
                   ' aria-label="Vorgang für diese Sitzung">' +
-                  '<button class="btn buchen" type="button">Buchen</button></td>')
+                  '<button class="btn buchen" type="button">' + uebersetze('Buchen') + '</button></td>')
           : '<td></td>';
         // Projekt und Branch nur einmal je Sitzung nennen: dieselbe Angabe
         // mehrfach untereinander liest sich wie mehrere Sitzungen. Die
@@ -1585,11 +1985,11 @@ function zeichneLive() {
   } else {
     st.className = 'status';
     const teile = [];
-    teile.push('Letzter Abgleich ' + esc(li ? vor(li.at) : 'unbekannt'));
-    if (li) teile.push('Dauer ' + num(li.ms) + ' ms');
-    if (li) teile.push(num(li.events) + ' Ereignisse');
-    if (preis) teile.push('Preisquelle ' + esc(preis.source) + ' (' + num(preis.models) + ' Modelle)');
-    if (state.fehler.live) teile.push('Server nicht erreichbar');
+    teile.push(uebersetze('Letzter Abgleich ') + esc(li ? vor(li.at) : 'unbekannt'));
+    if (li) teile.push(uebersetze('Dauer ') + num(li.ms) + ' ms');
+    if (li) teile.push(num(li.events) + uebersetze(' Ereignisse'));
+    if (preis) teile.push(uebersetze('Preisquelle ') + esc(preis.source) + ' (' + num(preis.models) + (istDE() ? ' Modelle)' : ' models)'));
+    if (state.fehler.live) teile.push(uebersetze('Server nicht erreichbar'));
     st.innerHTML = '<span class="dot"></span>' + teile.join(' · ');
   }
 }
@@ -1615,7 +2015,7 @@ function zeigeVorgangsfeld(tr) {
   zelle.innerHTML = '<input class="feld vorgang" value="' + esc(bisher) + '"' +
     ' data-vorbelegt="' + esc(bisher) + '" placeholder="ohne Vorgang" maxlength="40"' +
     ' aria-label="Vorgang für diese Sitzung">' +
-    '<button class="btn buchen" type="button">Buchen</button>' +
+    '<button class="btn buchen" type="button">' + uebersetze('Buchen') + '</button>' +
     '<button class="btn schlicht abbrechen" type="button">Abbrechen</button>';
   verdrahteBuchung(tr);
   const feld = zelle.querySelector('.vorgang');
@@ -1694,7 +2094,7 @@ async function bucheSitzung(tr) {
     status.className = 'status ok';
     status.textContent = antwort.ticket
       ? 'Sitzung auf ' + antwort.ticket + ' gebucht — die Arbeit ist jetzt abrechenbar.'
-      : 'Buchung aufgehoben, die Sitzung folgt wieder der automatischen Zuordnung.';
+      : uebersetze('Buchung aufgehoben, die Sitzung folgt wieder der automatischen Zuordnung.');
     feld.blur();
     // Bearbeitungszustand abraeumen, sonst haelt buchungInArbeit() den
     // Neuaufbau fuer eine laufende Eingabe und die Zeile bliebe im Formular
@@ -1707,7 +2107,7 @@ async function bucheSitzung(tr) {
     });
   } catch (err) {
     status.className = 'status err';
-    status.textContent = 'Nicht gebucht: ' + err.message;
+    status.textContent = uebersetze('Nicht gebucht: ') + err.message;
   }
 }
 
@@ -1731,7 +2131,7 @@ function zeichneWerkzeuge() {
   const gesamt = (d.summary && d.summary.cost_usd) || 0;
   setz('w-anteil', gesamt
     ? nf1.format((s.cost_usd / gesamt) * 100) + ' % des API-Gegenwerts'
-    : 'API-Gegenwert');
+    : uebersetze('API-Gegenwert'));
 
   const tabelle = (ziel, zeilen, spalte, kopf) => {
     const el = document.getElementById(ziel);
@@ -1741,7 +2141,7 @@ function zeichneWerkzeuge() {
       return;
     }
     let h = '<div class="tablewrap"><table><thead><tr>' +
-      '<th>' + kopf + '</th><th>Aufrufe</th><th>Tokens</th><th>API-Gegenwert USD</th><th>API-Gegenwert EUR</th>' +
+      '<th>' + kopf + '</th><th>' + uebersetze('Aufrufe') + '</th><th>' + uebersetze('Tokens') + '</th><th>' + uebersetze('API-Gegenwert USD') + '</th><th>' + uebersetze('API-Gegenwert EUR') + '</th>' +
       '</tr></thead><tbody>';
     for (const r of zeilen) {
       h += '<tr>' +
@@ -1755,9 +2155,9 @@ function zeichneWerkzeuge() {
     el.innerHTML = h + '</tbody></table></div>';
   };
 
-  tabelle('w-table', w.nach_werkzeug, 'werkzeug', 'Werkzeug');
-  tabelle('w-projekte', w.nach_projekt, 'projekt', 'Projekt');
-  tabelle('w-modelle', w.nach_modell, 'model', 'Modell');
+  tabelle('w-table', w.nach_werkzeug, 'werkzeug', uebersetze('Werkzeug'));
+  tabelle('w-projekte', w.nach_projekt, 'projekt', uebersetze('Projekt'));
+  tabelle('w-modelle', w.nach_modell, 'model', uebersetze('Modell'));
   setz('w-summe-hinweis', usd(s.cost_usd) + ' / ' + kurz(s.total_tokens) + ' Tokens');
 
   zeichneHerkunft();
@@ -1765,16 +2165,25 @@ function zeichneWerkzeuge() {
   const erkl = document.getElementById('w-erklaerung');
   if (erkl) {
     const offen = s.ohne_zuordnung || 0;
-    erkl.innerHTML =
-      '<b>Wie die Zuordnung entsteht:</b> Werkzeuge wie <code>claude-mem</code> laufen ' +
-      'automatisch mit, während an einem Projekt gearbeitet wird. Sie haben eigene ' +
-      'Sitzungen und verraten selbst nicht, wozu sie gehören. Zugeordnet wird deshalb ' +
-      'über die Zeit: Es zählt, an welchem Projekt im Umkreis von ' +
-      num(s.fenster_minuten) + ' Minuten gearbeitet wurde. ' +
-      (offen > 0
-        ? '<b>' + num(offen) + '</b> Aufrufe ließen sich nicht zuordnen und fehlen in der Projektaufteilung.'
-        : 'Im gewählten Zeitraum ließ sich jeder Aufruf zuordnen.') +
-      ' Diese Kosten stecken nicht in den Projekt- und Ticketzahlen der anderen Ansichten.';
+    erkl.innerHTML = istDE()
+      ? '<b>Wie die Zuordnung entsteht:</b> Werkzeuge wie <code>claude-mem</code> laufen '
+        + 'automatisch mit, während an einem Projekt gearbeitet wird. Sie haben eigene '
+        + 'Sitzungen und verraten selbst nicht, wozu sie gehören. Zugeordnet wird deshalb '
+        + 'über die Zeit: Es zählt, an welchem Projekt im Umkreis von '
+        + num(s.fenster_minuten) + ' Minuten gearbeitet wurde. '
+        + (offen > 0
+          ? '<b>' + num(offen) + '</b> Aufrufe ließen sich nicht zuordnen und fehlen in der Projektaufteilung.'
+          : 'Im gewählten Zeitraum ließ sich jeder Aufruf zuordnen.')
+        + ' Diese Kosten stecken nicht in den Projekt- und Ticketzahlen der anderen Ansichten.'
+      : '<b>How the attribution works:</b> Tools such as <code>claude-mem</code> run '
+        + 'alongside automatically while you work on a project. They have their own '
+        + 'sessions and do not themselves reveal what they belong to. Attribution therefore '
+        + 'goes by time: what counts is which project was worked on within '
+        + num(s.fenster_minuten) + ' minutes. '
+        + (offen > 0
+          ? '<b>' + num(offen) + '</b> calls could not be attributed and are missing from the project split.'
+          : 'Every call in the selected period could be attributed.')
+        + ' These costs are not part of the project and job figures in the other views.';
   }
 }
 
@@ -1798,8 +2207,8 @@ function zeichneHerkunft() {
       'Die Erfassung beginnt mit dem ersten Einlesen nach der Umstellung.</div>';
   } else {
     let m = '<div class="tablewrap"><table><thead><tr>' +
-      '<th>MCP-Server</th><th>Aufrufe</th><th>Tokens</th><th>Anteil</th>' +
-      '<th>API-Gegenwert USD</th><th>API-Gegenwert EUR</th></tr></thead><tbody>';
+      '<th>' + uebersetze('MCP-Server') + '</th><th>' + uebersetze('Aufrufe') + '</th><th>' + uebersetze('Tokens') + '</th><th>' + uebersetze('Anteil') + '</th>' +
+      '<th>' + uebersetze('API-Gegenwert USD') + '</th><th>' + uebersetze('API-Gegenwert EUR') + '</th></tr></thead><tbody>';
     for (const s of h.nach_mcp) {
       m += '<tr class="h-server" data-server="' + esc(s.server) + '" tabindex="0" ' +
           'role="button" aria-expanded="false" title="Werkzeuge ein- und ausblenden">' +
@@ -1846,8 +2255,8 @@ function zeichneHerkunft() {
       skillZiel.innerHTML = '<div class="empty">Keine Skill-Aufrufe im gewählten Zeitraum.</div>';
     } else {
       let sh = '<div class="tablewrap"><table><thead><tr>' +
-        '<th>Skill</th><th>Aufrufe</th><th>Tokens</th><th>Anteil</th>' +
-        '<th>API-Gegenwert USD</th><th>API-Gegenwert EUR</th></tr></thead><tbody>';
+        '<th>' + uebersetze('Skill') + '</th><th>' + uebersetze('Aufrufe') + '</th><th>' + uebersetze('Tokens') + '</th><th>' + uebersetze('Anteil') + '</th>' +
+        '<th>' + uebersetze('API-Gegenwert USD') + '</th><th>' + uebersetze('API-Gegenwert EUR') + '</th></tr></thead><tbody>';
       for (const s of h.nach_skill) {
         sh += '<tr>' +
           '<td class="trunc" title="' + esc(s.skill) + '">' + esc(s.skill) + '</td>' +
@@ -1863,20 +2272,33 @@ function zeichneHerkunft() {
   }
 
   if (erkl) {
-    erkl.innerHTML =
-      '<b>Warum zwei getrennte Listen:</b> Ein <b>MCP-Server</b> löst den Request aus — ' +
-      'die Tokens gehören ihm ursächlich. Ein <b>Skill</b> tut das nicht: er schiebt Text ' +
-      'in einen ohnehin laufenden Request, statt einen eigenen zu starten. Seine Zeile sagt ' +
-      'deshalb <i>so viel lief, während dieser Skill aktiv war</i> — nicht <i>so viel hat der ' +
-      'Skill gekostet</i>. Als Kostenzuordnung gelesen wäre die Zahl falsch.<br><br>' +
-      '<b>Was hier fehlt:</b> Werkzeuge ohne eigene Requests — Anweisungen im Kontext ' +
-      '(Ponytail, Caveman, <code>CLAUDE.md</code>) und Filter vor dem Modell (<code>rtk</code>). ' +
-      'Sie erzeugen keinen eigenen Verbrauch, ihr Beitrag steckt in den übrigen Requests. ' +
-      'Eine Null stünde für „nicht messbar", nicht für „kostet nichts" — deshalb steht sie nicht da.' +
-      '<br><br><b>Bezugsgröße:</b> ' + kurz(h.gesamt.total_tokens) + ' Tokens aus Claude-Code-Sitzungen ' +
-      'im gewählten Zeitraum. Davon ' + anteil(h.mcp_tokens) + ' über MCP-Server, ' +
-      anteil(h.skill_tokens) + ' im Kontext eines Skills. Die Erfassung beginnt mit dem ersten ' +
-      'Einlesen nach der Umstellung — ältere Sitzungen tragen sie nicht, ihre Logdateien sind fort.';
+    erkl.innerHTML = istDE()
+      ? '<b>Warum zwei getrennte Listen:</b> Ein <b>' + uebersetze('MCP-Server') + '</b> löst den Request aus — '
+        + 'die Tokens gehören ihm ursächlich. Ein <b>' + uebersetze('Skill') + '</b> tut das nicht: er schiebt Text '
+        + 'in einen ohnehin laufenden Request, statt einen eigenen zu starten. Seine Zeile sagt '
+        + 'deshalb <i>so viel lief, während dieser Skill aktiv war</i> — nicht <i>so viel hat der '
+        + 'Skill gekostet</i>. Als Kostenzuordnung gelesen wäre die Zahl falsch.<br><br>'
+        + '<b>Was hier fehlt:</b> Werkzeuge ohne eigene Requests — Anweisungen im Kontext '
+        + '(Ponytail, Caveman, <code>CLAUDE.md</code>) und Filter vor dem Modell (<code>rtk</code>). '
+        + uebersetze('Sie erzeugen keinen eigenen Verbrauch, ihr Beitrag steckt in den übrigen Requests. ')
+        + 'Eine Null stünde für „nicht messbar", nicht für „kostet nichts" — deshalb steht sie nicht da.'
+        + '<br><br><b>Bezugsgröße:</b> ' + kurz(h.gesamt.total_tokens) + ' Tokens aus Claude-Code-Sitzungen '
+        + 'im gewählten Zeitraum. Davon ' + anteil(h.mcp_tokens) + ' über MCP-Server, '
+        + anteil(h.skill_tokens) + ' im Kontext eines Skills. Die Erfassung beginnt mit dem ersten '
+        + uebersetze('Einlesen nach der Umstellung — ältere Sitzungen tragen sie nicht, ihre Logdateien sind fort.')
+      : '<b>Why two separate lists:</b> An <b>MCP server</b> triggers the request — '
+        + 'the tokens are causally its own. A <b>skill</b> does not: it pushes text into a '
+        + 'request that is running anyway, instead of starting one of its own. Its row therefore '
+        + 'says <i>this much ran while the skill was active</i> — not <i>this much is what the '
+        + 'skill cost</i>. Read as a cost attribution, the number would be wrong.<br><br>'
+        + '<b>What is missing here:</b> tools without requests of their own — instructions in the '
+        + 'context (Ponytail, Caveman, <code>CLAUDE.md</code>) and filters ahead of the model (<code>rtk</code>). '
+        + 'They generate no usage of their own; their contribution sits inside the other requests. '
+        + 'A zero would mean "not measurable", not "costs nothing" — which is why none is shown.'
+        + '<br><br><b>Basis:</b> ' + kurz(h.gesamt.total_tokens) + ' tokens from Claude Code sessions '
+        + 'in the selected period. Of those ' + anteil(h.mcp_tokens) + ' via MCP servers, '
+        + anteil(h.skill_tokens) + ' in the context of a skill. Recording starts with the first '
+        + 'ingest after the change — older sessions do not carry it, their log files are gone.';
   }
 }
 
@@ -1906,8 +2328,8 @@ function zeichneSaetze() {
   const standard = (d.config && d.config.stundensatz) || 0;
 
   let h = '<div class="tablewrap"><table class="saetze"><thead><tr>' +
-    '<th>Projekt</th><th>Kunde</th><th>Satz ' + w + '</th><th>Rabatt %</th>' +
-    '<th>ergibt</th><th></th></tr></thead><tbody>';
+    '<th>' + uebersetze('Projekt') + '</th><th>' + uebersetze('Kunde') + '</th><th>' + uebersetze('Satz') + ' ' + w + '</th><th>' + uebersetze('Rabatt %') + '</th>' +
+    '<th>' + uebersetze('ergibt') + '</th><th></th></tr></thead><tbody>';
 
   // Die Felder bleiben zunaechst leer; die gespeicherten Werte traegt
   // ladeSaetze() gleich darauf ein. Leer heisst immer: Standardsatz.
@@ -1985,7 +2407,7 @@ async function speichereSatz(tr) {
       body: JSON.stringify(nutzlast),
     });
     const antwort = await r.json();
-    if (!r.ok || antwort.error) throw new Error(antwort.error || 'Speichern fehlgeschlagen');
+    if (!r.ok || antwort.error) throw new Error(antwort.error || uebersetze('Speichern fehlgeschlagen'));
 
     tr.querySelector('.ergibt').textContent = eur(antwort.satz);
     status.className = 'saetze-status ok';
@@ -1998,7 +2420,7 @@ async function speichereSatz(tr) {
     hole('/api/summary').then((d) => { if (d) { state.summary = d; zeichneUeberblick(); zeichneTickets(); } });
   } catch (err) {
     status.className = 'saetze-status err';
-    status.textContent = 'Nicht gespeichert: ' + err.message;
+    status.textContent = uebersetze('Nicht gespeichert: ') + err.message;
   }
 }
 
@@ -2009,14 +2431,14 @@ function jiraKnopf(status) {
   const knopf = document.createElement('button');
   knopf.type = 'button';
   knopf.className = 'btn';
-  knopf.textContent = 'Neuen Satz zu Jira-Tickets synchen';
+  knopf.textContent = uebersetze('Neuen Satz zu Jira-Tickets synchen');
   knopf.addEventListener('click', async () => {
     knopf.disabled = true;
-    knopf.textContent = 'wird übertragen…';
+    knopf.textContent = uebersetze('wird übertragen…');
     try {
       const r = await fetch('/api/jira-sync', { method: 'POST' });
       const a = await r.json();
-      if (!a.ok) throw new Error(a.grund || 'Abgleich fehlgeschlagen');
+      if (!a.ok) throw new Error(a.grund || uebersetze('Abgleich fehlgeschlagen'));
       status.className = 'saetze-status ok';
       status.textContent = `Jira: ${a.aktualisiert} von ${a.geprueft} Ticket(s) aktualisiert` +
         (a.fehler ? `, ${a.fehler} fehlgeschlagen (Serverprotokoll)` : '') + '.';
@@ -2048,8 +2470,9 @@ function zeichneUeberblick() {
   const wzStunden = sp ? sp.overhead.active_seconds / 3600 : 0;
   setz('s-stunden', hrs(stunden));
   setz('s-stunden-hint',
-    (wzStunden > 0.05 ? 'ohne ' + hrs(wzStunden) + ' Werkzeugbetrieb · ' : '') +
-    'Pausen ab ' + num(d.config && d.config.gapMinutes) + ' Min zählen nicht');
+    (wzStunden > 0.05 ? uebersetze('ohne ') + hrs(wzStunden) + uebersetze(' Werkzeugbetrieb · ') : '') +
+    (istDE() ? 'Pausen ab ' + num(d.config && d.config.gapMinutes) + ' Min zählen nicht'
+             : 'gaps from ' + num(d.config && d.config.gapMinutes) + ' min do not count'));
   setz('s-requests', num(s.requests));
   setz('s-zeitraum', datum(s.first_day) + ' – ' + datum(s.last_day));
   setz('zeitraum', datum(s.first_day) + ' – ' + datum(s.last_day));
@@ -2068,7 +2491,7 @@ function zeichneUeberblick() {
   }));
   document.getElementById('c-models').innerHTML = balkenChart(
     modellPunkte,
-    { titel: 'API-Gegenwert nach Modell', fmt: usd, breite: containerBreite('c-models') }
+    { titel: uebersetze('API-Gegenwert nach Modell'), fmt: usd, breite: containerBreite('c-models') }
   );
   chartInteraktiv('c-models', modellPunkte, {
     fmt: usd,
@@ -2086,11 +2509,20 @@ function zeichneUeberblick() {
   const anteil = s.total_tokens ? (s.cache_read_tokens / s.total_tokens) * 100 : 0;
   const info = document.getElementById('cache-info');
   if (anteil > 0) {
-    info.innerHTML = '<b>Zur Einordnung:</b> ' + nf1.format(anteil) + ' % der Token-Summe sind ' +
-      '<b>Cache-Read-Tokens</b> (' + num(s.cache_read_tokens) + ') — wiederverwendeter Kontext, ' +
-      'der pro Token nur rund ein Zehntel eines normalen Input-Tokens kostet. Die große ' +
-      'Gesamtzahl bedeutet also nicht entsprechend große Kosten; maßgeblich ist der ' +
-      'API-Gegenwert in USD, nicht die Token-Zahl.';
+    // Ein Satz aus mehreren Teilen: die Zahlen stehen mittendrin. Deshalb
+    // zwei ganze Fassungen statt Bruchstuecken - so bleibt der Satzbau je
+    // Sprache richtig, statt englische Worte in deutsche Reihenfolge zu zwingen.
+    const anteilTxt = nf1.format(anteil);
+    const cacheZahl = num(s.cache_read_tokens);
+    info.innerHTML = istDE()
+      ? '<b>' + uebersetze('Zur Einordnung:') + '</b> ' + anteilTxt + ' % der Token-Summe sind <b>' + uebersetze('Cache-Read-Tokens') + '</b> (' + cacheZahl
+        + ') — wiederverwendeter Kontext, der pro Token nur rund ein Zehntel eines '
+        + 'normalen Input-Tokens kostet. Die große Gesamtzahl bedeutet also nicht '
+        + 'entsprechend große Kosten; maßgeblich ist der API-Gegenwert in USD, nicht die Token-Zahl.'
+      : '<b>For context:</b> ' + anteilTxt + ' % of the token total are <b>cache read tokens</b> (' + cacheZahl
+        + ') — reused context, costing only about a tenth of a normal input token each. '
+        + 'So the large total does not mean correspondingly large costs; what matters is '
+        + 'the API equivalent in USD, not the token count.';
   }
 }
 
@@ -2117,13 +2549,32 @@ function jiraLink(key) {
    Alle drei Reihen kommen fertig summiert vom Server (metrics.byPeriod) —
    im Frontend wird nicht nachgerechnet, sonst gaebe es die Summe zweimal.
    --------------------------------------------------------- */
+// note ist eine Funktion, kein fester Text: sonst friert der Wert die
+// Sprache vom Seitenaufbau ein.
 const KOERNUNG_TEXT = {
-  tag: { note: 'je Tag in USD', achse: (t) => t.slice(8) + '.' + t.slice(5, 7) + '.', voll: (t) => datum(t) },
-  monat: { note: 'je Monat in USD', achse: (t) => t.slice(5, 7) + '/' + t.slice(2, 4), voll: (t) => MONATE[+t.slice(5, 7) - 1] + ' ' + t.slice(0, 4) },
-  jahr: { note: 'je Jahr in USD', achse: (t) => t, voll: (t) => t },
+  tag: {
+    note: () => (istDE() ? 'je Tag in USD' : 'per day in USD'),
+    achse: (t) => t.slice(8) + '.' + t.slice(5, 7) + '.',
+    voll: (t) => datum(t),
+  },
+  monat: {
+    note: () => (istDE() ? uebersetze('je Monat in USD') : 'per month in USD'),
+    achse: (t) => t.slice(5, 7) + '/' + t.slice(2, 4),
+    voll: (t) => monatsName(+t.slice(5, 7) - 1) + ' ' + t.slice(0, 4),
+  },
+  jahr: {
+    note: () => (istDE() ? 'je Jahr in USD' : 'per year in USD'),
+    achse: (t) => t,
+    voll: (t) => t,
+  },
 };
-const MONATE = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
-                'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
+// Monatsnamen fuer die Zeigeranzeige im Verlauf. Als Funktion, damit ein
+// Sprachwechsel sie mitnimmt statt den Stand vom Seitenaufbau zu behalten.
+const MONATE_DE = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
+                   'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
+const MONATE_EN = ['January', 'February', 'March', 'April', 'May', 'June',
+                   'July', 'August', 'September', 'October', 'November', 'December'];
+const monatsName = (i) => (istDE() ? MONATE_DE : MONATE_EN)[i];
 
 function zeichneVerlauf() {
   const d = state.summary;
@@ -2143,14 +2594,14 @@ function zeichneVerlauf() {
   // Die Achse traegt die kurze Form, die Zeigeranzeige die ausgeschriebene.
   document.getElementById('c-days').innerHTML = linienChart(
     punkte.map((p) => ({ wert: p.wert, label: p.achse, titel: p.label + ': ' + usd(p.wert) })),
-    { titel: 'API-Gegenwert ' + t.note, yFmt: (v) => nf2.format(v), breite: containerBreite('c-days') }
+    { titel: uebersetze('API-Gegenwert') + ' ' + t.note(), yFmt: (v) => nf2.format(v), breite: containerBreite('c-days') }
   );
   chartInteraktiv('c-days', punkte, { fmt: usd });
 
   // Die Gesamtsumme steht im Kartenkopf, damit sie nicht in der Reihe
   // gesucht werden muss — sie gilt fuer jede Koernung gleich.
   const note = document.getElementById('c-days-note');
-  if (note) note.textContent = t.note + ' · gesamt ' + usd((d.summary || {}).cost_usd);
+  if (note) note.textContent = t.note() + (istDE() ? ' · gesamt ' : ' · total ') + usd((d.summary || {}).cost_usd);
 }
 
 document.querySelectorAll('.zeitraum-schalter button').forEach((b) => {
@@ -2201,8 +2652,8 @@ function zeichneProjekte() {
   const zuordnung = d.projekt_kontakt || {};
 
   let h = '<div class="tablewrap"><table><thead><tr>' +
-    '<th>Projekt</th><th>Kunde</th><th>Requests</th><th>Tokens</th><th>API-Gegenwert USD</th>' +
-    '<th>Aktive Std.</th><th>Arbeitswert EUR</th>' +
+    '<th>' + uebersetze('Projekt') + '</th><th>' + uebersetze('Kunde') + '</th><th>' + uebersetze('Requests') + '</th><th>' + uebersetze('Tokens') + '</th><th>' + uebersetze('API-Gegenwert USD') + '</th>' +
+    '<th>' + uebersetze('Aktive Std.') + '</th><th>' + uebersetze('Arbeitswert EUR') + '</th>' +
     '</tr></thead><tbody>';
   for (const p of projects) {
     // Aktivzeit und Arbeitswert kennen kein Modell: sie sind Zeitspannen
@@ -2240,7 +2691,7 @@ function zeichneProjekte() {
   const sp = d.split;
   if (sp && !gefiltert) {
     h += '<tr class="summe">' +
-      '<td>Projektarbeit</td>' +
+      '<td>' + uebersetze('Projektarbeit') + '</td>' +
       // Leerzelle fuer die Kundenspalte: eine Summe ueber mehrere Kunden.
       '<td></td>' +
       '<td>' + num(sp.arbeit.requests) + '</td>' +
@@ -2251,13 +2702,13 @@ function zeichneProjekte() {
     '</tr>' +
     '<tr class="summe">' +
       '<td class="dimlabel" title="Aufschlüsselung je Werkzeug im Tab &quot;Werkzeuge&quot;">' +
-        'Werkzeugbetrieb <span class="note">' + esc(sp.overhead_projekte.join(', ')) + '</span></td>' +
+        uebersetze('Werkzeugbetrieb ') + '<span class="note">' + esc(sp.overhead_projekte.join(', ')) + '</span></td>' +
       '<td class="dimlabel">–</td>' +
       '<td class="dimlabel">' + num(sp.overhead.requests) + '</td>' +
       '<td class="dimlabel">' + kurz(sp.overhead.total_tokens) + '</td>' +
       '<td class="dimlabel">' + usd(sp.overhead.cost_usd) + '</td>' +
       '<td class="dimlabel">' + hrs(sp.overhead.active_seconds / 3600) + '</td>' +
-      '<td class="dimlabel">nicht abrechenbar</td>' +
+      '<td class="dimlabel">' + uebersetze('nicht abrechenbar') + '</td>' +
     '</tr>';
   }
   ziel.innerHTML = h + '</tbody></table></div>';
@@ -2299,7 +2750,7 @@ function zeichneTickets() {
   const rows = Array.isArray(d.tickets) ? d.tickets.slice() : [];
 
   document.getElementById('t-count').textContent =
-    rows.length ? num(rows.length) + ' Tickets erfasst' : '';
+    rows.length ? num(rows.length) + uebersetze(' Tickets erfasst') : '';
 
   const ziel = document.getElementById('t-table');
   if (!rows.length) {
@@ -2320,7 +2771,7 @@ function zeichneTickets() {
   let h = '<div class="tablewrap"><table><thead><tr>';
   for (const c of SPALTEN) {
     const aktiv = c.key === key;
-    h += '<th class="sortable" data-key="' + c.key + '">' + esc(c.label) +
+    h += '<th class="sortable" data-key="' + c.key + '">' + esc(uebersetze(c.label)) +
          '<span class="arrow">' + (aktiv ? (dir === 1 ? '▲' : '▼') : '') + '</span></th>';
   }
   h += '</tr></thead><tbody>';
@@ -2341,7 +2792,7 @@ function zeichneTickets() {
       '<td>' + hrs(t.active_hours) + '</td>' +
       '<td title="' + (t.lokal_tokens
         ? num(t.lokal_tokens) + ' Tokens · ' + esc((t.lokal_modelle || []).join(', '))
-        : 'keine lokalen Modelle') + '">' +
+        : uebersetze('keine lokalen Modelle')) + '">' +
         (t.lokal_tokens ? kurz(t.lokal_tokens) : '<span class="faint">–</span>') + '</td>' +
       '<td class="eur">' + eur(t.arbeitswert) + '</td>' +
       '<td class="faint">' + datum(t.first_day) + ' – ' + datum(t.last_day) + '</td>' +
@@ -2404,15 +2855,15 @@ function zeichneDetail() {
         '<div class="tablewrap"><table style="min-width:0"><tbody>' +
           zeile('Input', t.input_tokens) +
           zeile('Output', t.output_tokens) +
-          zeile('Cache geschrieben', t.cache_write_tokens) +
-          zeile('Cache gelesen', t.cache_read_tokens) +
+          zeile(uebersetze('Cache geschrieben'), t.cache_write_tokens) +
+          zeile(uebersetze('Cache gelesen'), t.cache_read_tokens) +
           '<tr><td><b>Gesamt</b></td><td><b>' + num(t.total_tokens) + '</b></td></tr>' +
         '</tbody></table></div>' +
       '</div>' +
 
       '<div class="calc">' +
         '<div id="d-status" class="statuszeile"></div>' +
-        '<dl id="d-werte"><dd><small>wird geladen…</small></dd></dl>' +
+        '<dl id="d-werte"><dd><small>' + uebersetze('wird geladen…') + '</small></dd></dl>' +
       '</div>' +
 
     '</div>' +
@@ -2429,8 +2880,8 @@ function zeichneDetail() {
 
   // Modelle des Tickets: aus dem Gesamtbestand nicht ableitbar, daher gezielt
   // beim Server holen. /api/ticket liefert models + days für genau dieses Ticket.
-  document.getElementById('d-models').innerHTML = '<div class="empty">wird geladen…</div>';
-  document.getElementById('d-days').innerHTML = '<div class="empty">wird geladen…</div>';
+  document.getElementById('d-models').innerHTML = '<div class="empty">' + uebersetze('wird geladen…') + '</div>';
+  document.getElementById('d-days').innerHTML = '<div class="empty">' + uebersetze('wird geladen…') + '</div>';
   hole('/api/ticket?key=' + encodeURIComponent(key)).then((det) => {
     if (state.offenesTicket !== key) return;   // inzwischen umgeschaltet
 
@@ -2471,7 +2922,7 @@ function zeichneDetail() {
     const ziele = ['d-status', 'd-werte', 'd-models', 'd-days'];
     for (const id of ziele) {
       const el = document.getElementById(id);
-      if (el) el.innerHTML = '<div class="empty">Details konnten nicht geladen werden.</div>';
+      if (el) el.innerHTML = '<div class="empty">' + uebersetze('Details konnten nicht geladen werden.') + '</div>';
     }
   });
 
@@ -2530,7 +2981,7 @@ function werteHtml(t, w) {
     '<dd class="' + vz(betrag) + '">' + eur(betrag) +
       (prozent != null ? ' <small>(' + nf1.format(prozent) + ' %)</small>' : '') + '</dd>';
 
-  const erloesHerkunft = w.erloes_ist_rechnung ? 'gestellte Rechnung' : 'Arbeitswert, noch nicht abgerechnet';
+  const erloesHerkunft = w.erloes_ist_rechnung ? uebersetze('gestellte Rechnung') : uebersetze('Arbeitswert, noch nicht abgerechnet');
 
   // Soll/Ist nur zeigen, wenn eine Zielmarge hinterlegt ist.
   const zielZeile = w.zielmarge_prozent == null ? '' :
@@ -2550,15 +3001,15 @@ function werteHtml(t, w) {
     // Lokale Modelle nur zeigen, wenn welche liefen. Eine Nullzeile bei jedem
     // Vorgang macht die Aufstellung laenger, ohne etwas zu sagen.
     (t.lokal_tokens
-      ? '<dt>Lokale Modelle <small>' + kurz(t.lokal_tokens) + ' Tokens × ' +
+      ? '<dt>' + uebersetze('Lokale Modelle') + ' <small>' + kurz(t.lokal_tokens) + ' Tokens × ' +
           eur(t.lokal_eur_pro_mio) + '/Mio.</small></dt>' +
         '<dd class="eur">' + eur(t.lokal_betrag_eur) + '</dd>'
       : '') +
     '<div class="sep"></div>' +
-    '<dt>Gegenwert gesamt</dt><dd class="eur">' + eur(w.gegenwert) + '</dd>' +
-    '<dt>Rechnungsbetrag</dt>' +
+    '<dt>' + uebersetze('Gegenwert gesamt') + '</dt><dd class="eur">' + eur(w.gegenwert) + '</dd>' +
+    '<dt>' + uebersetze('Rechnungsbetrag') + '</dt>' +
       (w.erloes_ist_rechnung ? '<dd class="eur">' + eur(w.rechnungsbetrag) + '</dd>'
-                             : leer('noch nicht abgerechnet')) +
+                             : leer(uebersetze('noch nicht abgerechnet'))) +
     '<dt>Mehrwert <small>Gegenwert − Rechnung</small></dt>' + geld(w.mehrwert) +
     '<div class="sep"></div>' +
 
@@ -2572,17 +3023,17 @@ function werteHtml(t, w) {
         '<dd class="eur">' + eur(w.lokal_kosten) + '</dd>'
       : '') +
     '<dt>Deckungsbeitrag <small>Erlös − Sachkosten (Abo und lokale Rechenzeit)</small></dt>' +
-      (w.deckungsbeitrag == null ? leer('kein Erlös')
+      (w.deckungsbeitrag == null ? leer(uebersetze('kein Erlös'))
                                  : mitProzent(w.deckungsbeitrag, w.deckungsbeitrag_prozent)) +
     '<div class="sep"></div>' +
 
     '<dt>Eigene Arbeitszeit <small>' + hrs(t.active_hours) + ' × ' +
         (w.selbstkosten_stunde > 0 ? eur(w.selbstkosten_stunde) : '?') + ' Selbstkosten</small></dt>' +
-      (w.zeitkosten == null ? leer('kein Selbstkostensatz in config.json')
+      (w.zeitkosten == null ? leer(uebersetze('kein Selbstkostensatz in config.json'))
                             : '<dd class="eur">' + eur(w.zeitkosten) + '</dd>') +
     '<dt>Marge <small>nach Sachkosten und eigener Zeit</small></dt>' +
       (w.marge == null
-        ? leer('Selbstkostensatz fehlt')
+        ? leer(uebersetze('Selbstkostensatz fehlt'))
         : '<dd class="' + margeKlasse(w.marge_prozent, w.zielmarge_prozent) + '">' +
             eur(w.marge) +
             (w.marge_prozent != null ? ' <small>(' + nf1.format(w.marge_prozent) + ' %)</small>' : '') +
@@ -2645,8 +3096,8 @@ async function ladeEinstellungen() {
       // tiefer liegen, sonst weist der Browser eine Eingabe ab, die der Server
       // annimmt — und der Nutzer sucht den Fehler bei sich.
       const minAttr = info.aus !== undefined ? Math.min(info.aus, info.min) : info.min;
-      h += '<dt><label for="e-' + feld + '">' + esc(info.label) + '</label>' +
-             '<small>' + esc(E_HILFE[feld] || '') + '</small></dt>' +
+      h += '<dt><label for="e-' + feld + '">' + esc(uebersetze(info.label)) + '</label>' +
+             '<small>' + esc(uebersetze(E_HILFE[feld] || '')) + '</small></dt>' +
            '<dd><input id="e-' + feld + '" class="feld" type="number" inputmode="decimal" ' +
              'step="' + schritt + '" min="' + minAttr + '" max="' + info.max + '" ' +
              'data-feld="' + feld + '" value="' + esc(String(info.wert ?? '')) + '">' +
@@ -2655,15 +3106,15 @@ async function ladeEinstellungen() {
     ziel.innerHTML = h + '</dl>';
     eGeladen = true;
   } catch (err) {
-    ziel.innerHTML = '<div class="empty">Einstellungen nicht geladen: ' + esc(err.message) + '</div>';
+    ziel.innerHTML = '<div class="empty">' + uebersetze('Einstellungen nicht geladen') + ': ' + esc(err.message) + '</div>';
   }
 }
 
 function einheitFuer(feld, waehrung) {
-  if (feld === 'vergleichsFaktor') return '× (0 = aus)';
+  if (feld === 'vergleichsFaktor') return istDE() ? '× (0 = aus)' : '× (0 = off)';
   if (feld === 'zielmargeProzent') return '%';
-  if (feld === 'gapMinutes') return 'Minuten';
-  if (feld === 'lokalZuordnungsfenster') return 'Minuten';
+  if (feld === 'gapMinutes') return istDE() ? 'Minuten' : 'minutes';
+  if (feld === 'lokalZuordnungsfenster') return istDE() ? 'Minuten' : 'minutes';
   if (feld === 'lokalEurProMioTokens') return (waehrung || 'EUR') + ' / Mio. Tokens';
   if (feld === 'usdToEur') return 'EUR je USD';
   if (feld === 'aboPreisMonat') return 'USD';
@@ -2680,7 +3131,7 @@ async function speichereEinstellungen() {
   for (const f of felder) nutzlast[f.dataset.feld] = f.value;
 
   knopf.disabled = true;
-  status.textContent = 'wird gespeichert…';
+  status.textContent = uebersetze('wird gespeichert…');
   status.className = 'saetze-status';
   try {
     const r = await fetch('/api/einstellungen', {
@@ -2689,8 +3140,8 @@ async function speichereEinstellungen() {
       body: JSON.stringify(nutzlast),
     });
     const antwort = await r.json();
-    if (!r.ok || antwort.error) throw new Error(antwort.error || 'Speichern fehlgeschlagen');
-    status.textContent = 'Gespeichert. Die Auswertung rechnet ab sofort damit.';
+    if (!r.ok || antwort.error) throw new Error(antwort.error || uebersetze('Speichern fehlgeschlagen'));
+    status.textContent = uebersetze('Gespeichert. Die Auswertung rechnet ab sofort damit.');
     status.className = 'saetze-status ok';
     // Zahlen neu holen, sonst stehen im Dashboard noch die alten Werte.
     await ladeSummary();
@@ -2730,9 +3181,9 @@ let sdGeladen = false;
 function sdWarnung(fehlt) {
   if (!fehlt || !fehlt.length) return '';
   const namen = {
-    'rechnung.aussteller.name': 'Name',
-    'rechnung.aussteller.anschrift': 'Anschrift',
-    'rechnung.aussteller.steuernummer oder ustIdNr': 'Steuernummer oder USt-IdNr.',
+    'rechnung.aussteller.name': uebersetze('Name'),
+    'rechnung.aussteller.anschrift': uebersetze('Anschrift'),
+    'rechnung.aussteller.steuernummer oder ustIdNr': uebersetze('Steuernummer oder USt-IdNr.'),
   };
   const liste = fehlt.map((f) => namen[f] || f).join(', ');
   return '<p class="hinweis" id="sd-fehlt">Rechnungen lassen sich erst erstellen, wenn ' +
@@ -2763,8 +3214,8 @@ async function ladeStammdaten() {
         eingabe = '<input id="' + id + '" class="feld" type="text" maxlength="' + info.max + '" ' +
                   'data-feld="' + feld + '" data-typ="text" value="' + esc(String(info.wert ?? '')) + '">';
       }
-      h += '<dt><label for="' + id + '">' + esc(info.label) + (info.pflicht ? ' *' : '') + '</label>' +
-             '<small>' + esc(SD_HILFE[feld] || '') + '</small></dt>' +
+      h += '<dt><label for="' + id + '">' + esc(uebersetze(info.label)) + (info.pflicht ? ' *' : '') + '</label>' +
+             '<small>' + esc(uebersetze(SD_HILFE[feld] || '')) + '</small></dt>' +
            '<dd>' + eingabe + '</dd>';
     }
     ziel.innerHTML = h + '</dl>' + sdWarnung(d.fehlt);
@@ -2784,7 +3235,7 @@ function sdSatzSperre() {
   const satz = document.getElementById('sd-ustSatz');
   if (!schalter || !satz) return;
   satz.disabled = schalter.checked;
-  satz.title = schalter.checked ? 'Nach § 19 UStG wird keine Umsatzsteuer ausgewiesen.' : '';
+  satz.title = schalter.checked ? uebersetze('Nach § 19 UStG wird keine Umsatzsteuer ausgewiesen.') : '';
 }
 
 async function speichereStammdaten() {
@@ -2799,7 +3250,7 @@ async function speichereStammdaten() {
   }
 
   knopf.disabled = true;
-  status.textContent = 'wird gespeichert…';
+  status.textContent = uebersetze('wird gespeichert…');
   status.className = 'saetze-status';
   try {
     const r = await fetch('/api/stammdaten', {
@@ -2808,12 +3259,12 @@ async function speichereStammdaten() {
       body: JSON.stringify(nutzlast),
     });
     const antwort = await r.json();
-    if (!r.ok || antwort.error) throw new Error(antwort.error || 'Speichern fehlgeschlagen');
+    if (!r.ok || antwort.error) throw new Error(antwort.error || uebersetze('Speichern fehlgeschlagen'));
 
     const fehlt = antwort.fehlt || [];
     status.textContent = fehlt.length
       ? 'Gespeichert. Für Rechnungen fehlen noch Pflichtangaben.'
-      : 'Gespeichert. Die Stammdaten sind vollständig.';
+      : uebersetze('Gespeichert. Die Stammdaten sind vollständig.');
     status.className = 'saetze-status ' + (fehlt.length ? 'err' : 'ok');
 
     const alt = document.getElementById('sd-fehlt');
@@ -2850,20 +3301,20 @@ function aStatus(text, art, wo) {
 function zeichnePosten() {
   const ziel = document.getElementById('a-posten');
   if (!aZustand.posten.length) {
-    ziel.innerHTML = '<div class="empty">Noch keine Position. Über den Knopf unten hinzufügen.</div>';
+    ziel.innerHTML = '<div class="empty">' + uebersetze('Noch keine Position. Über den Knopf unten hinzufügen.') + '</div>';
     aSummeAktualisieren();
     return;
   }
   let h = '<div class="tablewrap"><table class="saetze"><thead><tr>' +
-    '<th>Leistung</th><th>Art</th><th>Stunden</th><th>Satz EUR</th><th>Betrag</th><th></th>' +
+    '<th>' + uebersetze('Leistung') + '</th><th>' + uebersetze('Art') + '</th><th>' + uebersetze('Stunden') + '</th><th>' + uebersetze('Satz EUR') + '</th><th>' + uebersetze('Betrag') + '</th><th></th>' +
     '</tr></thead><tbody>';
   aZustand.posten.forEach((p, i) => {
     const pauschal = p.typ === 'pauschal';
     h += '<tr data-i="' + i + '">' +
       '<td><input class="feld p-bez" type="text" maxlength="200" value="' + esc(p.bezeichnung) + '" placeholder="z. B. Konzept und Umsetzung"></td>' +
       '<td><select class="feld p-typ" aria-label="Abrechnungsart">' +
-        '<option value="stunden"' + (pauschal ? '' : ' selected') + '>Stunden</option>' +
-        '<option value="pauschal"' + (pauschal ? ' selected' : '') + '>Pauschal</option>' +
+        '<option value="stunden"' + (pauschal ? '' : ' selected') + '>' + uebersetze('Stunden') + '</option>' +
+        '<option value="pauschal"' + (pauschal ? ' selected' : '') + '>' + uebersetze('Pauschal') + '</option>' +
       '</select></td>' +
       // Bei einer Pauschale steht der Festpreis in der Betragsspalte; Stunden
       // und Satz entfallen, statt mit unbenutzbaren Feldern dazustehen.
@@ -2939,7 +3390,7 @@ function leereAngebotsVorgaenge() {
   aZustand.gewaehlt.clear();
   document.getElementById('a-tickets').innerHTML =
     '<div class="empty">Noch keine Vorgänge geladen.</div>';
-  document.getElementById('a-laden').textContent = 'Vorgänge laden';
+  document.getElementById('a-laden').textContent = uebersetze('Vorgänge laden');
   aSummeAktualisieren();
 }
 
@@ -2951,7 +3402,7 @@ async function ladeAngebotsVorgaenge() {
   if (!von || !bis) { ziel.innerHTML = '<div class="empty">Bitte beide Datumsfelder ausfüllen.</div>'; return; }
   if (von > bis) { ziel.innerHTML = '<div class="empty">Das Startdatum liegt nach dem Enddatum.</div>'; return; }
 
-  ziel.innerHTML = '<div class="empty">wird geladen…</div>';
+  ziel.innerHTML = '<div class="empty">' + uebersetze('wird geladen…') + '</div>';
   aZustand.gewaehlt.clear();
   try {
     const d = await hole('/api/summary?from=' + von + '&to=' + bis);
@@ -2965,10 +3416,10 @@ async function ladeAngebotsVorgaenge() {
     aSummeAktualisieren();
     return;
   }
-  document.getElementById('a-laden').textContent = 'Vorgänge ausblenden';
+  document.getElementById('a-laden').textContent = uebersetze('Vorgänge ausblenden');
 
   let h = '<div class="tablewrap"><table class="rechnung"><thead><tr>' +
-    '<th><input type="checkbox" id="a-alle"></th><th>Vorgang</th><th>Stunden</th><th>Betrag EUR</th>' +
+    '<th><input type="checkbox" id="a-alle"></th><th>' + uebersetze('Vorgang') + '</th><th>' + uebersetze('Stunden') + '</th><th>' + uebersetze('Betrag EUR') + '</th>' +
     '</tr></thead><tbody>';
   for (const t of aZustand.zeilen) {
     h += '<tr><td><input type="checkbox" data-ticket="' + esc(t.ticket) + '"></td>' +
@@ -3000,7 +3451,7 @@ async function ladeAngebotsVorgaenge() {
 async function erstelleAngebot() {
   const knopf = document.getElementById('a-erstellen');
   const name = document.getElementById('a-name').value.trim();
-  if (!name) { aStatus('Der Empfänger braucht mindestens einen Namen.', 'err'); return; }
+  if (!name) { aStatus(uebersetze('Der Empfänger braucht mindestens einen Namen.'), 'err'); return; }
 
   // Positionen mit leerer Bezeichnung fallen unten raus. Ohne diese Pruefung
   // ginge ein Angebot ohne jede Position wortlos an den Server.
@@ -3008,7 +3459,7 @@ async function erstelleAngebot() {
   if (!echtePosten.length && !aZustand.gewaehlt.size) {
     aStatus(aZustand.posten.length
       ? 'Jede Position braucht eine Bezeichnung.'
-      : 'Ein Angebot braucht mindestens eine Position oder einen ausgewählten Vorgang.', 'err');
+      : uebersetze('Ein Angebot braucht mindestens eine Position oder einen ausgewählten Vorgang.'), 'err');
     return;
   }
 
@@ -3034,14 +3485,14 @@ async function erstelleAngebot() {
   }
 
   knopf.disabled = true;
-  aStatus('wird erstellt…');
+  aStatus(uebersetze('wird erstellt…'));
   try {
     const r = await fetch('/api/angebot', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify(nutzlast),
     });
     const a = await r.json();
-    if (!r.ok || a.error) throw new Error(a.error || 'Erstellen fehlgeschlagen');
+    if (!r.ok || a.error) throw new Error(a.error || uebersetze('Erstellen fehlgeschlagen'));
     aStatus('Angebot ' + a.nr + ' erstellt (' + eur(a.brutto_eur) + ').', 'ok');
     // Vollstaendig leeren. Bleibt der vorige Empfaenger stehen, geht das
     // naechste Angebot an die falsche Anschrift.
@@ -3055,7 +3506,7 @@ async function erstelleAngebot() {
     zeichnePosten();
     ladeAngebote();
   } catch (err) {
-    aStatus('Nicht erstellt: ' + err.message, 'err');
+    aStatus(uebersetze('Nicht erstellt: ') + err.message, 'err');
   } finally {
     knopf.disabled = false;
   }
@@ -3071,11 +3522,11 @@ async function ladeAngebote() {
     return;
   }
   const liste = d.angebote || [];
-  if (!liste.length) { ziel.innerHTML = '<div class="empty">Noch kein Angebot erstellt.</div>'; return; }
+  if (!liste.length) { ziel.innerHTML = '<div class="empty">' + uebersetze('Noch kein Angebot erstellt.') + '</div>'; return; }
 
   let h = '<div class="tablewrap"><table><thead><tr>' +
-    '<th>Nummer</th><th>Datum</th><th>Gültig bis</th><th>Empfänger</th>' +
-    '<th>Betrag</th><th>Status</th><th></th></tr></thead><tbody>';
+    '<th>' + uebersetze('Nummer') + '</th><th>' + uebersetze('Datum') + '</th><th>' + uebersetze('Gültig bis') + '</th><th>' + uebersetze('Empfänger') + '</th>' +
+    '<th>' + uebersetze('Betrag') + '</th><th>' + uebersetze('Status') + '</th><th></th></tr></thead><tbody>';
   for (const a of liste) {
     // Nur Abgelehntes wird durchgestrichen. Ein angenommenes Angebot ist der
     // Normalfall und muss lesbar bleiben — daraus entsteht ja die Rechnung.
@@ -3137,14 +3588,14 @@ async function aAktion(knopf, pfad, nutzlast, meldung, wo) {
       body: JSON.stringify(nutzlast),
     });
     const a = await r.json();
-    if (!r.ok || a.error) throw new Error(a.error || 'Aktion fehlgeschlagen');
+    if (!r.ok || a.error) throw new Error(a.error || uebersetze('Aktion fehlgeschlagen'));
     aStatus(meldung(a), 'ok', wo);
     ladeAngebote();
     ladeRechnungen();
     // Eine Annahme kann aus einem Lead einen Kunden gemacht haben.
     ladeKontakte();
   } catch (err) {
-    aStatus('Fehlgeschlagen: ' + err.message, 'err', wo);
+    aStatus(uebersetze('Fehlgeschlagen: ') + err.message, 'err', wo);
     knopf.disabled = false;
     knopf.textContent = alt;
   }
@@ -3206,7 +3657,7 @@ async function ladeProjektnamen() {
       .map((p) => p.project).filter(Boolean).sort();
   } catch {
     kProjekte.alle = [];
-    kStatus('Projektliste konnte nicht geladen werden.', 'fehler');
+    kStatus(uebersetze('Projektliste konnte nicht geladen werden.'), 'fehler');
   }
   zeichneProjektzuordnung();
 }
@@ -3242,8 +3693,8 @@ function zeichneProjektzuordnung() {
       ? namen.map((n) => '<li role="option" data-projekt="' + esc(n) + '">' + esc(n) + '</li>').join('')
       : '<li class="leer">' + esc(leerText) + '</li>';
   };
-  zeichne(frei, offen, vergeben.size ? 'Alle übrigen Projekte sind vergeben.' : 'Keine Projekte gefunden.');
-  zeichne(zug, kProjekte.gewaehlt, 'Noch kein Projekt zugeordnet.');
+  zeichne(frei, offen, vergeben.size ? uebersetze('Alle übrigen Projekte sind vergeben.') : 'Keine Projekte gefunden.');
+  zeichne(zug, kProjekte.gewaehlt, uebersetze('Noch kein Projekt zugeordnet.'));
 
   frei.querySelectorAll('li[data-projekt]').forEach((li) => {
     li.addEventListener('click', () => {
@@ -3280,7 +3731,7 @@ function zeichneKontakte() {
   if (!zeilen.length) {
     ziel.innerHTML = '<div class="empty">' + esc(kZustand.liste.length
       ? 'Kein Kontakt passt zu Suche und Filter.'
-      : 'Noch kein Kontakt erfasst.') + '</div>';
+      : uebersetze('Noch kein Kontakt erfasst.')) + '</div>';
     zeichneKontaktDetail();
     return;
   }
@@ -3292,7 +3743,7 @@ function zeichneKontakte() {
     h += '<button type="button" class="k-zeile" data-k="' + k.id + '"' +
       (k.id === kZustand.gewaehlt ? ' aria-current="true"' : '') + '>' +
       '<span class="k-firma">' + esc(k.firma) +
-        (k.status === 'kunde' ? ' <span class="k-marke kunde">Kunde</span>' : '') + '</span>' +
+        (k.status === 'kunde' ? ' <span class="k-marke kunde">' + uebersetze('Kunde') + '</span>' : '') + '</span>' +
       '<span class="k-unter">' + esc(unter || '–') + '</span>' +
     '</button>';
   }
@@ -3311,7 +3762,7 @@ function zeichneKontaktDetail() {
   const ziel = document.getElementById('k-detail');
   const k = kZustand.liste.find((x) => x.id === kZustand.gewaehlt);
   if (!k) {
-    ziel.innerHTML = '<div class="empty">Links einen Kontakt wählen.</div>';
+    ziel.innerHTML = '<div class="empty">' + uebersetze('Links einen Kontakt wählen.') + '</div>';
     return;
   }
   const person = [k.vorname, k.nachname].filter(Boolean).join(' ');
@@ -3324,15 +3775,15 @@ function zeichneKontaktDetail() {
   ziel.innerHTML =
     '<h3>' + esc(k.firma) + '</h3>' +
     '<span class="k-marke' + (k.status === 'kunde' ? ' kunde' : '') + '">' +
-      (k.status === 'kunde' ? 'Kunde' : 'Lead') + '</span>' +
+      (k.status === 'kunde' ? uebersetze('Kunde') : uebersetze('Lead')) + '</span>' +
     '<dl>' +
-      zeile('Ansprechpartner', person) +
-      zeile('E-Mail', k.email) +
-      zeile('Anschrift', anschrift) +
-      zeile('Steuernummer', k.steuernummer) +
-      zeile('USt-IdNr.', k.ustIdNr) +
+      zeile(uebersetze('Ansprechpartner'), person) +
+      zeile(uebersetze('E-Mail'), k.email) +
+      zeile(uebersetze('Anschrift'), anschrift) +
+      zeile(uebersetze('Steuernummer'), k.steuernummer) +
+      zeile(uebersetze('USt-IdNr.'), k.ustIdNr) +
       zeile('Projekte', (k.projekte || []).join(', ')) +
-      zeile('Notiz', k.notiz) +
+      zeile(uebersetze('Notiz'), k.notiz) +
     '</dl>' +
     '<div class="r-aktionen" style="margin-top:16px">' +
       '<button class="btn" data-k="' + k.id + '" data-tun="bearbeiten">Bearbeiten</button>' +
@@ -3357,8 +3808,8 @@ async function kontaktAktion(knopf, id, tun) {
     }
     // Die eigenen Projekte nach rechts; die Namensliste steht bereits.
     projektauswahlSetzen(k.projekte);
-    document.getElementById('k-titel').textContent = 'Kontakt bearbeiten';
-    document.getElementById('k-speichern').textContent = 'Änderungen speichern';
+    document.getElementById('k-titel').textContent = uebersetze('Kontakt bearbeiten');
+    document.getElementById('k-speichern').textContent = uebersetze('Änderungen speichern');
     document.getElementById('k-abbrechen').hidden = false;
     kStatus('');
     document.getElementById('k-firma').focus();
@@ -3393,8 +3844,8 @@ function kFormularZuruecksetzen() {
   kZustand.bearbeitet = null;
   for (const f of K_FELDER) document.getElementById('k-' + f).value = f === 'status' ? 'lead' : '';
   projektauswahlSetzen([]);
-  document.getElementById('k-titel').textContent = 'Neuer Kontakt';
-  document.getElementById('k-speichern').textContent = 'Kontakt anlegen';
+  document.getElementById('k-titel').textContent = uebersetze('Neuer Kontakt');
+  document.getElementById('k-speichern').textContent = uebersetze('Kontakt anlegen');
   document.getElementById('k-abbrechen').hidden = true;
 }
 
@@ -3409,7 +3860,7 @@ async function speichereKontakt() {
   nutzlast.projekte = projektauswahlLesen();
 
   knopf.disabled = true;
-  kStatus('wird gespeichert…');
+  kStatus(uebersetze('wird gespeichert…'));
   try {
     const d = await sende('/api/kontakt', nutzlast);
     kStatus((d.kontakt ? d.kontakt.firma : 'Kontakt') + ' gespeichert.', 'ok');
@@ -3500,7 +3951,7 @@ function kontaktPicker(feldId, anschriftId, merkeId) {
 
     liste.innerHTML = treffer.map((k) => {
       const person = [k.vorname, k.nachname].filter(Boolean).join(' ');
-      const zusatz = [person, k.status === 'kunde' ? 'Kunde' : 'Lead'].filter(Boolean).join(' · ');
+      const zusatz = [person, k.status === 'kunde' ? uebersetze('Kunde') : uebersetze('Lead')].filter(Boolean).join(' · ');
       return '<li role="option" data-id="' + k.id + '">' + esc(k.firma) +
         '<small>' + esc(zusatz) + '</small></li>';
     }).join('');
@@ -3569,7 +4020,7 @@ async function ladeVorlagen() {
 // Auswahl im Angebotsformular: fuellt eine neue Zeile vor und springt zurueck.
 function zeichneVorlagenAuswahl() {
   const sel = document.getElementById('a-vorlage');
-  sel.innerHTML = '<option value="">Vorlage wählen…</option>' +
+  sel.innerHTML = '<option value="">' + uebersetze('Vorlage wählen…') + '</option>' +
     vListe.map((v) => '<option value="' + v.id + '">' + esc(v.bezeichnung) + '</option>').join('');
   sel.disabled = vListe.length === 0;
 }
@@ -3578,11 +4029,11 @@ function zeichneVorlagenListe() {
   const ziel = document.getElementById('v-liste');
   if (!ziel) return;
   if (!vListe.length) {
-    ziel.innerHTML = '<div class="empty">Noch keine Vorlage. Wiederkehrende Leistungen hier einmal anlegen.</div>';
+    ziel.innerHTML = '<div class="empty">' + uebersetze('Noch keine Vorlage. Wiederkehrende Leistungen hier einmal anlegen.') + '</div>';
     return;
   }
   let h = '<div class="tablewrap"><table class="saetze"><thead><tr>' +
-    '<th>Bezeichnung</th><th>Satz EUR</th><th></th></tr></thead><tbody>';
+    '<th>' + uebersetze('Bezeichnung') + '</th><th>' + uebersetze('Satz EUR') + '</th><th></th></tr></thead><tbody>';
   for (const v of vListe) {
     h += '<tr data-v="' + v.id + '">' +
       '<td><input class="feld v-bez" type="text" maxlength="200" value="' + esc(v.bezeichnung) + '"></td>' +
@@ -3602,7 +4053,7 @@ function zeichneVorlagenListe() {
         await sende('/api/vorlage', {
           id, bezeichnung: tr.querySelector('.v-bez').value, satz: tr.querySelector('.v-satz').value,
         });
-        vStatus('Vorlage gespeichert.', 'ok');
+        vStatus(uebersetze('Vorlage gespeichert.'), 'ok');
         await ladeVorlagen();
       } catch (err) {
         vStatus(err.message, 'fehler');
@@ -3613,7 +4064,7 @@ function zeichneVorlagenListe() {
       ev.target.disabled = true;
       try {
         await sende('/api/vorlage-loeschen', { id });
-        vStatus('Vorlage gelöscht.', 'ok');
+        vStatus(uebersetze('Vorlage gelöscht.'), 'ok');
         await ladeVorlagen();
       } catch (err) {
         vStatus(err.message, 'fehler');
@@ -3631,7 +4082,7 @@ document.getElementById('v-anlegen').addEventListener('click', async (ev) => {
     await sende('/api/vorlage', { bezeichnung: bez.value, satz: satz.value });
     bez.value = '';
     satz.value = '';
-    vStatus('Vorlage angelegt.', 'ok');
+    vStatus(uebersetze('Vorlage angelegt.'), 'ok');
     await ladeVorlagen();
   } catch (err) {
     vStatus(err.message, 'fehler');
@@ -3658,6 +4109,22 @@ zeichnePosten();
 /* =========================================================
    Start + automatische Aktualisierung
    ========================================================= */
+// Sprache: gespeicherte Wahl anwenden, bevor die ersten Daten eintreffen.
+// Sonst blitzt die Oberflaeche einmal deutsch auf.
+for (const b of document.querySelectorAll('[data-sprache]')) {
+  b.addEventListener('click', () => setzeSprache(b.getAttribute('data-sprache')));
+}
+function markiereSprachknopf() {
+  for (const b of document.querySelectorAll('[data-sprache]')) {
+    b.setAttribute('aria-pressed', b.getAttribute('data-sprache') === SPRACHE ? 'true' : 'false');
+  }
+}
+// setzeSprache zeichnet neu; beim Start gibt es noch nichts zu zeichnen,
+// deshalb hier nur die Textersetzung und die Knopfmarkierung.
+document.documentElement.lang = SPRACHE;
+uebersetzeHtml();
+markiereSprachknopf();
+
 ladeLive();
 ladeSummary();
 setInterval(ladeLive, 30_000);
@@ -3708,7 +4175,7 @@ async function ladeVorgaenge() {
     return;
   }
 
-  ziel.innerHTML = '<div class="empty">wird geladen…</div>';
+  ziel.innerHTML = '<div class="empty">' + uebersetze('wird geladen…') + '</div>';
   rZustand.gewaehlt.clear();
   rZustand.von = von;
   try {
@@ -3734,7 +4201,7 @@ function fuelleKundenauswahl() {
   if (!feld) return;
   const merk = feld.value;
   const mitProjekt = kZustand.liste.filter((k) => (k.projekte || []).length);
-  feld.innerHTML = '<option value="">alle Vorgänge</option>' +
+  feld.innerHTML = '<option value="">' + uebersetze('alle Vorgänge') + '</option>' +
     mitProjekt.map((k) => '<option value="' + k.id + '">' + esc(k.firma) + '</option>').join('');
   feld.value = merk;
   // Der zuvor gewaehlte Kunde kann inzwischen geloescht sein.
@@ -3748,7 +4215,7 @@ function zeichneVorgaenge() {
   const von = rZustand.von;
 
   if (rZustand.zeilen.length === 0) {
-    ziel.innerHTML = '<div class="empty">Keine abrechenbaren Vorgänge in diesem Zeitraum.</div>';
+    ziel.innerHTML = '<div class="empty">' + uebersetze('Keine abrechenbaren Vorgänge in diesem Zeitraum.') + '</div>';
     document.getElementById('r-formular').hidden = true;
     return;
   }
@@ -3775,8 +4242,8 @@ function zeichneVorgaenge() {
 
   let h = '<div class="tablewrap"><table class="rechnung"><thead><tr>' +
     '<th><input type="checkbox" id="r-alle" title="Alle auswählen"></th>' +
-    '<th>Vorgang</th><th>Stunden</th><th>Satz</th>' +
-    '<th>Rabatt</th><th>Betrag</th><th>Zeitraum</th></tr></thead><tbody>';
+    '<th>' + uebersetze('Vorgang') + '</th><th>' + uebersetze('Stunden') + '</th><th>' + uebersetze('Satz') + '</th>' +
+    '<th>' + uebersetze('Rabatt') + '</th><th>' + uebersetze('Betrag') + '</th><th>' + uebersetze('Zeitraum') + '</th></tr></thead><tbody>';
   for (const t of rZustand.zeilen) {
     const schnitt = t.first_day <= von;
     const key = rKey(t);
@@ -3805,7 +4272,7 @@ function zeichneVorgaenge() {
   if (ohneKunde.length) {
     h += '<div class="r-warnung">Ohne Kundenzuordnung: ' + ohneKunde.map(esc).join(', ') +
       '. Diese Arbeit lässt sich abrechnen, wird aber von keiner Kundenauswahl ' +
-      'erfasst — im Reiter <b>Kontakte</b> das Projekt beim Kunden eintragen.</div>';
+      'erfasst — im Reiter <b>' + uebersetze('Kontakte') + '</b> das Projekt beim Kunden eintragen.</div>';
   }
   if (angeschnitten.length) {
     h += '<div class="r-warnung">Bei ' + angeschnitten.map(esc).join(', ') +
@@ -3854,7 +4321,7 @@ function rSummeAktualisieren() {
   const stunden = gewaehlt.reduce((s, t) => s + (t.active_hours || 0), 0);
   const el = document.getElementById('r-summe');
   el.textContent = gewaehlt.length === 0
-    ? 'Noch kein Vorgang ausgewählt.'
+    ? uebersetze('Noch kein Vorgang ausgewählt.')
     : `${gewaehlt.length} Vorgang/Vorgänge · ${hrs(stunden)} · ${eur(summe)}`;
   document.getElementById('r-erstellen').disabled = gewaehlt.length === 0;
 }
@@ -3875,13 +4342,13 @@ async function erstelleRechnung() {
     kontaktId: rZustand.kontaktId || undefined,
   };
   if (!nutzlast.empfaenger.name) {
-    rStatus('Bitte den Namen des Empfängers eintragen.', 'err');
+    rStatus(uebersetze('Bitte den Namen des Empfängers eintragen.'), 'err');
     document.getElementById('r-name').focus();
     return;
   }
 
   knopf.disabled = true;
-  rStatus('wird erstellt…');
+  rStatus(uebersetze('wird erstellt…'));
   try {
     const r = await fetch('/api/rechnung', {
       method: 'POST',
@@ -3889,7 +4356,7 @@ async function erstelleRechnung() {
       body: JSON.stringify(nutzlast),
     });
     const a = await r.json();
-    if (!r.ok || a.error) throw new Error(a.error || 'Erstellen fehlgeschlagen');
+    if (!r.ok || a.error) throw new Error(a.error || uebersetze('Erstellen fehlgeschlagen'));
     rStatus('Rechnung ' + a.nr + ' erstellt (' + eur(a.brutto_eur) + ').', 'ok');
     rZustand.gewaehlt.clear();
     rZustand.kontaktId = null;
@@ -3901,7 +4368,7 @@ async function erstelleRechnung() {
     rSummeAktualisieren();
     ladeRechnungen();
   } catch (err) {
-    rStatus('Nicht erstellt: ' + err.message, 'err');
+    rStatus(uebersetze('Nicht erstellt: ') + err.message, 'err');
   } finally {
     knopf.disabled = false;
   }
@@ -3926,7 +4393,7 @@ async function ladeAbrechenbareAngebote() {
   if (!liste.length) { ziel.innerHTML = ''; return; }
 
   let h = '<div class="tablewrap"><table><thead><tr>' +
-    '<th>Nummer</th><th>Datum</th><th>Empfänger</th><th>Betrag</th><th></th>' +
+    '<th>' + uebersetze('Nummer') + '</th><th>' + uebersetze('Datum') + '</th><th>' + uebersetze('Empfänger') + '</th><th>' + uebersetze('Betrag') + '</th><th></th>' +
     '</tr></thead><tbody>';
   for (const a of liste) {
     h += '<tr data-nr="' + esc(a.nr) + '">' +
@@ -3963,13 +4430,13 @@ async function ladeRechnungen() {
   }
   const liste = d.rechnungen || [];
   if (liste.length === 0) {
-    ziel.innerHTML = '<div class="empty">Noch keine Rechnung gestellt.</div>';
+    ziel.innerHTML = '<div class="empty">' + uebersetze('Noch keine Rechnung gestellt.') + '</div>';
     return;
   }
 
   let h = '<div class="tablewrap"><table><thead><tr>' +
-    '<th>Nummer</th><th>Datum</th><th>Empfänger</th><th>Betrag</th>' +
-    '<th>Status</th><th></th></tr></thead><tbody>';
+    '<th>' + uebersetze('Nummer') + '</th><th>' + uebersetze('Datum') + '</th><th>' + uebersetze('Empfänger') + '</th><th>' + uebersetze('Betrag') + '</th>' +
+    '<th>' + uebersetze('Status') + '</th><th></th></tr></thead><tbody>';
   for (const r of liste) {
     h += '<tr data-nr="' + esc(r.nr) + '"' + (r.status === 'storniert' ? ' class="storniert"' : '') + '>' +
       '<td>' + esc(r.nr) + '</td>' +
@@ -4024,12 +4491,12 @@ async function rAktion(knopf, pfad, nutzlast, meldung, danach) {
       body: JSON.stringify(nutzlast),
     });
     const a = await r.json();
-    if (!r.ok || a.error) throw new Error(a.error || 'Aktion fehlgeschlagen');
+    if (!r.ok || a.error) throw new Error(a.error || uebersetze('Aktion fehlgeschlagen'));
     rStatus(meldung(a), 'ok');
     if (danach) danach(a);
     ladeRechnungen();
   } catch (err) {
-    rStatus('Fehlgeschlagen: ' + err.message, 'err');
+    rStatus(uebersetze('Fehlgeschlagen: ') + err.message, 'err');
     knopf.disabled = false;
     knopf.textContent = alt;
   }

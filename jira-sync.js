@@ -101,7 +101,7 @@ function buildComment(t, models) {
   const content = [
     {
       type: 'paragraph',
-      content: [{ type: 'text', text: 'Token-Ledger', marks: [{ type: 'strong' }] }],
+      content: [{ type: 'text', text: 'devbill', marks: [{ type: 'strong' }] }],
     },
     {
       type: 'bulletList',
@@ -315,7 +315,7 @@ function nodataKommentar(startDatum) {
       content: [{
         type: 'text',
         text:
-          'Token-Ledger: keine Token-Daten vorhanden. Die Arbeit an diesem ' +
+          'devbill: keine Token-Daten vorhanden. Die Arbeit an diesem ' +
           `Vorgang liegt vor Beginn der Aufzeichnung (${startDatum}); die ` +
           'Protokolle von Claude Code waren zu diesem Zeitpunkt bereits ' +
           `aufgeraeumt. (${MARKER_NODATA})`,

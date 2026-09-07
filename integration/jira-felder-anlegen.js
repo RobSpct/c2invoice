@@ -17,13 +17,13 @@ const SUCHER_ZAHL = 'com.atlassian.jira.plugin.system.customfieldtypes:exactnumb
 
 const FELDER = [
   { schluessel: 'kosten_usd', name: 'Token-Kosten USD',
-    beschreibung: 'API-Gegenwert der verbrauchten Tokens, einschliesslich begleitender Werkzeuge. Automatisch vom Token-Ledger gepflegt.' },
+    beschreibung: 'API-Gegenwert der verbrauchten Tokens, einschliesslich begleitender Werkzeuge. Automatisch vom devbill gepflegt.' },
   { schluessel: 'tokens', name: 'Tokens gesamt',
-    beschreibung: 'Verbrauchte Tokens insgesamt (Arbeitssitzung plus Werkzeuge). Automatisch vom Token-Ledger gepflegt.' },
+    beschreibung: 'Verbrauchte Tokens insgesamt (Arbeitssitzung plus Werkzeuge). Automatisch vom devbill gepflegt.' },
   { schluessel: 'stunden', name: 'Arbeitszeit Stunden',
-    beschreibung: 'Aktive Arbeitszeit ohne Pausen. Automatisch vom Token-Ledger gepflegt.' },
+    beschreibung: 'Aktive Arbeitszeit ohne Pausen. Automatisch vom devbill gepflegt.' },
   { schluessel: 'arbeitswert_eur', name: 'Arbeitswert EUR',
-    beschreibung: 'Arbeitszeit multipliziert mit dem Stundensatz des Projekts. Automatisch vom Token-Ledger gepflegt.' },
+    beschreibung: 'Arbeitszeit multipliziert mit dem Stundensatz des Projekts. Automatisch vom devbill gepflegt.' },
 ];
 
 function auth() {

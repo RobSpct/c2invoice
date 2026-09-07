@@ -2617,7 +2617,7 @@ function testJsonlDirTilde() {
 }
 
 async function main() {
-  console.log('Token-Ledger Selbstpruefung\n');
+  console.log('devbill Selbstpruefung\n');
   test('Dedup: Kopien desselben Requests zaehlen einmal', testDedup);
   test('Cache-Tokens werden nach 5m/1h getrennt und gehen nicht verloren', testUsageSplit);
   test('Ticket wird aus dem Branch gelesen', testTicket);

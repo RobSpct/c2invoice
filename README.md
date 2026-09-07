@@ -26,7 +26,7 @@ Live, while you work — sessions can be booked onto a job by hand:
 
 ![Live tab: running sessions with tokens, cost and a field to assign a job](docs/live.png)
 
-*Screenshots use anonymised project and job names; the interface is currently German.*
+*Screenshots use anonymised project and job names.*
 
 ## Why this exists
 
@@ -156,9 +156,14 @@ rather than replacing it.
 
 ## Language
 
-The user interface, configuration comments and source comments are **German**.
-This README is the English entry point. UI translation is on the roadmap —
-contributions welcome.
+The interface speaks **English and German**. Pick one under Settings; the
+choice is remembered per browser, and numbers and dates follow it.
+
+The **invoice document stays German** on purpose. German invoicing law ties
+its mandatory fields to German terms, so a translated invoice would not be
+legally sound. Only the interface is translated.
+
+Source comments and configuration comments remain German.
 
 ## Optional: run it in the background (Windows)
 
@@ -168,7 +173,6 @@ without a console window. Both are optional; `npm start` is enough.
 
 ## Roadmap
 
-- English user interface
 - Linear and Trello sync adapters
 - Partial billing of long-running jobs across month boundaries
 
