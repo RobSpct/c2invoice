@@ -9,6 +9,14 @@ Open an issue first for anything beyond a bug fix. The tool computes numbers
 that end up on invoices, so a change that alters a calculation needs a reason
 written down somewhere.
 
+**This repository is published from a private working repository.** Everything
+except `README.md`, `LICENSE`, `package.json` and `CLAUDE.md` is overwritten on
+the next sync, so a pull request is read as a proposal rather than merged as a
+commit: accepted changes are applied upstream and arrive here with the
+following sync, and you are credited in the release notes. Nothing is lost, but
+your commit will not appear in this repository's history. Say so in the pull
+request if that matters to you.
+
 ## Ground rules
 
 **No dependencies.** The tool runs on Node's standard library alone, including
@@ -52,10 +60,15 @@ Trello are the obvious next candidates.
 
 ## Language
 
-Code, comments and the user interface are German; the README is English.
-Translating the interface is a welcome contribution and is tracked as an open
-item. Please keep new comments in the language of the file you are editing so
-the codebase stays consistent.
+The interface speaks English and German; source comments and configuration
+comments are German, and the README is English. New interface strings go
+through the translation dictionary rather than being written inline, so both
+languages stay complete. Please keep new comments in the language of the file
+you are editing so the codebase stays consistent.
+
+The invoice document itself stays German on purpose: German invoicing law ties
+its mandatory fields to German terms, so a translated invoice would not be
+legally sound.
 
 ## Invoicing is German law
 
