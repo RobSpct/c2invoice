@@ -14,6 +14,20 @@ tokens**. Everything runs locally on `127.0.0.1`; nothing is uploaded anywhere.
 session logs → active working time → hourly value → margin → invoice PDF
 ```
 
+## What it looks like
+
+![Overview: spend over time, split by model, and per project with active hours and billable value](docs/overview.png)
+
+Per job — active hours and billable value next to what the API would have cost:
+
+![Jobs table: hours, API equivalent and billable value per job](docs/jobs.png)
+
+Live, while you work — sessions can be booked onto a job by hand:
+
+![Live tab: running sessions with tokens, cost and a field to assign a job](docs/live.png)
+
+*Screenshots use anonymised project and job names; the interface is currently German.*
+
 ## Why this exists
 
 Every tool in this space (ccusage, claude-code-templates, ccgauge, sniffly,
@@ -44,13 +58,10 @@ npm start                              # http://127.0.0.1:4747
 Requires **Node 22.5 or newer** (uses the built-in `node:sqlite`), tested on
 Node 24. **Zero dependencies** — there is no `npm install` step.
 
-The only setting you must provide is `jsonlDir`, pointing at your Claude Code
-session files:
-
-| OS | Path |
-|---|---|
-| Windows | `%USERPROFILE%\.claude\projects` |
-| macOS / Linux | `~/.claude/projects` |
+Session files are read from `~/.claude/projects` by default. That path works
+on every platform, so there is normally nothing to set. If your logs live
+elsewhere, point `jsonlDir` at them. If the directory cannot be found, the
+server says so on startup instead of quietly reporting zeros.
 
 Everything else has working defaults. Issuing invoices additionally requires
 your business details under `rechnung.aussteller` — until those are filled in,
@@ -159,8 +170,14 @@ without a console window. Both are optional; `npm start` is enough.
 
 - English user interface
 - Linear and Trello sync adapters
-- Screenshots in this README
 - Partial billing of long-running jobs across month boundaries
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Short version: no dependencies, every
+calculation gets a check that actually fails when the logic breaks, and tests
+must not depend on your own `config.json`. Tracker adapters are the most
+useful thing to contribute right now.
 
 ## License
 

@@ -66,8 +66,8 @@
     "chromePfad": ""
   },
   "port": 4747,
-  "//jsonlDir": "Verzeichnis mit den Claude-Code-Sitzungsdateien (*.jsonl). Unter Windows meist %USERPROFILE%\\.claude\\projects, unter macOS/Linux ~/.claude/projects.",
-  "jsonlDir": "C:\\Users\\DEIN_BENUTZER\\.claude\\projects",
+  "//jsonlDir": "Verzeichnis mit den Claude-Code-Sitzungsdateien (*.jsonl). Der Standard passt auf allen Systemen: das Tildezeichen wird zum Benutzerverzeichnis aufgeloest. Nur aendern, wenn die Logs woanders liegen.",
+  "jsonlDir": "~/.claude/projects",
   "//ticketRegex": "Erkennt Ticket-Schluessel in Branch- und Ordnernamen. Voreinstellung passt auf Jira-Schluessel wie ABC-123.",
   "ticketRegex": "([A-Z][A-Z0-9]{1,9}-\\d+)",
   "//jira": "Optional. enabled=false laesst den Ledger ohne Jira laufen. Das API-Token steht NIE hier, sondern in der unter tokenEnvVar genannten Umgebungsvariablen; der doppler-Block ist nur eine bequeme Quelle dafuer und kann entfallen. Die customfield-IDs sind je Jira-Instanz verschieden — integration/jira-felder-anlegen.js legt sie an und nennt die Nummern.",

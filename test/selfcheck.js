@@ -6,6 +6,16 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
+// Die Module lesen config.json beim Laden. Fehlt sie, bricht schon der Import
+// mit MODULE_NOT_FOUND ab — das sieht nach einem kaputten Test aus, ist aber
+// ein vergessener Einrichtungsschritt. Lieber hier sagen, was zu tun ist.
+if (!fs.existsSync(path.join(__dirname, '..', 'config.json'))) {
+  console.error('config.json fehlt. Zum Einrichten die Vorlage kopieren:\n'
+    + '  copy config.example.json config.json   (Windows)\n'
+    + '  cp config.example.json config.json     (macOS/Linux)');
+  process.exit(1);
+}
+
 const dbmod = require('../db');
 const ingest = require('../ingest');
 const metrics = require('../metrics');
@@ -2581,6 +2591,31 @@ async function testCodeStandKennung() {
   }
 }
 
+// --- Logverzeichnis --------------------------------------------------------
+// Die Vorlage nennt '~/.claude/projects'. Bliebe die Tilde stehen, faende das Einlesen
+// nichts und der Server meldete stumm 0 Requests — ein Einrichtungsfehler, der
+// wie Feierabend aussieht. Der Test sichert, dass aufgeloest wird und nicht der
+// rohe Eintrag durchgereicht.
+function testJsonlDirTilde() {
+  const heim = process.env.USERPROFILE || process.env.HOME;
+  const cfg = require('../config.json');
+  const vorher = cfg.jsonlDir;
+  try {
+    cfg.jsonlDir = '~/.claude/projects';
+    const auf = ingest.jsonlDir();
+    assert.ok(!auf.includes('~'), 'Tilde blieb stehen: ' + auf);
+    assert.ok(auf.startsWith(heim), 'nicht im Benutzerverzeichnis: ' + auf);
+    assert.ok(auf.endsWith(path.join('.claude', 'projects')), 'Endstueck fehlt: ' + auf);
+
+    // Ein absoluter Pfad muss unveraendert durchgehen.
+    const abs = path.join(heim, 'woanders');
+    cfg.jsonlDir = abs;
+    assert.strictEqual(ingest.jsonlDir(), abs);
+  } finally {
+    cfg.jsonlDir = vorher;
+  }
+}
+
 async function main() {
   console.log('Token-Ledger Selbstpruefung\n');
   test('Dedup: Kopien desselben Requests zaehlen einmal', testDedup);
@@ -2637,6 +2672,7 @@ async function main() {
   test('Lokale Modelle: Rechnungsposition bleibt im Verhaeltnis zur Zeit', testLokalRechnungsposition);
   test('Lokale Modelle: Marge kennt Pauschale und Rechenzeit', testLokalMarge);
   test('Proxy: Nutzungszahlen aus Strom und Antwort, sonst nichts', testProxyUsage);
+  test('Logverzeichnis: Tilde wird aufgeloest, absoluter Pfad bleibt', testJsonlDirTilde);
 
   try {
     await testIngestRoundtrip();

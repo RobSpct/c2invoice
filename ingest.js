@@ -21,6 +21,15 @@ function lokalDir() {
   const eigen = (config.lokaleModelle || {}).protokollDir;
   return eigen ? loeseHeim(eigen) : path.join(__dirname, 'data', 'lokal');
 }
+
+// Wo die Claude-Code-Logs liegen. Aus denselben Gruenden eine Funktion wie
+// lokalDir(). Zusaetzlich wird "~" aufgeloest, damit ein Eintrag wie
+// "~/.claude/projects" auf jedem Rechner und jedem Betriebssystem passt.
+// Ohne das muesste die Vorlage einen Pfad nennen, der nur auf einem System
+// existiert — unter macOS/Linux liefe jede frische Installation ins Leere.
+function jsonlDir() {
+  return loeseHeim(config.jsonlDir);
+}
 // Lokale Anfragen tragen kein Projekt: sie kommen aus einem Browserfenster
 // ohne Arbeitsverzeichnis. Der Name steht bewusst in Klammern, damit er sich
 // nicht mit einem echten Projektnamen verwechseln laesst.
@@ -305,7 +314,7 @@ async function run({ db, verbose = false } = {}) {
   // Zeilenleser greift — der Rest (Byte-Position, Wiederholungslauf,
   // Transaktion je Datei) ist fuer beide gleich.
   const files = [
-    ...listJsonlFiles(config.jsonlDir).map((f) => ({ pfad: f, quelle: 'claude' })),
+    ...listJsonlFiles(jsonlDir()).map((f) => ({ pfad: f, quelle: 'claude' })),
     ...listJsonlFiles(lokalDir()).map((f) => ({ pfad: f, quelle: 'lokal' })),
   ];
   const getFile = db.prepare('SELECT offset, size, mtime_ms FROM files WHERE path = ?');
@@ -367,7 +376,7 @@ async function run({ db, verbose = false } = {}) {
 
 module.exports = {
   run, projectOf, ticketOf, extractUsage, listJsonlFiles, PROJECT_ROOTS,
-  lokalDir, LOKAL_PROJEKT,
+  lokalDir, jsonlDir, LOKAL_PROJEKT,
 };
 
 if (require.main === module) {

@@ -959,7 +959,30 @@ async function syncJira() {
   }
 }
 
+// Ein Platzhalter- oder Tippfehler-Pfad in "jsonlDir" faellt sonst nirgends auf:
+// das Einlesen findet keine Dateien und der Server meldet 0 Requests. Das sieht
+// aus wie "heute nichts gearbeitet", ist aber ein Einrichtungsfehler. Unter
+// macOS/Linux traefe das jede frische Installation, weil die Vorlage
+// zwangslaeufig den Pfad eines Systems nennen muss.
+function pruefeLogverzeichnis() {
+  const dir = ingest.jsonlDir();
+  if (dir && fs.existsSync(dir)) return;
+  const beispiel = process.platform === 'win32'
+    ? '%USERPROFILE%\\.claude\\projects'
+    : '~/.claude/projects';
+  console.error(
+    ['Hinweis: das in config.json unter "jsonlDir" eingetragene Verzeichnis gibt es nicht:',
+      '  ' + (dir || '(leer)'),
+      'Ohne dieses Verzeichnis werden keine Sitzungen gefunden, alle Zahlen bleiben auf null.',
+      'Ueblich ist:',
+      '  ' + beispiel,
+      ''
+    ].join('\n')
+  );
+}
+
 async function main() {
+  pruefeLogverzeichnis();
   await refreshData();
   setInterval(refreshData, 30_000).unref();
 

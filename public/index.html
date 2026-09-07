@@ -1322,8 +1322,16 @@ function linienChart(punkte, opt) {
   // X-Achse mit höchstens 6 Beschriftungen
   s += '<line class="axis" x1="' + ml + '" y1="' + (mt + ih) + '" x2="' + (W - mr) + '" y2="' + (mt + ih) + '"/>';
   const schritt = Math.max(1, Math.ceil(punkte.length / 6));
+  // Die letzte Beschriftung wird immer gesetzt, damit das Ende des Zeitraums
+  // ablesbar bleibt. Faellt sie zu dicht an die vorherige, druecken beide
+  // uebereinander — dann entfaellt die vorherige, nicht die letzte.
+  const letzterRaster = Math.floor((punkte.length - 1) / schritt) * schritt;
+  const zuDicht = punkte.length > 1
+    && (x(punkte.length - 1) - x(letzterRaster)) < 42
+    && letzterRaster !== punkte.length - 1;
   punkte.forEach((p, i) => {
     if (i % schritt && i !== punkte.length - 1) return;
+    if (zuDicht && i === letzterRaster) return;
     const anchor = i === 0 ? 'start' : (i === punkte.length - 1 ? 'end' : 'middle');
     s += '<text x="' + x(i) + '" y="' + (H - 8) + '" text-anchor="' + anchor + '">' + esc(p.label) + '</text>';
   });
