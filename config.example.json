@@ -1,0 +1,95 @@
+{
+  "//": "Vorlage. Zum Einrichten nach config.json kopieren und die Platzhalter ersetzen. config.json selbst ist bewusst nicht versioniert — sie enthaelt Stammdaten, Anschrift und Zugangsangaben.",
+  "stundensatz": 85,
+  "waehrung": "EUR",
+  "//saetze": "Pro Projekt entweder 'satz' (eigener Stundensatz) ODER 'rabatt' (Prozent auf den Standardsatz). Ist beides gesetzt, gewinnt 'satz'. Projekte ohne Eintrag nutzen den Standardsatz.",
+  "projektSaetze": {
+    "Beispielprojekt": {
+      "satz": 85,
+      "kunde": "Beispielkunde"
+    }
+  },
+  "//selbstkostenStunde": "Was eine Arbeitsstunde kostet, bevor Gewinn entsteht: eigene Arbeitszeit zu Marktwert plus anteilige Sachkosten. Basis fuer die Marge — steht hier 0, wird nur der Deckungsbeitrag ausgewiesen. Eigene Herleitung empfohlen: (a) Lohnkosten = Vergleichsbrutto plus rund 20 % Arbeitgeberanteil, geteilt durch die produktiven Jahresstunden. (b) Sachkosten = Arbeitszimmer, Strom, Internet, Hardware-AfA, Software-Abos, Versicherungen, Fortbildung, Verwaltung, geteilt durch die abrechenbaren Stunden. Das Claude-Abo gehoert NICHT hinein — es steckt bereits im Abo-Anteil je Vorgang, sonst wird es doppelt gezaehlt.",
+  "selbstkostenStunde": 0,
+  "//zielmargeProzent": "Optionaler Sollwert: welchen Anteil am Erloes du als Gewinn anstrebst. Rein zum Vergleichen (Soll/Ist je Vorgang, Angebotskalkulation) — beeinflusst keine Rechnung. 0 blendet den Vergleich aus.",
+  "zielmargeProzent": 0,
+  "//vergleichsFaktor": "Rein darstellend: um welchen Faktor haette dieselbe Arbeit ohne KI-Unterstuetzung laenger gedauert. Ausgewiesen wird NUR Zeit, nie ein Eurobetrag — ein hypothetischer Preis neben einem echten liest sich als Streichpreis, und die Rechtsprechung dazu verlangt einen tatsaechlich verlangten Vergleichspreis. 0 schaltet die Kennzahl ab (Voreinstellung), sonst ist ein Wert zwischen 1 und 1.5 zulaessig. Warum so niedrig: die Studienlage traegt nicht mehr. Eine kontrollierte Studie mit erfahrenen Entwicklern an echten Aufgaben (METR 2025) mass eine Verlangsamung um 19 Prozent; die oft zitierten +55 Prozent (Peng et al. 2023) stammen vom Anbieter selbst, sind nicht begutachtet und messen eine einzelne isolierte Aufgabe. Dazu kommt: Code schreiben ist nur rund ein Drittel der Entwicklungszeit, der Rest ist Anforderungsklaerung, Abstimmung, Test und Betrieb. Selbst ein grosser Effekt beim Schreiben ergibt daher nur einen kleinen Gesamteffekt. Wer hier einen hohen Wert eintraegt, behauptet etwas, das er im Streitfall nicht belegen kann — und die Zahl steht am Ende beim Kunden.",
+  "vergleichsFaktor": 0,
+  "//aboPreisMonat": "Monatspreis des KI-Abos in aboWaehrung. Wird anteilig auf die Vorgaenge verteilt. Brutto ansetzen, wenn keine Vorsteuer gezogen wird, sonst netto.",
+  "aboPreisMonat": 0,
+  "//aboWaehrung": "Waehrung von aboPreisMonat. Bei EUR entfaellt die Umrechnung mit usdToEur; nur der API-Gegenwert bleibt in Dollar, der stammt aus den Preislisten statt von einer Rechnung. Anthropic stellt aus Irland in Euro — pruefe deine eigene Rechnung.",
+  "aboWaehrung": "EUR",
+  "usdToEur": 0.92,
+  "//lokaleModelle": "Lokal laufende Modelle (Ollama, LM Studio, llama.cpp ...). Erfasst werden sie ueber ollama-proxy.js: der Proxy sitzt vor dem Modellserver, ergaenzt die Nutzungszaehlung und schreibt je Anfrage eine Zeile nach data/lokal/. Diese Modelle verursachen keine API-Kosten, deshalb steht dort immer 0 Dollar. Abgerechnet wird die Arbeitszeit wie sonst auch, plus eine eigene Pauschale je Million Tokens.",
+  "lokaleModelle": {
+    "//upstreamUrl": "Der eigentliche Modellserver, an den der Proxy weiterreicht. Ollama lauscht im Auslieferungszustand auf 11434.",
+    "upstreamUrl": "http://127.0.0.1:11434",
+    "//proxyPort": "Port des Proxys. Diesen Port traegst du in der Oberflaeche deines Modell-Werkzeugs ein (Feld \"Local Base URL\" o. ae., Wert http://localhost:11435/v1). Nur ueber diesen Weg wird die Nutzung erfasst.",
+    "proxyPort": 11435,
+    "//protokollDir": "Wohin der Proxy seine Zeilen schreibt und woher ingest.js sie liest. Ohne Eintrag gilt data/lokal im Programmverzeichnis. Beide Seiten muessen denselben Ort meinen.",
+    "protokollDir": "",
+    "//praefix": "Wird dem Modellnamen vorangestellt, damit lokale Modelle in der Auswertung erkennbar bleiben und nie einen Cloud-Preis erben.",
+    "praefix": "ollama",
+    "//eurProMioTokens": "Pauschale je einer Million Tokens (Eingabe plus Ausgabe) in Euro. Erscheint als eigene Rechnungsposition und folgt dem Projektrabatt. 0 schaltet die Position ab — dann bleibt die Nutzung rein informativ.",
+    "eurProMioTokens": 0,
+    "//selbstkostenEurProStunde": "Was eine Stunde lokaler Rechenzeit tatsaechlich kostet (Strom plus anteilige Abschreibung der Grafikkarte). Fliesst nur in die Marge ein, nie auf die Rechnung. Groessenordnung bei einer Mittelklasse-Karte: rund 0,10 Euro.",
+    "selbstkostenEurProStunde": 0,
+    "//zuordnungsfensterMinuten": "Lokale Anfragen tragen weder Projekt noch Vorgang. Sie werden dem Vorgang zugeschlagen, der im Zeitfenster ringsum in Claude Code bearbeitet wurde. Groesser als das Fenster fuer Werkzeuge, weil Vorarbeit mit lokalen Modellen der eigentlichen Sitzung oft vorausgeht.",
+    "zuordnungsfensterMinuten": 30
+  },
+  "//gapMinutes": "Ab dieser Pause zaehlt die Aktivzeit nicht weiter — trennt echte Arbeit von offenen Fenstern.",
+  "gapMinutes": 5,
+  "//projectRoots": "Wo deine Projekte liegen. Der erste Ordner unterhalb eines dieser Pfade gilt als Projektname — aus '~/Dev/Kundenprojekt/src/lib' wird also 'Kundenprojekt'. '~' steht fuer dein Benutzerverzeichnis. Reihenfolge zaehlt: der spezifischere Pfad gehoert nach vorne. Ohne Eintrag gilt ['~/Dev', '~'].",
+  "projectRoots": [
+    "~/Dev",
+    "~"
+  ],
+  "//overheadProjekte": "Werkzeuge, die im Hintergrund mitlaufen und keinem Kunden direkt zurechenbar sind. Ihr Verbrauch wird dem parallel bearbeiteten Projekt zugeschlagen, statt als eigene Position zu erscheinen.",
+  "overheadProjekte": [
+    ".claude-mem"
+  ],
+  "//rechnung": "Stammdaten fuer die Rechnungsstellung. Pflicht nach Par. 14 UStG: vollstaendiger Name und Anschrift des Ausstellers sowie steuernummer ODER ustIdNr. Ohne diese Angaben verweigert das Erstellen einer Rechnung den Dienst. kleinunternehmer=true weist keine Umsatzsteuer aus und druckt stattdessen den Par.-19-Hinweis.",
+  "rechnung": {
+    "aussteller": {
+      "name": "",
+      "anschrift": [],
+      "steuernummer": "",
+      "ustIdNr": "",
+      "bank": "",
+      "iban": "",
+      "bic": ""
+    },
+    "kleinunternehmer": true,
+    "ustSatz": 19,
+    "zahlungszielTage": 14,
+    "//chromePfad": "Nur setzen, wenn weder Chrome noch Edge am ueblichen Ort liegen. Wird fuer den PDF-Druck gebraucht.",
+    "chromePfad": ""
+  },
+  "port": 4747,
+  "//jsonlDir": "Verzeichnis mit den Claude-Code-Sitzungsdateien (*.jsonl). Unter Windows meist %USERPROFILE%\\.claude\\projects, unter macOS/Linux ~/.claude/projects.",
+  "jsonlDir": "C:\\Users\\DEIN_BENUTZER\\.claude\\projects",
+  "//ticketRegex": "Erkennt Ticket-Schluessel in Branch- und Ordnernamen. Voreinstellung passt auf Jira-Schluessel wie ABC-123.",
+  "ticketRegex": "([A-Z][A-Z0-9]{1,9}-\\d+)",
+  "//jira": "Optional. enabled=false laesst den Ledger ohne Jira laufen. Das API-Token steht NIE hier, sondern in der unter tokenEnvVar genannten Umgebungsvariablen; der doppler-Block ist nur eine bequeme Quelle dafuer und kann entfallen. Die customfield-IDs sind je Jira-Instanz verschieden — integration/jira-felder-anlegen.js legt sie an und nennt die Nummern.",
+  "jira": {
+    "enabled": false,
+    "baseUrl": "https://DEINE-INSTANZ.atlassian.net",
+    "projectKeys": [
+      "ABC"
+    ],
+    "email": "dein.name@beispiel.de",
+    "tokenEnvVar": "JIRA_API_TOKEN",
+    "syncIntervalMinutes": 60,
+    "doppler": {
+      "project": "",
+      "config": "",
+      "secret": ""
+    },
+    "felder": {
+      "kosten_usd": "customfield_00000",
+      "tokens": "customfield_00000",
+      "stunden": "customfield_00000",
+      "arbeitswert_eur": "customfield_00000"
+    }
+  }
+}

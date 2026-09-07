@@ -1,0 +1,6 @@
+data/
+node_modules/
+*.log
+
+# Enthaelt Stammdaten, Anschrift und Zugangsangaben — Vorlage ist config.example.json
+config.json

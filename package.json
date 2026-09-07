@@ -1,0 +1,33 @@
+{
+  "name": "devbill",
+  "version": "1.0.0",
+  "description": "Turn Claude Code usage into billable work: active time, cost, margin and invoices per job",
+  "license": "AGPL-3.0-or-later",
+  "type": "commonjs",
+  "main": "server.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RobSpct/devbill.git"
+  },
+  "bugs": {
+    "url": "https://github.com/RobSpct/devbill/issues"
+  },
+  "homepage": "https://github.com/RobSpct/devbill#readme",
+  "keywords": [
+    "claude-code",
+    "billing",
+    "invoicing",
+    "time-tracking",
+    "token-usage",
+    "freelance"
+  ],
+  "scripts": {
+    "start": "node server.js",
+    "ingest": "node ingest.js",
+    "proxy": "node ollama-proxy.js",
+    "test": "node test/selfcheck.js"
+  },
+  "engines": {
+    "node": ">=22.5"
+  }
+}

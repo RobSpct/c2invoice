@@ -1,0 +1,4050 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Token-Ledger</title>
+<!-- Inline statt Datei: spart den 404 auf /favicon.ico ohne zusaetzliches Asset. -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230a0a0b'/%3E%3Crect x='7' y='17' width='4' height='9' fill='%23f97316'/%3E%3Crect x='14' y='11' width='4' height='15' fill='%23f97316'/%3E%3Crect x='21' y='6' width='4' height='20' fill='%23f97316'/%3E%3C/svg%3E">
+<!-- Fira Sans fuer Labels, Fira Code fuer Zahlen. Laedt das Dashboard offline
+     (kein Netz, Server laeuft lokal), greift der System-Stack im font-Shorthand. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Fira+Sans:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --bg: #0a0a0b;
+    --panel: #141416;
+    --panel-2: #1c1c20;
+    --line: #28282e;
+    --line-soft: #1f1f24;
+    --text: #f4f4f5;
+    --text-dim: #9c9ca6;
+    /* Auf 4.5:1 gegen --panel gehoben; faint traegt 10-11px-Labels, dort gilt
+       der Kleinschrift-Kontrast, nicht die 3:1-Ausnahme fuer grossen Text. */
+    --text-faint: #82828e;
+    --accent: #f97316;
+    --accent-soft: rgba(249,115,22,.13);
+    --ok: #57c98a;
+    --warn: #e0b355;
+    --bad: #ef4444;
+    /* Margen-Ampel: fliessender Uebergang statt hartem Rot/Gruen. Eine knapp
+       verfehlte Zielmarge ist kein Fehlschlag und soll auch nicht so aussehen. */
+    --marge-top: #3ddc84;
+    --marge-ok: #57c98a;
+    --marge-fast: #a8cf6a;
+    --marge-knapp: #e0b355;
+    --marge-schwach: #e08a4a;
+    --marge-bad: #ef4444;
+    /* EUR neutral, USD traegt den Akzent — zwei Bunttoene fuer zwei Waehrungen
+       waren im schwarz/orangen Schema eine Farbe zu viel. Reines Weiss zieht
+       hier mehr Blick als der Akzent, deshalb eine Stufe darunter. */
+    --eur: #d4d4d8;
+    --radius: 10px;
+    --font-ui: "Fira Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    --font-zahl: "Fira Code", ui-monospace, SFMono-Regular, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    overflow-x: hidden;
+  }
+
+  body {
+    font: 14px/1.5 var(--font-ui);
+    font-variant-numeric: tabular-nums;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 16px 16px 48px; }
+
+  /* ---------- Kopf + Tabs ---------- */
+  header {
+    display: flex; flex-wrap: wrap; align-items: baseline;
+    gap: 8px 14px; margin-bottom: 14px;
+  }
+  header h1 {
+    margin: 0; font-size: 16px; font-weight: 600; letter-spacing: .2px;
+  }
+  header .sub { color: var(--text-faint); font-size: 12px; }
+
+  nav.tabs {
+    display: flex; gap: 2px; margin-bottom: 18px;
+    border-bottom: 1px solid var(--line);
+    overflow-x: auto; scrollbar-width: none;
+  }
+  nav.tabs::-webkit-scrollbar { display: none; }
+  nav.tabs button {
+    appearance: none; background: none; border: 0;
+    border-bottom: 2px solid transparent;
+    color: var(--text-dim); font: inherit; font-size: 13px; font-weight: 500;
+    padding: 9px 14px; cursor: pointer; white-space: nowrap;
+    transition: color .15s ease, border-color .15s ease;
+  }
+  nav.tabs button:hover { color: var(--text); border-bottom-color: var(--line); }
+  nav.tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 4px; }
+  nav.tabs button[aria-selected="true"] {
+    color: var(--text); font-weight: 600; border-bottom-color: var(--accent);
+  }
+
+  .view { display: none; }
+  .view.active { display: block; animation: fade .18s ease; }
+  @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+
+  /* ---------- Kennzahlen ---------- */
+  .kpis {
+    display: grid; gap: 10px; margin-bottom: 18px;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  }
+  .kpi {
+    background: var(--panel); border: 1px solid var(--line-soft);
+    border-radius: var(--radius); padding: 12px 14px;
+    transition: border-color .15s ease, background .15s ease;
+  }
+  .kpi:hover { border-color: var(--line); background: var(--panel-2); }
+  .kpi .label {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .07em;
+    color: var(--text-faint); margin-bottom: 6px;
+  }
+  .kpi .value {
+    font-family: var(--font-zahl);
+    font-size: 24px; font-weight: 600; line-height: 1.15; letter-spacing: -.02em;
+    overflow-wrap: anywhere;
+  }
+  .kpi .unit { font-size: 13px; font-weight: 500; color: var(--text-dim); margin-left: 3px; }
+  .kpi .hint { font-size: 11px; color: var(--text-faint); margin-top: 5px; }
+  .kpi.usd .value { color: var(--accent); }
+  .kpi.eur .value { color: var(--eur); }
+
+  /* ---------- Karten ---------- */
+  .card {
+    background: var(--panel); border: 1px solid var(--line-soft);
+    border-radius: var(--radius); padding: 14px; margin-bottom: 16px;
+  }
+  .card > h2 {
+    margin: 0 0 12px; font-size: 13px; font-weight: 600;
+    color: var(--text); letter-spacing: .01em;
+  }
+  .card > h2 .note { font-weight: 400; color: var(--text-faint); font-size: 11px; margin-left: 6px; }
+
+  /* ---------- Tabellen ---------- */
+  .tablewrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table { border-collapse: collapse; width: 100%; min-width: 560px; font-size: 13px; }
+  th, td { padding: 7px 10px; text-align: right; white-space: nowrap; }
+  /* Zahlenspalten in der Ziffernschrift; die erste Spalte traegt Namen/Labels
+     und bleibt deshalb in der UI-Schrift. */
+  td { font-family: var(--font-zahl); font-size: 12.5px; }
+  th:first-child, td:first-child { text-align: left; font-family: var(--font-ui); font-size: 13px; }
+  thead th {
+    font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--text-faint); border-bottom: 1px solid var(--line);
+    position: sticky; top: 0; background: var(--panel); z-index: 1;
+  }
+  tbody tr { border-bottom: 1px solid var(--line-soft); }
+  tbody tr:last-child { border-bottom: 0; }
+  th.sortable { cursor: pointer; user-select: none; }
+  th.sortable:hover { color: var(--accent); }
+  th.sortable:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  th.sortable .arrow { opacity: .45; margin-left: 3px; font-size: 10px; }
+  tr.clickable { cursor: pointer; transition: background .12s ease; }
+  tr.clickable:hover { background: var(--panel-2); }
+  /* Ausgewaehlte Zeile traegt zusaetzlich eine Kante — die Flaeche allein ist
+     bei Orange auf Schwarz zu dezent, um sie im Scrollen wiederzufinden. */
+  tr.clickable.sel { background: var(--accent-soft); }
+  tr.clickable.sel td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
+  td.trunc { max-width: 210px; overflow: hidden; text-overflow: ellipsis; }
+
+  /* Werkzeugbetrieb sichtbar von abrechenbarer Projektarbeit abheben. */
+  tr.row-overhead td { opacity: .62; }
+  .tag-overhead, .tag {
+    display: inline-block; margin-left: 6px; padding: 1px 6px;
+    border: 1px solid var(--line); border-radius: 999px;
+    font-size: 10px; letter-spacing: .04em; text-transform: uppercase;
+    color: var(--text-faint); vertical-align: middle;
+  }
+  /* Abrechnungsstand: gestellte Rechnung hebt sich vom offenen Vorgang ab. */
+  .tag-abgerechnet { color: var(--ok); border-color: var(--ok); }
+  /* Offen ist kein Fehler, nur ein Zustand — deshalb gedaempft statt rot. */
+  .tag-offen { color: var(--text-faint); border-color: var(--line); }
+  .tag:first-child { margin-left: 0; }
+  /* Stundensatz-Bearbeitung */
+  table.saetze td { vertical-align: middle; }
+  table.saetze input.feld, .e-liste input.feld {
+    width: 100%; max-width: 110px; padding: 5px 8px;
+    background: var(--bg); color: inherit;
+    border: 1px solid var(--line); border-radius: 6px;
+    font: inherit; font-variant-numeric: tabular-nums;
+  }
+  /* Auswahlfelder und die Textfelder der neuen Formulare erben die
+     Feldgestaltung nicht automatisch: sie haengt am jeweiligen Container. */
+  table.saetze select.feld, .k-formular .feld, .picker input, .r-empfaenger input[type="text"],
+  td.buchung input.feld {
+    width: 100%; padding: 6px 9px;
+    background: var(--bg); color: inherit;
+    border: 1px solid var(--line); border-radius: 6px;
+    font: inherit;
+  }
+  table.saetze select.feld { max-width: 120px; }
+  /* Zeilen einer Sitzung (je Modell eine) als Block lesbar machen: gebucht
+     wird die ganze Sitzung, das Feld steht nur in der ersten Zeile. Ohne
+     Klammer sieht die zweite Zeile aus wie eine Sitzung ohne Feld.
+     Zusammenhalt entsteht ueber eine durchgehende Kante und weggenommene
+     Trennlinien — nicht ueber ein Zeichen in der Zelle, das wie Inhalt
+     aussieht und vorgelesen wird. */
+  tr.sitzung td:first-child {
+    border-left: 2px solid var(--line); padding-left: 12px;
+  }
+  tr.s-kopf td:first-child { border-left-color: var(--accent); }
+  tr.s-folge td { border-top: 0; padding-top: 3px; padding-bottom: 5px; }
+  tr.s-kopf td { padding-bottom: 3px; }
+  /* Die Beschriftung gehoert zur Sitzung, nicht in die Vorgangsspalte —
+     deshalb linksbuendig unter dem Projektnamen statt am rechten Rand. */
+  tr.s-folge td.folge-label {
+    font-size: 11px; text-align: left; color: var(--text-faint);
+  }
+
+  /* Buchungsfeld sitzt in einer schmalen Tabellenspalte neben seinem Knopf. */
+  td.buchung { display: flex; gap: 6px; align-items: center; }
+  td.buchung input.feld { min-width: 110px; font-family: var(--font-zahl); }
+  td.buchung .btn { padding: 5px 10px; white-space: nowrap; }
+  /* Zugeordnet ist ein Ergebnis, kein offenes Formular: Wert plus Herkunft,
+     der Weg zum Aendern bleibt da, draengt sich aber nicht auf. */
+  td.buchung.zugeordnet .vorgang-wert { font-size: 13px; color: var(--text); }
+  td.buchung.zugeordnet .tag { margin-left: 0; }
+  .btn.schlicht {
+    background: none; border-color: transparent; color: var(--text-faint);
+    padding: 4px 6px;
+  }
+  .btn.schlicht:hover { color: var(--text); border-color: var(--line); }
+  table.saetze input.feld:focus, .e-liste input.feld:focus,
+  .e-liste textarea.feld:focus, table.saetze select.feld:focus,
+  .k-formular .feld:focus, .picker input:focus, td.buchung input.feld:focus {
+    outline: 2px solid var(--accent); outline-offset: -1px;
+  }
+  /* Stammdaten sind Text, keine Kennzahlen: breiter und linksbuendig, sonst
+     stehen Anschrift und Firmenname rechtsbuendig in einem 110px-Feld. */
+  .e-liste input.feld[type="text"], .e-liste textarea.feld {
+    width: 260px; max-width: 100%; text-align: left;
+    padding: 5px 8px; background: var(--bg); color: inherit;
+    border: 1px solid var(--line); border-radius: 6px;
+    font: inherit;
+  }
+  .e-liste textarea.feld { resize: vertical; line-height: 1.5; white-space: pre; }
+  .e-liste input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); }
+  .e-liste input.feld:disabled { opacity: 0.45; cursor: not-allowed; }
+  table.saetze td.ergibt { font-weight: 600; }
+  /* ---------- Rechnungen ---------- */
+  .r-zeitraum { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 14px; }
+  .r-zeitraum label { font-size: 12px; color: var(--text-faint); }
+  .r-empfaenger { display: grid; gap: 6px; max-width: 420px; }
+  .r-empfaenger label { font-size: 12px; color: var(--text-faint); }
+  /* Eingabefelder erben die Systemschrift nicht von selbst; ohne inherit
+     steht das Formular in einer anderen Schrift als der Rest der Seite. */
+  .r-zeitraum input, .r-empfaenger input, .r-empfaenger textarea {
+    background: var(--panel-2); color: var(--text); font: inherit; font-size: 13px;
+    border: 1px solid var(--line); border-radius: 4px; padding: 7px 9px;
+  }
+  .r-empfaenger textarea { resize: vertical; }
+  .r-zeitraum input:focus, .r-empfaenger input:focus, .r-empfaenger textarea:focus {
+    outline: 2px solid var(--accent); outline-offset: -1px;
+  }
+  .r-abschluss {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+    gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line-soft);
+  }
+  .r-summe { font-size: 14px; color: var(--text); }
+  .r-summe .note { margin-left: 0; }
+  /* Ankreuzfelder gross genug zum Treffen, auch mit dem Finger. */
+  table.rechnung input[type=checkbox] { width: 17px; height: 17px; cursor: pointer; accent-color: var(--accent); }
+  table.rechnung th:nth-child(2), table.rechnung td:nth-child(2) { text-align: left; }
+  table.rechnung td:first-child, table.rechnung th:first-child { width: 34px; text-align: center; }
+  tr.storniert td { opacity: .5; text-decoration: line-through; }
+  /* Der Status faerbt nur sich selbst. Frueher lag die Durchstreichung auf der
+     ganzen Zeile und traf auch die Knoepfe, die weiter benutzbar sein muessen. */
+  .a-st-angenommen { color: var(--ok); }
+  .a-st-abgelehnt, .a-st-abgelaufen { color: var(--warn); }
+  /* Ein angeschnittener Vorgang ist keine Fehlfunktion, aber er kostet Geld,
+     wenn man ihn uebersieht — deshalb auffaellig, nicht dezent. */
+  .r-schnitt {
+    font-size: 10px; text-transform: uppercase; letter-spacing: .05em;
+    color: var(--warn); border: 1px solid currentColor;
+    border-radius: 3px; padding: 1px 4px; margin-left: 6px; cursor: help;
+    white-space: nowrap;
+  }
+  /* Herkunft: Server aufklappbar, Werkzeuge eingerueckt darunter. */
+  .w-hinweis { margin: -4px 0 14px; }
+  .w-abschnitt { margin: 30px 0 4px; font-size: 15px; }
+  .h-server { cursor: pointer; }
+  .h-server:hover td { background: var(--accent-soft); }
+  .h-server:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .h-pfeil { display: inline-block; width: 12px; color: var(--text-faint); }
+  .h-eingerueckt { padding-left: 26px; color: var(--text-dim); }
+  /* Zwei Spalten statt einer Mehrfachauswahl: Strg-Klicken ist fehleranfaellig
+     und laesst nicht sehen, was zugeordnet IST — hier steht es nebeneinander.
+     Ein Klick verschiebt, mehr braucht es nicht. */
+  .k-zuordnung { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .k-spalte-titel {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
+    color: var(--text-faint); margin-bottom: 5px;
+  }
+  .k-spalte {
+    list-style: none; margin: 0; padding: 4px; min-height: 132px; max-height: 220px;
+    overflow-y: auto; border: 1px solid var(--line); border-radius: var(--radius);
+    background: var(--bg);
+  }
+  .k-spalte li {
+    padding: 5px 8px; border-radius: 5px; cursor: pointer; font-size: 12px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .k-spalte li:hover { background: var(--accent-soft); color: var(--accent); }
+  /* Der Pfeil sagt, wohin der Klick fuehrt — ohne ihn muss man es ausprobieren. */
+  .k-spalte li::after { content: '→'; margin-left: auto; opacity: .35; }
+  #k-zugeordnet li::after { content: '←'; }
+  .k-spalte .leer {
+    padding: 8px; color: var(--text-faint); font-size: 12px; cursor: default;
+  }
+  .k-spalte .leer:hover { background: none; color: var(--text-faint); }
+  .k-spalte .leer::after { content: ''; }
+  /* Gehoert einem anderen Kunden: zurueckgenommen, aber lesbar und weiterhin
+     anwaehlbar — Ausblenden wuerde verbergen, was noch abzurechnen ist. */
+  .r-fremd td { opacity: .45; }
+  .r-fremd:hover td { opacity: 1; }
+  .r-warnung {
+    margin-top: 10px; padding: 9px 11px; font-size: 12px; line-height: 1.5;
+    color: var(--warn); border: 1px solid currentColor;
+    border-radius: 4px; background: color-mix(in srgb, currentColor 8%, transparent);
+  }
+  .r-aktionen { display: flex; gap: 6px; justify-content: flex-end; }
+
+  .saetze-status { margin-top: 10px; font-size: 13px; min-height: 18px; color: var(--text-faint); }
+  .saetze-status.ok { color: var(--ok); }
+  .saetze-status.err { color: var(--bad); }
+
+  tr.summe td { border-top: 1px solid var(--line); font-weight: 600; }
+  tr.summe td.dimlabel { color: var(--text-faint); font-weight: 400; }
+  /* Der Akzent traegt nur die Leitkennzahl (API-Gegenwert). Faerbt man jede
+     USD-Spalte orange, hebt sich nichts mehr ab. */
+  .usd { color: var(--accent); }
+  .usd-neben { color: var(--text-dim); }
+  .eur { color: var(--eur); }
+  .dim { color: var(--text-dim); }
+  .faint { color: var(--text-faint); }
+  .mono { font-family: var(--font-zahl); font-size: 12px; }
+
+  .empty {
+    padding: 26px 14px; text-align: center; color: var(--text-dim); font-size: 13px;
+  }
+  .empty .big { display: block; font-size: 14px; color: var(--text); margin-bottom: 4px; }
+
+  /* ---------- Charts ---------- */
+  .chart { width: 100%; display: block; overflow: visible; }
+  .chart text { fill: var(--text-faint); font-family: var(--font-zahl); font-size: 10px; }
+  .chart .grid { stroke: var(--line-soft); stroke-width: 1; }
+  .chart .axis { stroke: var(--line); stroke-width: 1; }
+  .chart .line { fill: none; stroke: var(--accent); stroke-width: 1.8; stroke-linejoin: round; }
+  .chart .area { fill: var(--accent-soft); }
+  .chart .bar { fill: var(--accent); }
+  .chart .dot { fill: var(--accent); }
+  /* Interaktion: Fadenkreuz und Markierung liegen still, bis die Maus kommt.
+     pointer-events aus, sonst faengt die Fangflaeche ihre eigenen Ereignisse. */
+  .chart .cross { stroke: var(--text-faint); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0; }
+  .chart .marker { fill: var(--accent); stroke: var(--panel); stroke-width: 2; opacity: 0; }
+  .chart .cross, .chart .marker, .chart text, .chart .line, .chart .area { pointer-events: none; }
+  .chart .fang { fill: transparent; }
+  .chart .bar { transition: fill .12s ease; }
+  .chart .bar:hover { fill: var(--accent-hell, #fb923c); }
+  .chart-halter { position: relative; }
+  .zeitraum-schalter { display: flex; gap: 2px; margin: -4px 0 14px; }
+  .zeitraum-schalter button {
+    background: var(--panel-2); color: var(--text-dim); border: 1px solid var(--line);
+    padding: 4px 12px; font: inherit; font-size: 12px; cursor: pointer;
+  }
+  .zeitraum-schalter button:first-child { border-radius: 6px 0 0 6px; }
+  .zeitraum-schalter button:last-child { border-radius: 0 6px 6px 0; }
+  .zeitraum-schalter button[aria-pressed="true"] {
+    background: var(--accent-soft); color: var(--accent); border-color: var(--accent);
+  }
+  .zeitraum-schalter button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  /* Aktiver Modellfilter: die Karte sagt, worauf sie gerade eingeschraenkt ist. */
+  .filter-hinweis {
+    display: inline-flex; align-items: center; gap: 8px; margin-left: 8px;
+    font-size: 11px; font-weight: 400; color: var(--accent);
+    background: var(--accent-soft); border-radius: 999px; padding: 2px 6px 2px 10px;
+  }
+  .filter-hinweis button {
+    background: none; border: 0; color: inherit; cursor: pointer;
+    font: inherit; line-height: 1; padding: 2px 4px;
+  }
+  .filter-hinweis button:focus-visible { outline: 1px solid var(--accent); border-radius: 4px; }
+  .filter-note { display: block; margin-top: 4px; }
+  /* Zwischenueberschrift innerhalb einer Karte */
+  h3.unter {
+    font-size: 12px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--text-faint); font-weight: 600; margin: 22px 0 10px;
+  }
+  h3.unter:first-child { margin-top: 0; }
+  h3.unter .note { text-transform: none; letter-spacing: 0; }
+  .chart-tip {
+    position: absolute; z-index: 5; pointer-events: none; opacity: 0;
+    transform: translate(-50%, -100%);
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 6px; padding: 5px 9px; white-space: nowrap;
+    font-size: 11px; line-height: 1.5; color: var(--text);
+    box-shadow: 0 4px 14px rgba(0,0,0,.45);
+  }
+  .chart-tip .tip-wert { font-family: var(--font-zahl); color: var(--accent); font-weight: 600; }
+  .chart-tip .tip-neben { font-family: var(--font-zahl); color: var(--text-faint); }
+  @media (prefers-reduced-motion: reduce) {
+    .chart .bar { transition: none; }
+  }
+
+  /* ---------- Statuszeile ---------- */
+  .status {
+    display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center;
+    font-size: 12px; color: var(--text-faint);
+    border-top: 1px solid var(--line-soft); padding-top: 10px; margin-top: 4px;
+  }
+  .status .dot {
+    display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+    background: var(--ok); margin-right: 6px; vertical-align: middle;
+  }
+  .status.err { color: var(--bad); }
+  .status.err .dot { background: var(--bad); }
+
+  .banner {
+    display: none; margin-bottom: 12px; padding: 8px 12px;
+    color: var(--warn); border: 1px solid color-mix(in srgb, currentColor 40%, transparent);
+    background: color-mix(in srgb, currentColor 9%, transparent);
+    border-radius: var(--radius); font-size: 12px;
+  }
+  .banner.show { display: block; }
+
+  .info {
+    font-size: 12px; color: var(--text-dim); line-height: 1.6;
+    border-left: 2px solid var(--line); padding: 2px 0 2px 11px;
+  }
+  .info b { color: var(--text); font-weight: 600; }
+
+  /* ---------- Detailbereich ---------- */
+  #detail { display: none; }
+  #detail.show { display: block; }
+  .detail-head {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px;
+    margin-bottom: 12px;
+  }
+  .detail-head h2 { margin: 0; font-size: 15px; font-weight: 600; }
+  .detail-head .meta { font-size: 12px; color: var(--text-faint); }
+  .detail-grid {
+    display: grid; gap: 16px;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  }
+  .btn {
+    appearance: none; background: var(--panel-2); color: var(--text-dim);
+    border: 1px solid var(--line); border-radius: 6px;
+    font: inherit; font-size: 12px; padding: 5px 11px; cursor: pointer;
+    text-decoration: none; display: inline-block;
+    transition: color .15s ease, border-color .15s ease;
+  }
+  .btn:hover { color: var(--text); border-color: var(--accent); }
+  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  .calc { margin-top: 4px; }
+  .statuszeile { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; min-height: 20px; }
+  .statuszeile small { color: var(--text-faint); font-size: 11px; }
+
+  /* Kontakte */
+  /* Zwei Spalten Feldpaare: das Formular hat neun Felder und waere einspaltig
+     unnoetig lang. Anschrift und Notiz bekommen die volle Breite. */
+  .k-formular { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px 22px; margin-bottom: 18px; align-items: start; }
+  .k-formular label { display: block; font-size: 12px; color: var(--text-dim);
+    margin-bottom: 5px; }
+  .k-formular label .note { display: block; margin: 2px 0 0; font-size: 11px; }
+  .k-formular > div.breit { grid-column: 1 / -1; }
+  .k-formular textarea.feld { line-height: 1.5; resize: vertical; }
+  @media (max-width: 720px) { .k-formular { grid-template-columns: 1fr; } }
+  /* hidden schlaegt die Flex-Anzeige des Abschlussbereichs, sonst steht
+     "Abbrechen" auch beim Anlegen eines neuen Kontakts da. */
+  .r-abschluss [hidden] { display: none; }
+  /* Die Notiz ist frei getippt und beliebig lang. Ohne feste Breite und
+     Kuerzung schiebt sie die Aktionsspalte aus dem sichtbaren Bereich. */
+  /* Feste Breite fuer die Aktionsspalte, damit die drei Knoepfe nicht in die
+     Nachbarspalte ragen; der Rest teilt sich den verbleibenden Platz. */
+  .k-marke { font-size: 11px; padding: 1px 7px; border-radius: 10px; white-space: nowrap;
+    border: 1px solid var(--line); color: var(--text-dim); }
+  .k-marke.kunde { color: var(--ok); border-color: rgba(87,201,138,.4); }
+
+  /* Kontakte als Master-Detail. Die Liste bleibt stehen, rechts steht der
+     gewaehlte Kontakt — bei vielen Eintraegen ersetzt das langes Scrollen. */
+  .k-werkzeuge { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+  .k-werkzeuge #k-suche { flex: 1 1 220px; min-width: 180px; }
+  .k-filter { display: flex; gap: 6px; }
+  .chip {
+    font: inherit; font-size: 12px; padding: 7px 13px; min-height: 34px;
+    background: var(--panel-2); color: var(--text-dim);
+    border: 1px solid var(--line); border-radius: 999px; cursor: pointer;
+  }
+  .chip:hover { color: var(--text); }
+  .chip[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+  .chip:focus-visible, .k-zeile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .k-split { display: grid; grid-template-columns: minmax(220px, 320px) 1fr; gap: 14px; align-items: start; }
+  .k-liste { border: 1px solid var(--line); border-radius: var(--radius);
+    max-height: 460px; overflow-y: auto; }
+  .k-zeile {
+    display: block; width: 100%; text-align: left; font: inherit;
+    padding: 9px 12px; background: none; border: 0; cursor: pointer;
+    border-bottom: 1px solid var(--line-soft); color: var(--text);
+  }
+  .k-zeile:last-child { border-bottom: 0; }
+  .k-zeile:hover { background: var(--panel-2); }
+  /* Der gewaehlte Eintrag traegt zusaetzlich einen Balken — Farbe allein
+     reicht als Unterscheidung nicht. */
+  .k-zeile[aria-current="true"] { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+  .k-zeile .k-firma { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .k-zeile .k-unter { display: block; font-size: 11px; color: var(--text-faint); margin-top: 2px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .k-detail { border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; min-height: 200px; }
+  .k-detail h3 { margin: 0 0 2px; font-size: 16px; }
+  .k-detail dl { display: grid; grid-template-columns: minmax(90px, auto) 1fr;
+    gap: 6px 14px; margin: 14px 0 0; font-size: 13px; }
+  .k-detail dt { color: var(--text-faint); }
+  .k-detail dd { margin: 0; overflow-wrap: anywhere; white-space: pre-line; }
+
+  @media (max-width: 860px) {
+    .k-split { grid-template-columns: 1fr; }
+    .k-liste { max-height: 300px; }
+  }
+
+  /* Kontaktsuche. Position relativ, damit die Liste unter dem Feld haengt. */
+  .picker { position: relative; }
+  .vorschlaege { position: absolute; z-index: 20; top: calc(100% + 3px); left: 0; right: 0;
+    margin: 0; padding: 4px; list-style: none; max-height: 240px; overflow-y: auto;
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+  .vorschlaege li { padding: 7px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  .vorschlaege li small { display: block; color: var(--text-faint); font-size: 11px; margin-top: 2px; }
+  .vorschlaege li:hover, .vorschlaege li.aktiv { background: var(--accent-soft); }
+  .vorschlaege li.aktiv { outline: 1px solid var(--accent); }
+
+  /* Einstellungen */
+  /* Klappbare Abschnitte: der Tab ist zu lang geworden, um alles gleichzeitig
+     zu zeigen. Natives details/summary — kein Zustand, kein Skript. */
+  details.klapp { border-top: 1px solid var(--line-soft); }
+  details.klapp:first-of-type { border-top: none; }
+  details.klapp > summary { cursor: pointer; list-style: none; padding: 14px 0;
+    font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 9px; }
+  details.klapp > summary::-webkit-details-marker { display: none; }
+  details.klapp > summary::before { content: '▸'; color: var(--accent); font-size: 12px;
+    transition: transform .15s ease; }
+  details.klapp[open] > summary::before { transform: rotate(90deg); }
+  details.klapp > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  details.klapp > summary .note { font-weight: 400; }
+  details.klapp .klapp-inhalt { padding-bottom: 18px; }
+  @media (prefers-reduced-motion: reduce) { details.klapp > summary::before { transition: none; } }
+
+  /* Eigene Gruppe, weil die Werkzeugleiste ihre Kinder sonst auseinanderzieht
+     (justify-content: space-between) und der Waehler am Zeilenende landet. */
+  .a-posten-werkzeuge { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .a-posten-werkzeuge select { min-width: 190px; padding: 6px 9px;
+    background: var(--bg); color: inherit; border: 1px solid var(--line);
+    border-radius: 6px; font: inherit; }
+  .a-posten-werkzeuge select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+  .v-neu { display: flex; gap: 10px; align-items: center; margin-top: 14px; flex-wrap: wrap; }
+  .v-neu #v-bezeichnung { flex: 1; min-width: 220px; padding: 6px 9px; background: var(--bg);
+    color: inherit; border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+  .v-neu #v-satz { width: 92px; padding: 6px 9px; background: var(--bg); color: inherit;
+    border: 1px solid var(--line); border-radius: 6px; font: inherit; text-align: right; }
+  .v-neu input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+  .e-liste { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px 20px; margin: 0; align-items: start; }
+  .e-liste dt { min-width: 0; }
+  .e-liste dt label { display: block; font-size: 13px; margin-bottom: 3px; }
+  .e-liste dt small { color: var(--text-faint); font-size: 11px; line-height: 1.45; display: block; }
+  .e-liste dd { margin: 0; display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+  .e-liste input.feld { width: 110px; text-align: right; }
+  .e-einheit { color: var(--text-faint); font-size: 11px; min-width: 62px; }
+  .e-abschluss { display: flex; align-items: center; gap: 14px; margin-top: 18px;
+    padding-top: 14px; border-top: 1px solid var(--line-soft); }
+  .e-abschluss .saetze-status { margin: 0; flex: 1; }
+  .hinweis { color: var(--text-dim); font-size: 12px; line-height: 1.6; margin: 0; }
+  .hinweis code { color: var(--text); font-size: 11px; }
+  @media (max-width: 620px) {
+    .e-liste { grid-template-columns: 1fr; gap: 6px 0; }
+    .e-liste dd { margin-bottom: 10px; }
+  }
+  .calc dl { margin: 0; display: grid; grid-template-columns: 1fr auto; gap: 7px 12px; }
+  .calc dt { color: var(--text-dim); font-size: 12px; }
+  .calc dd { margin: 0; text-align: right; font-family: var(--font-zahl); font-size: 12.5px; font-weight: 500; }
+  .calc dd small { color: var(--text-faint); font-weight: 400; font-size: 11px; }
+  .calc .sep { grid-column: 1 / -1; border-top: 1px solid var(--line-soft); margin: 2px 0; }
+  .pos { color: var(--ok); }
+  .neg { color: var(--bad); }
+  .m-top { color: var(--marge-top); font-weight: 600; }
+  .m-ok { color: var(--marge-ok); }
+  .m-fast { color: var(--marge-fast); }
+  .m-knapp { color: var(--marge-knapp); }
+  .m-schwach { color: var(--marge-schwach); }
+  .m-bad { color: var(--marge-bad); }
+
+  .toolbar {
+    display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+    justify-content: space-between; margin-bottom: 12px;
+  }
+
+  @media (max-width: 560px) {
+    .wrap { padding: 12px 10px 40px; }
+    .kpi .value { font-size: 20px; }
+    .kpis { grid-template-columns: repeat(auto-fit, minmax(135px, 1fr)); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: .01ms !important; animation-iteration-count: 1 !important;
+      transition-duration: .01ms !important;
+    }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>Token-Ledger</h1>
+    <span class="sub" id="zeitraum">wird geladen…</span>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button role="tab" aria-selected="true"  data-view="live">Live</button>
+    <button role="tab" aria-selected="false" data-view="ueberblick">Überblick</button>
+    <button role="tab" aria-selected="false" data-view="tickets">Tickets</button>
+    <button role="tab" aria-selected="false" data-view="werkzeuge">Werkzeuge</button>
+    <button role="tab" aria-selected="false" data-view="kontakte">Kontakte</button>
+    <button role="tab" aria-selected="false" data-view="angebote">Angebote</button>
+    <button role="tab" aria-selected="false" data-view="rechnungen">Rechnungen</button>
+    <button role="tab" aria-selected="false" data-view="einstellungen">Einstellungen</button>
+  </nav>
+
+  <div class="banner" id="banner"></div>
+
+  <!-- ============ LIVE ============ -->
+  <section class="view active" id="view-live">
+    <div class="kpis">
+      <div class="kpi">
+        <div class="label">Tokens heute</div>
+        <div class="value" id="l-tokens">–</div>
+        <div class="hint" id="l-tokens-hint"></div>
+      </div>
+      <div class="kpi usd">
+        <div class="label">API-Gegenwert heute</div>
+        <div class="value" id="l-kosten">–</div>
+        <div class="hint">API-Gegenwert</div>
+      </div>
+      <div class="kpi usd">
+        <div class="label">Verbrauchsrate</div>
+        <div class="value" id="l-burn">–</div>
+        <div class="hint" id="l-burn-hint">letzte 60 Min hochgerechnet</div>
+      </div>
+      <div class="kpi">
+        <div class="label">Requests heute</div>
+        <div class="value" id="l-requests">–</div>
+        <div class="hint" id="l-window-hint"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Aktive Sitzungen <span class="note" id="l-fenster">letzte 60 Minuten</span></h2>
+      <p class="note">Arbeit ohne Ticket-Branch trägt keinen Vorgang und bleibt damit
+        unabrechenbar. Im Feld <b>Vorgang</b> lässt sich eine Sitzung von Hand buchen —
+        ein Jira-Schlüssel oder ein frei gewählter Name. Leeren stellt die automatische
+        Zuordnung wieder her.</p>
+      <div id="l-sessions"><div class="empty">wird geladen…</div></div>
+      <div id="l-buchung-status" class="status"></div>
+    </div>
+
+    <div class="status" id="l-status"><span class="dot"></span>wird geladen…</div>
+  </section>
+
+  <!-- ============ ÜBERBLICK ============ -->
+  <section class="view" id="view-ueberblick">
+    <div class="kpis">
+      <div class="kpi">
+        <div class="label">Tokens gesamt</div>
+        <div class="value" id="s-tokens">–</div>
+        <div class="hint" id="s-tokens-hint"></div>
+      </div>
+      <div class="kpi usd">
+        <div class="label">API-Gegenwert</div>
+        <div class="value" id="s-kosten">–</div>
+        <div class="hint">so viel hätte die API gekostet</div>
+      </div>
+      <div class="kpi">
+        <div class="label">Aktive Stunden</div>
+        <div class="value" id="s-stunden">–</div>
+        <div class="hint" id="s-stunden-hint"></div>
+      </div>
+      <div class="kpi">
+        <div class="label">Requests</div>
+        <div class="value" id="s-requests">–</div>
+        <div class="hint" id="s-zeitraum"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>API-Gegenwert im Verlauf <span class="note" id="c-days-note">in USD</span></h2>
+      <div class="zeitraum-schalter" role="group" aria-label="Körnung des Verlaufs">
+        <button type="button" data-koernung="tag" aria-pressed="true">Tag</button>
+        <button type="button" data-koernung="monat" aria-pressed="false">Monat</button>
+        <button type="button" data-koernung="jahr" aria-pressed="false">Jahr</button>
+      </div>
+      <div id="c-days"><div class="empty">wird geladen…</div></div>
+    </div>
+
+    <div class="card">
+      <h2>Verteilung nach Modell <span class="note">API-Gegenwert in USD — Modell anklicken, um die Projekte darunter zu filtern</span></h2>
+      <div id="c-models"><div class="empty">wird geladen…</div></div>
+    </div>
+
+    <div class="card">
+      <h2>Nach Projekt<span id="s-projects-kopf"></span></h2>
+      <div id="s-projects"><div class="empty">wird geladen…</div></div>
+    </div>
+
+    <div class="card">
+      <p class="info" id="cache-info">
+        <b>Zur Einordnung:</b> Der weitaus größte Teil der Token-Summe sind
+        <b>Cache-Read-Tokens</b> — wiederverwendeter Kontext, der pro Token nur
+        rund ein Zehntel eines normalen Input-Tokens kostet. Die große
+        Gesamtzahl bedeutet also nicht entsprechend große Kosten; maßgeblich
+        ist der API-Gegenwert in USD, nicht die Token-Zahl.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============ TICKETS ============ -->
+  <section class="view" id="view-tickets">
+    <div class="toolbar">
+      <span class="faint" id="t-count"></span>
+      <a class="btn" href="/api/export.csv" download>CSV exportieren</a>
+    </div>
+
+    <div class="card">
+      <h2>Tickets <span class="note">Spaltenkopf klicken zum Sortieren, Zeile klicken für Details</span></h2>
+      <div id="t-table"><div class="empty">wird geladen…</div></div>
+    </div>
+
+    <div class="card" id="detail"></div>
+  </section>
+
+  <!-- ============ WERKZEUGE ============ -->
+  <section class="view" id="view-werkzeuge">
+    <div class="kpis">
+      <div class="kpi">
+        <div class="label">Tokens Werkzeuge</div>
+        <div class="value" id="w-tokens">–</div>
+        <div class="hint" id="w-tokens-hint"></div>
+      </div>
+      <div class="kpi usd">
+        <div class="label">API-Gegenwert Werkzeuge</div>
+        <div class="value" id="w-kosten">–</div>
+        <div class="hint" id="w-anteil"></div>
+      </div>
+      <div class="kpi">
+        <div class="label">Aufrufe</div>
+        <div class="value" id="w-requests">–</div>
+        <div class="hint">im gewählten Zeitraum</div>
+      </div>
+    </div>
+
+    <!-- Drei Schnitte durch DIESELBE Summe. Ohne diesen Hinweis liest man die
+         laengere Projekttabelle als "mehr" und sucht einen Rechenfehler. -->
+    <p class="note w-hinweis">Die drei Tabellen zeigen denselben Verbrauch aus
+      drei Blickwinkeln — jede summiert sich auf <b id="w-summe-hinweis">–</b>.</p>
+
+    <div class="card">
+      <h2>Nach Werkzeug <span class="note">welches Werkzeug den Verbrauch erzeugt hat</span></h2>
+      <div id="w-table"><div class="empty">wird geladen…</div></div>
+    </div>
+
+    <div class="card">
+      <h2>Zugeordnet auf Projekte
+        <span class="note">dieselbe Summe, aufgeteilt auf die begleiteten Projekte</span></h2>
+      <div id="w-projekte"><div class="empty">wird geladen…</div></div>
+    </div>
+
+    <div class="card">
+      <h2>Nach Modell <span class="note">dieselbe Summe, aufgeteilt nach Modell</span></h2>
+      <div id="w-modelle"><div class="empty">wird geladen…</div></div>
+    </div>
+
+    <div class="card note" id="w-erklaerung"></div>
+
+    <!-- Zweiter Block: etwas voellig anderes als oben. Oben stehen
+         Hintergrunddienste mit eigener Sitzung, deren Kosten einem Vorgang
+         zugeschlagen werden. Hier steht der Verbrauch der eigenen Sitzungen,
+         nur anders gruppiert — er ist in den Projektzahlen bereits enthalten. -->
+    <h2 class="w-abschnitt">Woher die Requests kamen</h2>
+    <p class="note w-hinweis">Andere Sicht auf Tokens, die bereits in den
+      Projekt- und Vorgangszahlen stecken. <b>Ändert keine Abrechnung</b> —
+      dient nur der Frage, was wie intensiv genutzt wird.</p>
+
+    <div class="card">
+      <h2>Nach MCP-Server <span class="note">der Aufruf hat den Request ausgelöst — Zeile anklicken für die einzelnen Werkzeuge</span></h2>
+      <div id="h-mcp"><div class="empty">wird geladen…</div></div>
+    </div>
+
+    <div class="card">
+      <h2>Requests im Kontext eines Skills
+        <span class="note">nicht die Kosten des Skills — siehe Hinweis unten</span></h2>
+      <div id="h-skill"><div class="empty">wird geladen…</div></div>
+    </div>
+
+    <div class="card note" id="h-erklaerung"></div>
+  </section>
+
+  <!-- ============ RECHNUNGEN ============ -->
+  <section class="view" id="view-rechnungen">
+    <!-- Zweiter Einstieg in denselben Weg wie der Knopf im Angebote-Tab.
+         Wer abrechnen will, sucht das hier, nicht dort. -->
+    <div class="card" id="r-angebote-karte" hidden>
+      <h2>Abrechenbare Angebote
+        <span class="note">angenommen und noch nicht abgerechnet</span></h2>
+      <div id="r-angebote"></div>
+      <div class="saetze-status" id="ra-status"></div>
+    </div>
+
+    <div class="card">
+      <h2>Neue Rechnung <span class="note">Zeitraum wählen, Vorgänge auswählen, Rechnung erstellen</span></h2>
+      <div class="r-zeitraum">
+        <label for="r-von">Leistung von</label>
+        <input type="date" id="r-von">
+        <label for="r-bis">bis</label>
+        <input type="date" id="r-bis">
+        <button class="btn" id="r-laden">Vorgänge laden</button>
+        <label for="r-kunde">Kunde</label>
+        <select id="r-kunde" class="feld">
+          <option value="">alle Vorgänge</option>
+        </select>
+      </div>
+      <div id="r-tickets"><div class="empty">Zeitraum wählen und laden.</div></div>
+    </div>
+
+    <div class="card" id="r-formular" hidden>
+      <h2>Empfänger</h2>
+      <div class="r-empfaenger">
+        <label for="r-name">Name <span class="note">Pflichtangabe — tippen sucht in den Kontakten</span></label>
+        <div class="picker">
+          <input type="text" id="r-name" autocomplete="off" role="combobox"
+                 aria-expanded="false" aria-autocomplete="list" aria-controls="r-name-liste">
+          <ul class="vorschlaege" id="r-name-liste" role="listbox" hidden></ul>
+        </div>
+        <label for="r-anschrift">Anschrift <span class="note">eine Zeile je Adresszeile</span></label>
+        <textarea id="r-anschrift" rows="3"></textarea>
+      </div>
+      <div class="r-abschluss">
+        <div id="r-summe" class="r-summe">–</div>
+        <button class="btn" id="r-erstellen">Rechnung erstellen</button>
+      </div>
+      <div class="saetze-status" id="r-status"></div>
+    </div>
+
+    <div class="card">
+      <h2>Gestellte Rechnungen
+        <span class="note">unveränderlich — Korrektur erfolgt per Storno</span></h2>
+      <div id="r-liste"><div class="empty">wird geladen…</div></div>
+    </div>
+  </section>
+
+  <!-- ============ ANGEBOTE ============ -->
+  <!-- ============ KONTAKTE ============ -->
+  <section class="view" id="view-kontakte">
+    <div class="card">
+      <h2 id="k-titel">Neuer Kontakt <span class="note">Leads werden zu Kunden, sobald sie ein Angebot annehmen</span></h2>
+      <div class="k-formular">
+        <div class="breit">
+          <label for="k-firma">Firma <span class="note">Pflichtangabe</span></label>
+          <input type="text" id="k-firma" class="feld" maxlength="200" autocomplete="off">
+        </div>
+        <div>
+          <label for="k-vorname">Vorname <span class="note">Ansprechpartner</span></label>
+          <input type="text" id="k-vorname" class="feld" maxlength="80" autocomplete="off">
+        </div>
+        <div>
+          <label for="k-nachname">Nachname</label>
+          <input type="text" id="k-nachname" class="feld" maxlength="80" autocomplete="off">
+        </div>
+        <div class="breit">
+          <label for="k-anschrift">Anschrift <span class="note">eine Zeile je Adresszeile, höchstens 6</span></label>
+          <textarea id="k-anschrift" class="feld" rows="3"></textarea>
+        </div>
+        <div>
+          <label for="k-steuernummer">Steuernummer</label>
+          <input type="text" id="k-steuernummer" class="feld" maxlength="40" autocomplete="off">
+        </div>
+        <div>
+          <label for="k-ustIdNr">USt-IdNr.</label>
+          <input type="text" id="k-ustIdNr" class="feld" maxlength="40" autocomplete="off">
+        </div>
+        <div>
+          <label for="k-email">E-Mail</label>
+          <input type="email" id="k-email" class="feld" maxlength="120" autocomplete="off">
+        </div>
+        <div>
+          <label for="k-status">Status</label>
+          <select id="k-status" class="feld">
+            <option value="lead">Lead</option>
+            <option value="kunde">Kunde</option>
+          </select>
+        </div>
+        <div class="breit">
+          <label>Projekte dieses Kunden
+            <span class="note">steuert, welche Vorgänge im Reiter Rechnungen vorgeschlagen werden. Bereits vergebene Projekte stehen nicht zur Wahl — erst beim bisherigen Kunden entfernen.</span></label>
+          <div class="k-zuordnung">
+            <div>
+              <div class="k-spalte-titel" id="k-frei-titel">Freie Projekte</div>
+              <ul class="k-spalte" id="k-frei" role="listbox" aria-labelledby="k-frei-titel"></ul>
+            </div>
+            <div>
+              <div class="k-spalte-titel" id="k-zug-titel">Zugeordnet</div>
+              <ul class="k-spalte" id="k-zugeordnet" role="listbox" aria-labelledby="k-zug-titel"></ul>
+            </div>
+          </div>
+        </div>
+        <div class="breit">
+          <label for="k-notiz">Notiz</label>
+          <textarea id="k-notiz" class="feld" rows="2" maxlength="500"></textarea>
+        </div>
+      </div>
+      <div class="r-abschluss">
+        <button class="btn" id="k-abbrechen" hidden>Abbrechen</button>
+        <button class="btn" id="k-speichern">Kontakt anlegen</button>
+      </div>
+      <div class="saetze-status" id="k-status-text"></div>
+    </div>
+
+    <!-- Eine Liste statt zweier Tabellen untereinander: bei vielen Kontakten
+         war das Suchen ein Scrollen zwischen zwei Bloecken. -->
+    <div class="card">
+      <h2>Kontakte <span class="note">Leads werden zu Kunden, sobald sie ein Angebot annehmen</span></h2>
+      <div class="k-werkzeuge">
+        <input type="search" id="k-suche" class="feld" placeholder="Firma, Person oder E-Mail suchen…"
+               autocomplete="off" aria-label="Kontakte durchsuchen">
+        <div class="k-filter" role="group" aria-label="Nach Status filtern">
+          <button class="chip" data-filter="alle" aria-pressed="true">Alle</button>
+          <button class="chip" data-filter="lead" aria-pressed="false">Leads</button>
+          <button class="chip" data-filter="kunde" aria-pressed="false">Kunden</button>
+        </div>
+      </div>
+      <div class="k-split">
+        <div class="k-liste" id="k-liste"><div class="empty">wird geladen…</div></div>
+        <div class="k-detail" id="k-detail"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="view" id="view-angebote">
+    <div class="card">
+      <h2>Neues Angebot <span class="note">Schätzung vor dem Auftrag — abgerechnet wird später nach tatsächlichem Aufwand</span></h2>
+
+      <h3 class="unter">Positionen</h3>
+      <div id="a-posten"></div>
+      <div class="toolbar">
+        <div class="a-posten-werkzeuge">
+          <button class="btn" id="a-posten-plus">Position hinzufügen</button>
+          <label for="a-vorlage" class="note">oder aus Vorlage</label>
+          <select id="a-vorlage">
+            <option value="">Vorlage wählen…</option>
+          </select>
+        </div>
+      </div>
+
+      <h3 class="unter">Erfasste Vorgänge übernehmen <span class="note">optional, für Nachträge und Folgeaufträge</span></h3>
+      <div class="r-zeitraum">
+        <label for="a-von">von</label>
+        <input type="date" id="a-von">
+        <label for="a-bis">bis</label>
+        <input type="date" id="a-bis">
+        <button class="btn" id="a-laden">Vorgänge laden</button>
+      </div>
+      <div id="a-tickets"><div class="empty">Zeitraum wählen, wenn erfasste Arbeit ins Angebot soll.</div></div>
+    </div>
+
+    <div class="card">
+      <h2>Empfänger</h2>
+      <div class="r-empfaenger">
+        <label for="a-name">Name <span class="note">Pflichtangabe — tippen sucht in den Kontakten</span></label>
+        <div class="picker">
+          <input type="text" id="a-name" autocomplete="off" role="combobox"
+                 aria-expanded="false" aria-autocomplete="list" aria-controls="a-name-liste">
+          <ul class="vorschlaege" id="a-name-liste" role="listbox" hidden></ul>
+        </div>
+        <label for="a-anschrift">Anschrift <span class="note">eine Zeile je Adresszeile</span></label>
+        <textarea id="a-anschrift" rows="3"></textarea>
+        <label for="a-gueltig">Bindefrist <span class="note">Tage ab heute</span></label>
+        <input type="number" id="a-gueltig" value="30" min="1" max="365" class="feld">
+      </div>
+      <div class="r-abschluss">
+        <div id="a-summe" class="r-summe">–</div>
+        <button class="btn" id="a-erstellen">Angebot erstellen</button>
+      </div>
+      <div class="saetze-status" id="a-status"></div>
+    </div>
+
+    <div class="card">
+      <h2>Angebote <span class="note">freibleibend — löschen ist erlaubt, anders als bei Rechnungen</span></h2>
+      <div id="a-liste"><div class="empty">wird geladen…</div></div>
+    </div>
+  </section>
+
+  <!-- ============ EINSTELLUNGEN ============ -->
+  <section class="view" id="view-einstellungen">
+    <!-- Klappbare Abschnitte: alles gleichzeitig sichtbar war zu viel. Wer
+         Vorlagen pflegt, soll nicht nebenbei Stammdatenfelder vor sich haben. -->
+    <div class="card">
+      <details class="klapp" open>
+        <summary>Werte und Grenzen <span class="note">werden in config.json geschrieben und wirken sofort</span></summary>
+        <div class="klapp-inhalt">
+          <div id="e-felder"><div class="empty">wird geladen…</div></div>
+          <div class="e-abschluss">
+            <div class="saetze-status" id="e-status"></div>
+            <button class="btn" id="e-speichern">Speichern</button>
+          </div>
+        </div>
+      </details>
+
+      <details class="klapp">
+        <summary>Stundensätze je Projekt
+          <span class="note">eigener Satz, Rabatt oder beides</span></summary>
+        <div class="klapp-inhalt">
+          <div id="s-saetze"><div class="empty">wird geladen…</div></div>
+          <div class="saetze-status" id="s-saetze-status"></div>
+        </div>
+      </details>
+
+      <details class="klapp">
+        <summary>Positionsvorlagen
+          <span class="note">wiederkehrende Leistungen für Angebote</span></summary>
+        <div class="klapp-inhalt">
+          <div id="v-liste"><div class="empty">wird geladen…</div></div>
+          <div class="v-neu">
+            <input type="text" id="v-bezeichnung" class="feld" maxlength="200"
+                   placeholder="z. B. Fehlersuche und Behebung" aria-label="Bezeichnung der Vorlage">
+            <input type="number" id="v-satz" class="feld" step="0.01" min="0" max="10000"
+                   placeholder="Satz" aria-label="Stundensatz, leer lassen für den Standardsatz">
+            <button class="btn" id="v-anlegen">Vorlage anlegen</button>
+          </div>
+          <div class="saetze-status" id="v-status"></div>
+        </div>
+      </details>
+
+      <details class="klapp">
+        <summary>Rechnungs-Stammdaten
+          <span class="note">§ 14 UStG verlangt Name, Anschrift und Steuernummer oder USt-IdNr.</span></summary>
+        <div class="klapp-inhalt">
+          <div id="sd-felder"><div class="empty">wird geladen…</div></div>
+          <div class="e-abschluss">
+            <div class="saetze-status" id="sd-status"></div>
+            <button class="btn" id="sd-speichern">Speichern</button>
+          </div>
+        </div>
+      </details>
+
+      <details class="klapp">
+        <summary>Nicht hier änderbar <span class="note">bewusst der Datei vorbehalten</span></summary>
+        <div class="klapp-inhalt">
+          <p class="hinweis">
+            Jira-Zugang, Token-Variablen und Pfade stehen in <code>config.json</code>. Sie öffnen
+            Zugänge, statt nur ein Dokument zu beschriften — deshalb bleiben sie der Datei
+            vorbehalten. Änderungen dort wirken erst nach einem Neustart des Servers.
+          </p>
+        </div>
+      </details>
+    </div>
+  </section>
+
+</div>
+
+<script>
+'use strict';
+
+/* =========================================================
+   Formatierung — durchgehend deutsch
+   ========================================================= */
+const nf0 = new Intl.NumberFormat('de-DE', { maximumFractionDigits: 0 });
+const nf1 = new Intl.NumberFormat('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const nf2 = new Intl.NumberFormat('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+const num  = (v) => nf0.format(Number(v) || 0);
+const usd  = (v) => nf2.format(Number(v) || 0) + ' USD';
+const eur  = (v) => nf2.format(Number(v) || 0) + ' EUR';
+// Das Abo wird nicht zwangslaeufig in Dollar abgerechnet — Anthropic stellt aus
+// Irland in Euro. Der Betrag traegt deshalb die konfigurierte Abo-Waehrung,
+// nicht pauschal USD.
+const aboWhg = () => ((state.summary && state.summary.config
+  && state.summary.config.aboWaehrung) || 'USD').toUpperCase();
+const abo    = (v) => nf2.format(Number(v) || 0) + ' ' + aboWhg();
+const hrs  = (v) => nf1.format(Number(v) || 0) + ' h';
+
+// Große Token-Zahlen kompakt, damit die Kacheln lesbar bleiben.
+function kurz(v) {
+  const n = Number(v) || 0;
+  if (n >= 1e9) return nf2.format(n / 1e9) + ' Mrd';
+  if (n >= 1e6) return nf1.format(n / 1e6) + ' Mio';
+  if (n >= 1e4) return nf0.format(Math.round(n / 1e3)) + ' Tsd';
+  return nf0.format(n);
+}
+
+function datum(iso) {
+  if (!iso) return '–';
+  const p = String(iso).slice(0, 10).split('-');
+  return p.length === 3 ? p[2] + '.' + p[1] + '.' + p[0] : String(iso);
+}
+
+// "vor X" — bewusst grob, exakte Sekunden helfen hier niemandem.
+function vor(iso) {
+  if (!iso) return 'unbekannt';
+  const ms = Date.now() - Date.parse(iso);
+  if (!Number.isFinite(ms)) return 'unbekannt';
+  if (ms < 0) return 'gerade eben';
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return 'vor ' + s + ' Sek';
+  const m = Math.floor(s / 60);
+  if (m < 60) return 'vor ' + m + ' Min';
+  const h = Math.floor(m / 60);
+  if (h < 24) return 'vor ' + h + ' Std';
+  return 'vor ' + Math.floor(h / 24) + ' Tagen';
+}
+
+// Deckungsgleich mit esc() in rechnung.js, einschliesslich des Apostrophs.
+// Der ist heute entbehrlich, weil jedes Attribut hier doppelte
+// Anfuehrungszeichen verwendet — aber die naechste Zeile, die einfache nimmt,
+// waere sonst ein Ausbruch aus dem Attribut, und niemand wuerde daran denken.
+const esc = (s) => String(s == null ? '' : s)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+// Modellnamen kürzen: "claude-opus-5" -> "opus-5"
+const kurzModell = (m) => String(m || '–').replace(/^claude-/, '');
+
+/* =========================================================
+   Zustand
+   ========================================================= */
+const state = {
+  summary: null,
+  live: null,
+  sort: { key: 'cost_usd', dir: -1 },
+  offenesTicket: null,
+  fehler: { summary: false, live: false },
+  // Koernung des Verlaufsdiagramms: tag, monat oder jahr.
+  koernung: 'tag',
+  // Modellfilter der Projekttabelle. Die gefilterten Zeilen kommen vom
+  // Server, damit die Summen dort gebildet werden, wo alle anderen auch
+  // entstehen.
+  modellFilter: null,
+  modellProjekte: null,
+  // Programmstand des Servers beim letzten Abruf, siehe ladeSummary().
+  codeStand: null,
+  codeSprung: false,
+};
+
+/* =========================================================
+   Laden — ein fehlgeschlagener Abruf lässt die Seite stehen
+   ========================================================= */
+async function hole(pfad) {
+  const r = await fetch(pfad, { cache: 'no-store' });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+
+// Der Server meldet Fehler als { error } mit Statuscode 400. Beides pruefen,
+// sonst laeuft eine abgewiesene Eingabe als Erfolg durch.
+async function sende(pfad, nutzlast) {
+  const r = await fetch(pfad, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(nutzlast),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok || d.error) throw new Error(d.error || 'HTTP ' + r.status);
+  return d;
+}
+
+function bannerSetzen() {
+  const el = document.getElementById('banner');
+  // Der Programmstand wiegt schwerer als ein Verbindungsabbruch: bei einem
+  // Versionssprung stimmen die angezeigten Zahlen zwar, aber die Bedienung
+  // ruft womoeglich Endpunkte auf, die es in der geladenen Seite nicht gibt.
+  if (state.codeSprung) {
+    el.textContent = 'Der Server wurde seit dem Öffnen dieser Seite erneuert. ' +
+      'Bitte neu laden (Strg+R), sonst passen Oberfläche und Server nicht zusammen.';
+    el.classList.add('show');
+    return;
+  }
+  const aus = [];
+  if (state.fehler.summary) aus.push('Auswertung');
+  if (state.fehler.live) aus.push('Live-Daten');
+  if (!aus.length) { el.classList.remove('show'); return; }
+  el.textContent = 'Keine Verbindung zum Server (' + aus.join(', ') +
+    '). Angezeigt werden die zuletzt geladenen Werte — es wird weiter versucht.';
+  el.classList.add('show');
+}
+
+async function ladeSummary() {
+  try {
+    const neu = await hole('/api/summary');
+    // Beim ersten Abruf nur merken, danach vergleichen. Ein geaenderter Stand
+    // heisst: der Dienst wurde neu gestartet, die Seite im Browser ist alt.
+    if (state.codeStand && neu.codeStand && neu.codeStand !== state.codeStand) {
+      state.codeSprung = true;
+    }
+    if (neu.codeStand) state.codeStand = neu.codeStand;
+    state.summary = neu;
+    state.fehler.summary = false;
+  } catch (e) {
+    state.fehler.summary = true;
+  }
+  bannerSetzen();
+  if (state.summary) { zeichneUeberblick(); zeichneTickets(); zeichneWerkzeuge(); zeichneSaetze(); }
+}
+
+async function ladeLive() {
+  try {
+    state.live = await hole('/api/live?minutes=60');
+    state.fehler.live = false;
+  } catch (e) {
+    state.fehler.live = true;
+  }
+  bannerSetzen();
+  zeichneLive();
+}
+
+/* =========================================================
+   Tabs
+   ========================================================= */
+document.querySelectorAll('nav.tabs button').forEach((b) => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('nav.tabs button').forEach((x) =>
+      x.setAttribute('aria-selected', String(x === b)));
+    document.querySelectorAll('.view').forEach((v) =>
+      v.classList.toggle('active', v.id === 'view-' + b.dataset.view));
+    // Rechnungen erst beim Aufruf laden: sie aendern sich nur, wenn hier
+    // etwas gestellt wird, nicht im Sekundentakt wie die Live-Zahlen.
+    if (b.dataset.view === 'rechnungen') ladeRechnungen();
+    if (b.dataset.view === 'kontakte') ladeKontakte();
+    // Angebot und Rechnung brauchen den Kontaktbestand fuer die Suche am
+    // Empfaengerfeld, auch wenn der Kontakte-Tab nie geoeffnet wurde.
+    if (b.dataset.view === 'angebote') { ladeAngebote(); ladeVorlagen(); ladeKontakte(); }
+    if (b.dataset.view === 'rechnungen') ladeKontakte();
+    // Einstellungen nur einmal holen: waehrend des Tippens neu zu laden
+    // wuerde die Eingabe ueberschreiben.
+    if (b.dataset.view === 'einstellungen' && !eGeladen) ladeEinstellungen();
+    if (b.dataset.view === 'einstellungen' && !sdGeladen) ladeStammdaten();
+  });
+});
+
+/* =========================================================
+   Selbstgezeichnete Diagramme (inline SVG, keine Bibliothek)
+   ========================================================= */
+
+// Zeichenbreite bestimmen. Der Zielcontainer taugt nicht als Massstab: Tabs
+// sind beim ersten Zeichnen noch ausgeblendet und melden dann Breite 0.
+// Deshalb ueber den immer sichtbaren Rahmen rechnen (abzueglich Karten-
+// Innenabstand und Rahmen), damit die Schrift im schmalen iframe lesbar bleibt.
+function containerBreite(id) {
+  const el = document.getElementById(id);
+  const b = el ? el.clientWidth : 0;
+  if (b > 40) return b;
+  const wrap = document.querySelector('.wrap');
+  const w = wrap ? wrap.clientWidth : 0;
+  return w > 80 ? w - 32 : 720;
+}
+
+// Liniendiagramm mit Fläche: Werte über die Zeit.
+function linienChart(punkte, opt) {
+  const o = Object.assign({ hoehe: 190, yFmt: (v) => nf2.format(v), breite: 720 }, opt || {});
+  if (!punkte.length) return '<div class="empty">Keine Daten vorhanden.</div>';
+
+  const W = Math.max(300, Math.min(720, o.breite)), H = o.hoehe;
+  const ml = W < 480 ? 46 : 54, mr = 10, mt = 12, mb = 26;
+  const iw = W - ml - mr, ih = H - mt - mb;
+
+  const werte = punkte.map((p) => p.wert);
+  const max = Math.max(...werte, 0);
+  const top = max > 0 ? max * 1.1 : 1;
+
+  const x = (i) => punkte.length < 2 ? ml + iw / 2 : ml + (i / (punkte.length - 1)) * iw;
+  const y = (v) => mt + ih - (v / top) * ih;
+
+  // Die Geometrie wandert als Attribute mit ins Bild: der Interaktionshelfer
+  // rechnet damit die Mausposition auf einen Wert um, ohne sie ein zweites
+  // Mal herleiten zu muessen.
+  let s = '<svg class="chart" data-chart="linie" data-ml="' + ml + '" data-iw="' + iw +
+          '" data-mt="' + mt + '" data-ih="' + ih + '" data-top="' + top + '" data-n="' + punkte.length +
+          '" viewBox="0 0 ' + W + ' ' + H +
+          '" preserveAspectRatio="xMidYMid meet" role="img" aria-label="' + esc(o.titel || '') + '">';
+
+  // Gitter + Y-Beschriftung
+  for (let i = 0; i <= 4; i++) {
+    const v = (top / 4) * i, yy = y(v);
+    s += '<line class="grid" x1="' + ml + '" y1="' + yy + '" x2="' + (W - mr) + '" y2="' + yy + '"/>';
+    s += '<text x="' + (ml - 6) + '" y="' + (yy + 3.5) + '" text-anchor="end">' + esc(o.yFmt(v)) + '</text>';
+  }
+
+  // Fläche unter der Linie
+  let flaeche = 'M ' + x(0) + ' ' + (mt + ih);
+  punkte.forEach((p, i) => { flaeche += ' L ' + x(i) + ' ' + y(p.wert); });
+  flaeche += ' L ' + x(punkte.length - 1) + ' ' + (mt + ih) + ' Z';
+  s += '<path class="area" d="' + flaeche + '"/>';
+
+  // Linie
+  s += '<path class="line" d="' +
+       punkte.map((p, i) => (i ? 'L' : 'M') + ' ' + x(i) + ' ' + y(p.wert)).join(' ') + '"/>';
+
+  // Punkte nur bei wenigen Werten, sonst wird es unruhig
+  if (punkte.length <= 45) {
+    punkte.forEach((p, i) => {
+      s += '<circle class="dot" cx="' + x(i) + '" cy="' + y(p.wert) + '" r="2"/>';
+    });
+  }
+
+  // Fadenkreuz und hervorgehobener Punkt fuer den Zeiger. Beide liegen von
+  // Anfang an im Bild und werden nur ein- und ausgeblendet — DOM-Knoten
+  // nachtraeglich in ein SVG zu haengen ist umstaendlicher als das.
+  s += '<line class="cross" y1="' + mt + '" y2="' + (mt + ih) + '"/>';
+  s += '<circle class="marker" r="4"/>';
+
+  // X-Achse mit höchstens 6 Beschriftungen
+  s += '<line class="axis" x1="' + ml + '" y1="' + (mt + ih) + '" x2="' + (W - mr) + '" y2="' + (mt + ih) + '"/>';
+  const schritt = Math.max(1, Math.ceil(punkte.length / 6));
+  punkte.forEach((p, i) => {
+    if (i % schritt && i !== punkte.length - 1) return;
+    const anchor = i === 0 ? 'start' : (i === punkte.length - 1 ? 'end' : 'middle');
+    s += '<text x="' + x(i) + '" y="' + (H - 8) + '" text-anchor="' + anchor + '">' + esc(p.label) + '</text>';
+  });
+
+  // Fangflaeche ueber der Zeichenflaeche: sie nimmt die Mausbewegung
+  // entgegen. Die Punkte selbst sind mit r=2 zu klein zum Treffen und fehlen
+  // ab 46 Werten ganz — ueber die Flaeche trifft der Zeiger jeden Wert.
+  s += '<rect class="fang" x="' + ml + '" y="' + mt + '" width="' + iw + '" height="' + ih + '"/>';
+
+  return s + '</svg>';
+}
+
+// Waagerechte Balken: Rangfolge lesbarer als senkrechte Säulen,
+// und lange Modellnamen passen ohne Drehung hinein.
+// Die Zeichenbreite richtet sich nach dem Container, sonst schrumpft die
+// Schrift im schmalen iframe mit dem viewBox mit und wird unlesbar.
+function balkenChart(reihen, opt) {
+  const o = Object.assign({ fmt: usd, breite: 720 }, opt || {});
+  if (!reihen.length) return '<div class="empty">Keine Daten vorhanden.</div>';
+
+  const W = Math.max(300, Math.min(720, o.breite));
+  const eng = W < 480;
+  const zh = 26, mt = 6, mb = 6;
+  const H = mt + mb + reihen.length * zh;
+  const ml = eng ? 92 : 150, mr = eng ? 74 : 96;
+  const iw = W - ml - mr;
+  const max = Math.max(...reihen.map((r) => r.wert), 0) || 1;
+
+  let s = '<svg class="chart" viewBox="0 0 ' + W + ' ' + H +
+          '" preserveAspectRatio="xMidYMid meet" role="img" aria-label="' + esc(o.titel || '') + '">';
+
+  reihen.forEach((r, i) => {
+    const y = mt + i * zh;
+    const bh = 14;
+    const bw = Math.max(1, (r.wert / max) * iw);
+    s += '<text x="' + (ml - 8) + '" y="' + (y + bh / 2 + 3.5) + '" text-anchor="end">' + esc(r.label) + '</text>';
+    s += '<rect class="bar" x="' + ml + '" y="' + y + '" width="' + bw + '" height="' + bh + '" rx="2">' +
+         '<title>' + esc(r.titel || (r.label + ': ' + o.fmt(r.wert))) + '</title></rect>';
+    s += '<text x="' + (ml + bw + 7) + '" y="' + (y + bh / 2 + 3.5) + '">' + esc(o.fmt(r.wert)) + '</text>';
+  });
+
+  return s + '</svg>';
+}
+
+/* ---------------------------------------------------------
+   Zeigerhilfe fuer die Diagramme
+   Die eingebauten <title>-Elemente zeigen den Wert erst nach einer Sekunde
+   Verharren und im Liniendiagramm gar nicht, sobald mehr als 45 Werte im Bild
+   sind — dort fehlen die Punkte. Der Helfer legt deshalb eine eigene
+   Anzeige darueber: sie folgt der Maus sofort und trifft jeden Wert.
+   Angehaengt wird nach jedem Zeichnen, weil innerHTML die Zuhoerer verwirft.
+   --------------------------------------------------------- */
+function chartInteraktiv(containerId, punkte, opt) {
+  const o = Object.assign({ fmt: usd, klick: null }, opt || {});
+  const halter = document.getElementById(containerId);
+  if (!halter || !punkte || !punkte.length) return;
+  const svg = halter.querySelector('svg.chart');
+  if (!svg) return;
+
+  halter.classList.add('chart-halter');
+  let tip = halter.querySelector('.chart-tip');
+  if (!tip) {
+    tip = document.createElement('div');
+    tip.className = 'chart-tip';
+    halter.appendChild(tip);
+  }
+
+  const zeige = (i, klientX, klientY) => {
+    const p = punkte[i];
+    if (!p) return;
+    tip.innerHTML =
+      '<div>' + esc(p.label || '') + '</div>' +
+      '<div class="tip-wert">' + esc(o.fmt(p.wert)) + '</div>' +
+      (p.neben ? '<div class="tip-neben">' + esc(p.neben) + '</div>' : '');
+    const kasten = halter.getBoundingClientRect();
+    // An den Raendern nicht ueber den Kartenrand hinauslaufen.
+    const links = Math.min(Math.max(klientX - kasten.left, 46), kasten.width - 46);
+    tip.style.left = links + 'px';
+    tip.style.top = Math.max(klientY - kasten.top - 12, 26) + 'px';
+    tip.style.opacity = '1';
+  };
+  const verstecke = () => { tip.style.opacity = '0'; };
+
+  if (svg.dataset.chart === 'linie') {
+    const ml = +svg.dataset.ml, iw = +svg.dataset.iw;
+    const mt = +svg.dataset.mt, ih = +svg.dataset.ih, top = +svg.dataset.top;
+    const n = +svg.dataset.n;
+    const cross = svg.querySelector('.cross');
+    const marker = svg.querySelector('.marker');
+
+    svg.addEventListener('mousemove', (e) => {
+      // Von Bildschirm- auf viewBox-Koordinaten: das SVG skaliert mit der
+      // Breite, gerechnet wird aber im urspruenglichen Raster.
+      const kasten = svg.getBoundingClientRect();
+      const skala = kasten.width / svg.viewBox.baseVal.width;
+      const vx = (e.clientX - kasten.left) / skala;
+      const i = n < 2 ? 0 : Math.round(((vx - ml) / iw) * (n - 1));
+      if (i < 0 || i >= n) return verstecke();
+
+      const px = n < 2 ? ml + iw / 2 : ml + (i / (n - 1)) * iw;
+      const py = mt + ih - (punkte[i].wert / top) * ih;
+      if (cross) { cross.setAttribute('x1', px); cross.setAttribute('x2', px); cross.style.opacity = '1'; }
+      if (marker) { marker.setAttribute('cx', px); marker.setAttribute('cy', py); marker.style.opacity = '1'; }
+      // Die Anzeige haengt am Punkt, nicht am Zeiger — sonst zittert sie.
+      zeige(i, kasten.left + px * skala, kasten.top + py * skala);
+    });
+    svg.addEventListener('mouseleave', () => {
+      verstecke();
+      if (cross) cross.style.opacity = '0';
+      if (marker) marker.style.opacity = '0';
+    });
+  } else {
+    svg.querySelectorAll('rect.bar').forEach((rect, i) => {
+      rect.addEventListener('mousemove', (e) => zeige(i, e.clientX, e.clientY));
+      rect.addEventListener('mouseleave', verstecke);
+      if (o.klick) {
+        rect.style.cursor = 'pointer';
+        rect.addEventListener('click', () => o.klick(punkte[i], i));
+      }
+    });
+  }
+}
+
+/* =========================================================
+   Ansicht LIVE
+   ========================================================= */
+function zeichneLive() {
+  const d = state.live;
+  const setz = (id, v) => { document.getElementById(id).textContent = v; };
+
+  if (d) {
+    const t = d.today || {};
+    setz('l-tokens', kurz(t.total_tokens));
+    setz('l-tokens-hint', num(t.total_tokens) + ' Tokens');
+    setz('l-kosten', usd(t.cost_usd));
+    setz('l-burn', usd(d.burn_usd_per_hour) + ' /h');
+    setz('l-burn-hint', 'aus den letzten ' + num(d.window_minutes) + ' Min hochgerechnet');
+    setz('l-requests', num(t.requests));
+    const w = d.window || {};
+    setz('l-window-hint', num(w.requests) + ' im aktuellen Fenster');
+    setz('l-fenster', 'letzte ' + num(d.window_minutes) + ' Minuten');
+  }
+
+  // Sitzungstabelle
+  const ziel = document.getElementById('l-sessions');
+  const sess = d && Array.isArray(d.sessions) ? d.sessions : [];
+  if (!sess.length) {
+    ziel.innerHTML = '<div class="empty"><span class="big">Keine Aktivität in den letzten 60 Minuten</span>' +
+      'Sobald wieder gearbeitet wird, erscheinen die Sitzungen hier automatisch.</div>';
+  } else if (buchungInArbeit(ziel)) {
+    // Die Tabelle wird alle 30 Sekunden neu aufgebaut. Waehrend jemand einen
+    // Vorgang eintippt, wuerde das die Eingabe verschlucken — dann bleibt sie
+    // stehen, die Kennzahlen oben laufen weiter.
+    aktualisiereBuchungsanzeige(sess);
+  } else {
+    let h = '<div class="tablewrap"><table><thead><tr>' +
+      '<th>Projekt</th><th>Branch</th><th>Vorgang</th><th>Modell</th>' +
+      '<th>Tokens</th><th>API-Gegenwert USD</th><th>Letzte Aktivität</th>' +
+      '</tr></thead><tbody>';
+    // Eine Sitzung kann mehrere Zeilen haben (je Modell eine). Gebucht wird
+    // aber die ganze Sitzung, deshalb bekommt nur ihre erste Zeile das
+    // Eingabefeld — sonst sieht es nach Teilbuchung aus, die es nicht gibt.
+    //
+    // Dafuer muessen die Zeilen einer Sitzung beieinander stehen. Der Server
+    // sortiert nach Zeit, dabei geraet eine fremde Sitzung dazwischen und die
+    // Folgezeile steht ohne erkennbaren Bezug irgendwo darunter — sie sieht
+    // dann aus wie eine eigene Sitzung, der das Feld fehlt.
+    const gruppen = [];
+    const index = new Map();
+    for (const s of sess) {
+      if (!index.has(s.session_id)) {
+        index.set(s.session_id, gruppen.length);
+        gruppen.push([]);
+      }
+      gruppen[index.get(s.session_id)].push(s);
+    }
+
+    for (const gruppe of gruppen) {
+      gruppe.forEach((s, i) => {
+        const erste = i === 0;
+        const mehrteilig = gruppe.length > 1;
+        // Eine erkannte Zuordnung ist ein Ergebnis, keine offene Aufgabe. Als
+        // gefuelltes Eingabefeld neben einem Knopf sieht sie aus wie ein
+        // Formular, das noch auf Absenden wartet — dabei ist die Arbeit
+        // laengst abrechenbar. Deshalb ruhig als Text mit Herkunft, und das
+        // Feld erscheint erst, wenn jemand die Zuordnung aendern will.
+        const vorgangZelle = erste
+          ? (s.ticket
+              ? '<td class="buchung zugeordnet">' +
+                  '<span class="vorgang-wert mono">' + esc(s.ticket) + '</span>' +
+                  '<span class="tag">' + (s.ticket_quelle === 'override' ? 'gebucht' : 'erkannt') + '</span>' +
+                  '<button class="btn schlicht aendern" type="button">Ändern</button></td>'
+              : '<td class="buchung">' +
+                  '<input class="feld vorgang" value="" data-vorbelegt=""' +
+                  ' placeholder="ohne Vorgang" maxlength="40"' +
+                  ' aria-label="Vorgang für diese Sitzung">' +
+                  '<button class="btn buchen" type="button">Buchen</button></td>')
+          : '<td></td>';
+        // Projekt und Branch nur einmal je Sitzung nennen: dieselbe Angabe
+        // mehrfach untereinander liest sich wie mehrere Sitzungen. Die
+        // Folgezeile sagt statt dessen, dass sie dazugehoert — an derselben
+        // Stelle, an der sonst der Projektname steht.
+        const projektZelle = erste
+          ? '<td class="trunc" title="' + esc(s.project) + '">' + esc(s.project || '–') + '</td>' +
+            '<td class="trunc dim mono">' + esc(s.branch || '–') + '</td>'
+          : '<td class="folge-label" colspan="2">gleiche Sitzung, anderes Modell</td>';
+        h += '<tr data-session="' + esc(s.session_id || '') + '"' +
+            ' data-modell="' + esc(s.model || '') + '"' +
+            (mehrteilig ? ' class="sitzung' + (erste ? ' s-kopf' : ' s-folge') + '"' : '') + '>' +
+          projektZelle +
+          vorgangZelle +
+          '<td class="dim">' + esc(kurzModell(s.model)) + '</td>' +
+          '<td class="z-tokens" title="' + num(s.total_tokens) + ' Tokens">' + kurz(s.total_tokens) + '</td>' +
+          '<td class="usd z-usd">' + usd(s.cost_usd) + '</td>' +
+          '<td class="faint z-zeit">' + esc(vor(s.last_ts)) + '</td>' +
+        '</tr>';
+      });
+    }
+    // Werkzeuge begleiten die Sitzungen und stehen deshalb nicht als eigene
+    // Zeilen in der Liste. Ihr Verbrauch wird hier gesammelt ausgewiesen,
+    // damit er nicht unsichtbar wird.
+    const wz = Array.isArray(d.werkzeuge) ? d.werkzeuge : [];
+    if (wz.length) {
+      const summe = wz.reduce((a, x) => a + (x.cost_usd || 0), 0);
+      const tok = wz.reduce((a, x) => a + (x.total_tokens || 0), 0);
+      h += '<tr class="summe">' +
+        '<td colspan="4" class="dimlabel">Werkzeuge im Hintergrund <span class="note">' +
+          wz.map((x) => esc(x.projekt)).join(', ') + '</span></td>' +
+        '<td class="dimlabel">' + kurz(tok) + '</td>' +
+        '<td class="dimlabel">' + usd(summe) + '</td>' +
+        '<td class="dimlabel"></td>' +
+      '</tr>';
+    }
+    ziel.innerHTML = h + '</tbody></table></div>';
+    ziel.querySelectorAll('tr[data-session]').forEach((tr) => {
+      const aendern = tr.querySelector('.aendern');
+      if (aendern) aendern.addEventListener('click', () => zeigeVorgangsfeld(tr));
+      verdrahteBuchung(tr);
+    });
+  }
+
+  // Statuszeile — Abgleichfehler müssen auffallen
+  const st = document.getElementById('l-status');
+  const li = (d && d.lastIngest) || (state.summary && state.summary.lastIngest) || null;
+  const preis = state.summary && state.summary.pricing ? state.summary.pricing : null;
+
+  if (li && li.error) {
+    st.className = 'status err';
+    st.innerHTML = '<span class="dot"></span><b>Abgleich fehlgeschlagen:</b> ' + esc(li.error) +
+      ' <span>(' + esc(vor(li.at)) + ')</span>';
+  } else {
+    st.className = 'status';
+    const teile = [];
+    teile.push('Letzter Abgleich ' + esc(li ? vor(li.at) : 'unbekannt'));
+    if (li) teile.push('Dauer ' + num(li.ms) + ' ms');
+    if (li) teile.push(num(li.events) + ' Ereignisse');
+    if (preis) teile.push('Preisquelle ' + esc(preis.source) + ' (' + num(preis.models) + ' Modelle)');
+    if (state.fehler.live) teile.push('Server nicht erreichbar');
+    st.innerHTML = '<span class="dot"></span>' + teile.join(' · ');
+  }
+}
+
+// Eine Buchung ist angefangen, sobald jemand in der Tabelle steht, ein Feld
+// von seinem urspruenglichen Wert abweicht oder eine Zeile gerade im
+// Bearbeitungsmodus ist. Alle drei muessen den Neuaufbau verhindern, denn er
+// wuerde die angefangene Eingabe verwerfen.
+function buchungInArbeit(ziel) {
+  if (ziel.contains(document.activeElement)) return true;
+  if (ziel.querySelector('td.buchung.bearbeiten')) return true;
+  return Array.from(ziel.querySelectorAll('.vorgang'))
+    .some((el) => el.value !== el.getAttribute('data-vorbelegt'));
+}
+
+// Aus dem ruhigen Zustand in die Bearbeitung wechseln. Das Feld entsteht erst
+// hier, damit eine fertige Zuordnung nicht wie eine offene Aufgabe aussieht.
+function zeigeVorgangsfeld(tr) {
+  const zelle = tr.querySelector('td.buchung');
+  const wert = tr.querySelector('.vorgang-wert');
+  const bisher = wert ? wert.textContent.trim() : '';
+  zelle.className = 'buchung bearbeiten';
+  zelle.innerHTML = '<input class="feld vorgang" value="' + esc(bisher) + '"' +
+    ' data-vorbelegt="' + esc(bisher) + '" placeholder="ohne Vorgang" maxlength="40"' +
+    ' aria-label="Vorgang für diese Sitzung">' +
+    '<button class="btn buchen" type="button">Buchen</button>' +
+    '<button class="btn schlicht abbrechen" type="button">Abbrechen</button>';
+  verdrahteBuchung(tr);
+  const feld = zelle.querySelector('.vorgang');
+  feld.focus();
+  feld.select();
+}
+
+function verdrahteBuchung(tr) {
+  const knopf = tr.querySelector('.buchen');
+  if (!knopf) return;
+  knopf.addEventListener('click', () => bucheSitzung(tr));
+  const feld = tr.querySelector('.vorgang');
+  feld.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') bucheSitzung(tr);
+    // Escape ist der erwartete Rueckweg aus einer Eingabe, die man doch nicht
+    // machen wollte — ohne ihn bleibt nur Speichern oder die Maus.
+    if (e.key === 'Escape') brichBearbeitungAb(tr);
+  });
+  const abbrechen = tr.querySelector('.abbrechen');
+  if (abbrechen) abbrechen.addEventListener('click', () => brichBearbeitungAb(tr));
+}
+
+// Vor dem Neuzeichnen die Bearbeitungsspuren entfernen: sonst haelt
+// buchungInArbeit() den Neuaufbau fuer eine laufende Eingabe und blockiert
+// genau das Zuruecksetzen, das hier gewuenscht ist.
+function brichBearbeitungAb(tr) {
+  const zelle = tr.querySelector('td.buchung');
+  if (zelle) zelle.className = 'buchung';
+  const feld = tr.querySelector('.vorgang');
+  if (feld) {
+    feld.value = feld.getAttribute('data-vorbelegt') || '';
+    feld.blur();
+  }
+  ladeLive();
+}
+
+// Nur die Zahlen auffrischen, solange eine Eingabe laeuft. Der Vorgang selbst
+// bleibt unangetastet — er gehoert in diesem Moment dem Benutzer.
+function aktualisiereBuchungsanzeige(sess) {
+  // Eine Sitzung hat je Modell eine Zeile. Ueber die Sitzungskennung allein
+  // findet man immer nur die erste — die uebrigen blieben auf alten Zahlen
+  // stehen, solange jemand tippt. Modell mit in den Schluessel nehmen.
+  const zeilen = new Map();
+  for (const tr of document.querySelectorAll('#l-sessions tr[data-session]')) {
+    zeilen.set(tr.getAttribute('data-session') + ' ' + (tr.getAttribute('data-modell') || ''), tr);
+  }
+  for (const s of sess) {
+    const tr = zeilen.get((s.session_id || '') + ' ' + (s.model || ''));
+    if (!tr) continue;
+    // Ueber Klassen statt Spaltennummern: eine Folgezeile fasst Projekt und
+    // Branch in einer Zelle zusammen, ihre Zellen sind also anders
+    // durchnummeriert als die der ersten Zeile.
+    const setz = (klasse, wert) => {
+      const z = tr.querySelector('td.' + klasse);
+      if (z) z.textContent = wert;
+    };
+    setz('z-tokens', kurz(s.total_tokens));
+    setz('z-usd', usd(s.cost_usd));
+    setz('z-zeit', vor(s.last_ts));
+  }
+}
+
+async function bucheSitzung(tr) {
+  const feld = tr.querySelector('.vorgang');
+  const status = document.getElementById('l-buchung-status');
+  try {
+    const antwort = await sende('/api/buchen', {
+      session_id: tr.getAttribute('data-session'),
+      vorgang: feld.value.trim(),
+    });
+    // Der Server entscheidet, wie der Vorgang heisst — er schreibt gross und
+    // leitet beim Leeren die Zuordnung neu ab. Angezeigt wird deshalb seine
+    // Antwort, nicht das Eingetippte.
+    feld.value = antwort.ticket || '';
+    feld.setAttribute('data-vorbelegt', antwort.ticket || '');
+    status.className = 'status ok';
+    status.textContent = antwort.ticket
+      ? 'Sitzung auf ' + antwort.ticket + ' gebucht — die Arbeit ist jetzt abrechenbar.'
+      : 'Buchung aufgehoben, die Sitzung folgt wieder der automatischen Zuordnung.';
+    feld.blur();
+    // Bearbeitungszustand abraeumen, sonst haelt buchungInArbeit() den
+    // Neuaufbau fuer eine laufende Eingabe und die Zeile bliebe im Formular
+    // stehen, obwohl gespeichert ist.
+    const zelle = tr.querySelector('td.buchung');
+    if (zelle) zelle.className = 'buchung';
+    ladeLive();
+    hole('/api/summary').then((d) => {
+      if (d) { state.summary = d; zeichneUeberblick(); zeichneTickets(); }
+    });
+  } catch (err) {
+    status.className = 'status err';
+    status.textContent = 'Nicht gebucht: ' + err.message;
+  }
+}
+
+/* =========================================================
+   Ansicht ÜBERBLICK
+   ========================================================= */
+// Werkzeuge laufen nicht eigenstaendig, sondern begleiten eine Arbeitssitzung.
+// Diese Ansicht zeigt, was sie verbrauchen und welchem Projekt das zugute kommt.
+function zeichneWerkzeuge() {
+  const d = state.summary;
+  if (!d || !d.werkzeuge) return;
+  const w = d.werkzeuge;
+  const s = w.summe || {};
+  const setz = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+
+  setz('w-tokens', kurz(s.total_tokens));
+  setz('w-tokens-hint', num(s.total_tokens) + ' Tokens');
+  setz('w-kosten', usd(s.cost_usd));
+  setz('w-requests', num(s.requests));
+
+  const gesamt = (d.summary && d.summary.cost_usd) || 0;
+  setz('w-anteil', gesamt
+    ? nf1.format((s.cost_usd / gesamt) * 100) + ' % des API-Gegenwerts'
+    : 'API-Gegenwert');
+
+  const tabelle = (ziel, zeilen, spalte, kopf) => {
+    const el = document.getElementById(ziel);
+    if (!el) return;
+    if (!zeilen || zeilen.length === 0) {
+      el.innerHTML = '<div class="empty">Keine Daten im gewählten Zeitraum.</div>';
+      return;
+    }
+    let h = '<div class="tablewrap"><table><thead><tr>' +
+      '<th>' + kopf + '</th><th>Aufrufe</th><th>Tokens</th><th>API-Gegenwert USD</th><th>API-Gegenwert EUR</th>' +
+      '</tr></thead><tbody>';
+    for (const r of zeilen) {
+      h += '<tr>' +
+        '<td class="trunc" title="' + esc(r[spalte]) + '">' + esc(r[spalte]) + '</td>' +
+        '<td>' + num(r.requests) + '</td>' +
+        '<td title="' + num(r.total_tokens) + ' Tokens">' + kurz(r.total_tokens) + '</td>' +
+        '<td class="usd">' + usd(r.cost_usd) + '</td>' +
+        '<td class="eur">' + eur(r.cost_eur) + '</td>' +
+      '</tr>';
+    }
+    el.innerHTML = h + '</tbody></table></div>';
+  };
+
+  tabelle('w-table', w.nach_werkzeug, 'werkzeug', 'Werkzeug');
+  tabelle('w-projekte', w.nach_projekt, 'projekt', 'Projekt');
+  tabelle('w-modelle', w.nach_modell, 'model', 'Modell');
+  setz('w-summe-hinweis', usd(s.cost_usd) + ' / ' + kurz(s.total_tokens) + ' Tokens');
+
+  zeichneHerkunft();
+
+  const erkl = document.getElementById('w-erklaerung');
+  if (erkl) {
+    const offen = s.ohne_zuordnung || 0;
+    erkl.innerHTML =
+      '<b>Wie die Zuordnung entsteht:</b> Werkzeuge wie <code>claude-mem</code> laufen ' +
+      'automatisch mit, während an einem Projekt gearbeitet wird. Sie haben eigene ' +
+      'Sitzungen und verraten selbst nicht, wozu sie gehören. Zugeordnet wird deshalb ' +
+      'über die Zeit: Es zählt, an welchem Projekt im Umkreis von ' +
+      num(s.fenster_minuten) + ' Minuten gearbeitet wurde. ' +
+      (offen > 0
+        ? '<b>' + num(offen) + '</b> Aufrufe ließen sich nicht zuordnen und fehlen in der Projektaufteilung.'
+        : 'Im gewählten Zeitraum ließ sich jeder Aufruf zuordnen.') +
+      ' Diese Kosten stecken nicht in den Projekt- und Ticketzahlen der anderen Ansichten.';
+  }
+}
+
+// Woher die Requests der eigenen Sitzungen kamen. Bewusst getrennt von den
+// Werkzeugen darueber: die laufen als eigene Dienste und werden einem Vorgang
+// zugeschlagen, das hier steckt bereits in den Projektzahlen.
+function zeichneHerkunft() {
+  const h = state.summary && state.summary.herkunft;
+  const mcpZiel = document.getElementById('h-mcp');
+  const erkl = document.getElementById('h-erklaerung');
+  if (!h || !mcpZiel) return;
+
+  const anteil = (t) => h.gesamt.total_tokens
+    ? nf1.format((t / h.gesamt.total_tokens) * 100) + ' %' : '–';
+
+  // Server mit aufklappbaren Werkzeugzeilen. Ein Abschnitt je Server statt
+  // einer flachen Liste: sonst stehen zwoelf ctx_*-Zeilen zwischen den Servern
+  // und man sieht nicht mehr, was zu wem gehoert.
+  if (!h.nach_mcp.length) {
+    mcpZiel.innerHTML = '<div class="empty">Keine MCP-Aufrufe im gewählten Zeitraum. ' +
+      'Die Erfassung beginnt mit dem ersten Einlesen nach der Umstellung.</div>';
+  } else {
+    let m = '<div class="tablewrap"><table><thead><tr>' +
+      '<th>MCP-Server</th><th>Aufrufe</th><th>Tokens</th><th>Anteil</th>' +
+      '<th>API-Gegenwert USD</th><th>API-Gegenwert EUR</th></tr></thead><tbody>';
+    for (const s of h.nach_mcp) {
+      m += '<tr class="h-server" data-server="' + esc(s.server) + '" tabindex="0" ' +
+          'role="button" aria-expanded="false" title="Werkzeuge ein- und ausblenden">' +
+        '<td class="trunc"><span class="h-pfeil">▸</span> ' + esc(s.server) + '</td>' +
+        '<td>' + num(s.requests) + '</td>' +
+        '<td title="' + num(s.total_tokens) + ' Tokens">' + kurz(s.total_tokens) + '</td>' +
+        '<td class="dimlabel">' + anteil(s.total_tokens) + '</td>' +
+        '<td class="usd">' + usd(s.cost_usd) + '</td>' +
+        '<td class="eur">' + eur(s.cost_eur) + '</td>' +
+      '</tr>';
+      for (const wz of s.werkzeuge) {
+        m += '<tr class="h-werkzeug" data-von="' + esc(s.server) + '" hidden>' +
+          '<td class="trunc h-eingerueckt">' + esc(wz.werkzeug) + '</td>' +
+          '<td>' + num(wz.requests) + '</td>' +
+          '<td title="' + num(wz.total_tokens) + ' Tokens">' + kurz(wz.total_tokens) + '</td>' +
+          '<td class="dimlabel">' + anteil(wz.total_tokens) + '</td>' +
+          '<td class="usd">' + usd(wz.cost_usd) + '</td>' +
+          '<td class="eur">' + eur(wz.cost_eur) + '</td>' +
+        '</tr>';
+      }
+    }
+    mcpZiel.innerHTML = m + '</tbody></table></div>';
+
+    const umschalten = (tr) => {
+      const auf = tr.getAttribute('aria-expanded') === 'true';
+      tr.setAttribute('aria-expanded', auf ? 'false' : 'true');
+      tr.querySelector('.h-pfeil').textContent = auf ? '▸' : '▾';
+      mcpZiel.querySelectorAll('.h-werkzeug[data-von="' + CSS.escape(tr.dataset.server) + '"]')
+        .forEach((z) => { z.hidden = auf; });
+    };
+    mcpZiel.querySelectorAll('.h-server').forEach((tr) => {
+      tr.addEventListener('click', () => umschalten(tr));
+      tr.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); umschalten(tr); }
+      });
+    });
+  }
+
+  // Eigene Tabelle statt der Helferin oben: die Anteilspalte gehoert auch hier
+  // dazu. Ohne sie sagt "208,3 Mio" nichts darueber, ob das viel ist.
+  const skillZiel = document.getElementById('h-skill');
+  if (skillZiel) {
+    if (!h.nach_skill.length) {
+      skillZiel.innerHTML = '<div class="empty">Keine Skill-Aufrufe im gewählten Zeitraum.</div>';
+    } else {
+      let sh = '<div class="tablewrap"><table><thead><tr>' +
+        '<th>Skill</th><th>Aufrufe</th><th>Tokens</th><th>Anteil</th>' +
+        '<th>API-Gegenwert USD</th><th>API-Gegenwert EUR</th></tr></thead><tbody>';
+      for (const s of h.nach_skill) {
+        sh += '<tr>' +
+          '<td class="trunc" title="' + esc(s.skill) + '">' + esc(s.skill) + '</td>' +
+          '<td>' + num(s.requests) + '</td>' +
+          '<td title="' + num(s.total_tokens) + ' Tokens">' + kurz(s.total_tokens) + '</td>' +
+          '<td class="dimlabel">' + anteil(s.total_tokens) + '</td>' +
+          '<td class="usd">' + usd(s.cost_usd) + '</td>' +
+          '<td class="eur">' + eur(s.cost_eur) + '</td>' +
+        '</tr>';
+      }
+      skillZiel.innerHTML = sh + '</tbody></table></div>';
+    }
+  }
+
+  if (erkl) {
+    erkl.innerHTML =
+      '<b>Warum zwei getrennte Listen:</b> Ein <b>MCP-Server</b> löst den Request aus — ' +
+      'die Tokens gehören ihm ursächlich. Ein <b>Skill</b> tut das nicht: er schiebt Text ' +
+      'in einen ohnehin laufenden Request, statt einen eigenen zu starten. Seine Zeile sagt ' +
+      'deshalb <i>so viel lief, während dieser Skill aktiv war</i> — nicht <i>so viel hat der ' +
+      'Skill gekostet</i>. Als Kostenzuordnung gelesen wäre die Zahl falsch.<br><br>' +
+      '<b>Was hier fehlt:</b> Werkzeuge ohne eigene Requests — Anweisungen im Kontext ' +
+      '(Ponytail, Caveman, <code>CLAUDE.md</code>) und Filter vor dem Modell (<code>rtk</code>). ' +
+      'Sie erzeugen keinen eigenen Verbrauch, ihr Beitrag steckt in den übrigen Requests. ' +
+      'Eine Null stünde für „nicht messbar", nicht für „kostet nichts" — deshalb steht sie nicht da.' +
+      '<br><br><b>Bezugsgröße:</b> ' + kurz(h.gesamt.total_tokens) + ' Tokens aus Claude-Code-Sitzungen ' +
+      'im gewählten Zeitraum. Davon ' + anteil(h.mcp_tokens) + ' über MCP-Server, ' +
+      anteil(h.skill_tokens) + ' im Kontext eines Skills. Die Erfassung beginnt mit dem ersten ' +
+      'Einlesen nach der Umstellung — ältere Sitzungen tragen sie nicht, ihre Logdateien sind fort.';
+  }
+}
+
+// Stundensaetze bearbeiten. Die Zeilen werden nur neu gebaut, wenn sich die
+// Projektliste aendert — sonst verlaeren die Felder beim Auto-Refresh den Fokus.
+let saetzeSignatur = '';
+
+function zeichneSaetze() {
+  const d = state.summary;
+  const ziel = document.getElementById('s-saetze');
+  if (!d || !ziel) return;
+
+  const projekte = (d.projects || []).filter((p) => !p.overhead);
+  const signatur = projekte.map((p) => p.project).join('|');
+  if (signatur === saetzeSignatur && ziel.querySelector('table')) {
+    aktualisiereSatzAnzeige(projekte);
+    return;
+  }
+  saetzeSignatur = signatur;
+
+  if (projekte.length === 0) {
+    ziel.innerHTML = '<div class="empty">Keine Projekte im gewählten Zeitraum.</div>';
+    return;
+  }
+
+  const w = (d.config && d.config.waehrung) || 'EUR';
+  const standard = (d.config && d.config.stundensatz) || 0;
+
+  let h = '<div class="tablewrap"><table class="saetze"><thead><tr>' +
+    '<th>Projekt</th><th>Kunde</th><th>Satz ' + w + '</th><th>Rabatt %</th>' +
+    '<th>ergibt</th><th></th></tr></thead><tbody>';
+
+  // Die Felder bleiben zunaechst leer; die gespeicherten Werte traegt
+  // ladeSaetze() gleich darauf ein. Leer heisst immer: Standardsatz.
+  for (const p of projekte) {
+    h += '<tr data-projekt="' + esc(p.project) + '">' +
+      '<td class="trunc" title="' + esc(p.project) + '">' + esc(p.project) + '</td>' +
+      '<td><input class="feld kunde" type="text" placeholder="–" value="' +
+        esc(p.kunde || '') + '" size="10"></td>' +
+      '<td><input class="feld satz" type="number" min="0" step="0.5" placeholder="' +
+        nf2.format(standard) + '"></td>' +
+      '<td><input class="feld rabatt" type="number" min="0" max="100" step="1" placeholder="0"></td>' +
+      '<td class="ergibt eur">' + eur(p.stundensatz) + '</td>' +
+      '<td><button class="btn speichern">Speichern</button></td>' +
+    '</tr>';
+  }
+  ziel.innerHTML = h + '</tbody></table></div>';
+
+  // Vorhandene Werte eintragen (aus /api/saetze, nicht aus der Zusammenfassung).
+  ladeSaetze();
+
+  ziel.querySelectorAll('tr[data-projekt]').forEach((tr) => {
+    const knopf = tr.querySelector('.speichern');
+    knopf.addEventListener('click', () => speichereSatz(tr));
+    tr.querySelectorAll('input').forEach((el) => {
+      el.addEventListener('keydown', (e) => { if (e.key === 'Enter') speichereSatz(tr); });
+    });
+  });
+}
+
+// Nur die berechnete Spalte auffrischen, ohne die Eingabefelder anzufassen.
+function aktualisiereSatzAnzeige(projekte) {
+  for (const p of projekte) {
+    const tr = document.querySelector('tr[data-projekt="' + cssEsc(p.project) + '"]');
+    if (!tr) continue;
+    const zelle = tr.querySelector('.ergibt');
+    if (zelle && document.activeElement !== tr.querySelector('.satz') &&
+        document.activeElement !== tr.querySelector('.rabatt')) {
+      zelle.textContent = eur(p.stundensatz);
+    }
+  }
+}
+
+function cssEsc(s) {
+  return String(s).replace(/["\\]/g, '\\$&');
+}
+
+async function ladeSaetze() {
+  try {
+    const r = await fetch('/api/saetze', { cache: 'no-store' });
+    if (!r.ok) return;
+    const daten = await r.json();
+    for (const [projekt, eintrag] of Object.entries(daten.projekte || {})) {
+      const tr = document.querySelector('tr[data-projekt="' + cssEsc(projekt) + '"]');
+      if (!tr) continue;
+      if (eintrag.satz != null) tr.querySelector('.satz').value = eintrag.satz;
+      if (eintrag.rabatt != null) tr.querySelector('.rabatt').value = eintrag.rabatt;
+      if (eintrag.kunde) tr.querySelector('.kunde').value = eintrag.kunde;
+    }
+  } catch { /* Anzeige bleibt wie sie ist */ }
+}
+
+async function speichereSatz(tr) {
+  const projekt = tr.getAttribute('data-projekt');
+  const status = document.getElementById('s-saetze-status');
+  const nutzlast = {
+    projekt,
+    satz: tr.querySelector('.satz').value.trim(),
+    rabatt: tr.querySelector('.rabatt').value.trim(),
+    kunde: tr.querySelector('.kunde').value.trim(),
+  };
+  try {
+    const r = await fetch('/api/saetze', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(nutzlast),
+    });
+    const antwort = await r.json();
+    if (!r.ok || antwort.error) throw new Error(antwort.error || 'Speichern fehlgeschlagen');
+
+    tr.querySelector('.ergibt').textContent = eur(antwort.satz);
+    status.className = 'saetze-status ok';
+    status.textContent = projekt + ': ' + eur(antwort.satz) + ' pro Stunde (' + antwort.quelle + ')' +
+      (antwort.rabatt > 0 ? ' — ' + nf2.format(antwort.rabatt) + ' % Rabatt auf ' + eur(antwort.basissatz) : '') +
+      ' — gespeichert, Arbeitswerte sind aktualisiert. ';
+    // In Jira steht bis zum naechsten Takt noch der alte Arbeitswert. Der Knopf
+    // holt das sofort nach, statt bis zu einer Stunde zwei Zahlen zu haben.
+    status.appendChild(jiraKnopf(status));
+    hole('/api/summary').then((d) => { if (d) { state.summary = d; zeichneUeberblick(); zeichneTickets(); } });
+  } catch (err) {
+    status.className = 'saetze-status err';
+    status.textContent = 'Nicht gespeichert: ' + err.message;
+  }
+}
+
+// Loest den Jira-Abgleich sofort aus. Bewusst ein Knopf statt automatisch:
+// bei mehreren Satz-Korrekturen hintereinander soll nicht jedes Mal an Jira
+// geschrieben werden.
+function jiraKnopf(status) {
+  const knopf = document.createElement('button');
+  knopf.type = 'button';
+  knopf.className = 'btn';
+  knopf.textContent = 'Neuen Satz zu Jira-Tickets synchen';
+  knopf.addEventListener('click', async () => {
+    knopf.disabled = true;
+    knopf.textContent = 'wird übertragen…';
+    try {
+      const r = await fetch('/api/jira-sync', { method: 'POST' });
+      const a = await r.json();
+      if (!a.ok) throw new Error(a.grund || 'Abgleich fehlgeschlagen');
+      status.className = 'saetze-status ok';
+      status.textContent = `Jira: ${a.aktualisiert} von ${a.geprueft} Ticket(s) aktualisiert` +
+        (a.fehler ? `, ${a.fehler} fehlgeschlagen (Serverprotokoll)` : '') + '.';
+    } catch (err) {
+      status.className = 'saetze-status err';
+      status.textContent = 'Jira nicht abgeglichen: ' + err.message;
+    }
+  });
+  return knopf;
+}
+
+function zeichneUeberblick() {
+  const d = state.summary;
+  if (!d) return;
+  const s = d.summary || {};
+  const setz = (id, v) => { document.getElementById(id).textContent = v; };
+
+  setz('s-tokens', kurz(s.total_tokens));
+  setz('s-tokens-hint', num(s.total_tokens) + ' Tokens');
+  setz('s-kosten', usd(s.cost_usd));
+
+  // Nur die Projektarbeit, nicht der Werkzeugbetrieb. Die Gesamtzeit aus
+  // `summary` enthaelt auch die Hintergrundsitzungen der Werkzeuge — die
+  // Kachel stuende dann ueber einer Tabelle, die eine kleinere Summe zeigt,
+  // ohne dass der Unterschied zu sehen waere. Abgerechnet wird ohnehin nur
+  // die Projektarbeit.
+  const sp = d.split;
+  const stunden = sp ? sp.arbeit.active_seconds / 3600 : (s.active_seconds || 0) / 3600;
+  const wzStunden = sp ? sp.overhead.active_seconds / 3600 : 0;
+  setz('s-stunden', hrs(stunden));
+  setz('s-stunden-hint',
+    (wzStunden > 0.05 ? 'ohne ' + hrs(wzStunden) + ' Werkzeugbetrieb · ' : '') +
+    'Pausen ab ' + num(d.config && d.config.gapMinutes) + ' Min zählen nicht');
+  setz('s-requests', num(s.requests));
+  setz('s-zeitraum', datum(s.first_day) + ' – ' + datum(s.last_day));
+  setz('zeitraum', datum(s.first_day) + ' – ' + datum(s.last_day));
+
+  zeichneVerlauf();
+
+  // Modelle
+  const models = Array.isArray(d.models) ? d.models : [];
+  const modellPunkte = models.map((m) => ({
+    label: kurzModell(m.model),
+    wert: m.cost_usd || 0,
+    modell: m.model,
+    neben: num(m.requests) + ' Requests · ' + num(m.total_tokens) + ' Tokens',
+    titel: kurzModell(m.model) + ': ' + usd(m.cost_usd) + ' · ' +
+           num(m.requests) + ' Requests · ' + num(m.total_tokens) + ' Tokens',
+  }));
+  document.getElementById('c-models').innerHTML = balkenChart(
+    modellPunkte,
+    { titel: 'API-Gegenwert nach Modell', fmt: usd, breite: containerBreite('c-models') }
+  );
+  chartInteraktiv('c-models', modellPunkte, {
+    fmt: usd,
+    // Ein Klick schraenkt die Projekttabelle darunter auf dieses Modell ein,
+    // ein zweiter hebt es wieder auf.
+    klick: (p) => setzeModellFilter(state.modellFilter === p.modell ? null : p.modell),
+  });
+
+  // Bei aktivem Filter die eingeschraenkten Zeilen mitziehen, sonst zeigt die
+  // Tabelle nach dem naechsten Abruf noch den Stand von vorhin.
+  if (state.modellFilter) setzeModellFilter(state.modellFilter);
+  else zeichneProjekte();
+
+  // Cache-Hinweis mit echtem Anteil unterfüttern
+  const anteil = s.total_tokens ? (s.cache_read_tokens / s.total_tokens) * 100 : 0;
+  const info = document.getElementById('cache-info');
+  if (anteil > 0) {
+    info.innerHTML = '<b>Zur Einordnung:</b> ' + nf1.format(anteil) + ' % der Token-Summe sind ' +
+      '<b>Cache-Read-Tokens</b> (' + num(s.cache_read_tokens) + ') — wiederverwendeter Kontext, ' +
+      'der pro Token nur rund ein Zehntel eines normalen Input-Tokens kostet. Die große ' +
+      'Gesamtzahl bedeutet also nicht entsprechend große Kosten; maßgeblich ist der ' +
+      'API-Gegenwert in USD, nicht die Token-Zahl.';
+  }
+}
+
+/* ---------------------------------------------------------
+   Absprung nach Jira
+   Nur wenn Jira eingeschaltet ist UND das Kuerzel zu einem der dort
+   gefuehrten Vorgangsbereiche gehoert. Sonst zeigte der Knopf bei jedem
+   frei benannten Vorgang auf eine Seite, die es nicht gibt.
+   --------------------------------------------------------- */
+function jiraLink(key) {
+  const c = (state.summary && state.summary.config) || {};
+  const basis = c.jiraBaseUrl;
+  if (!basis || !key) return '';
+  const bereiche = Array.isArray(c.jiraProjectKeys) ? c.jiraProjectKeys : [];
+  const praefix = String(key).split('-')[0];
+  if (bereiche.length && !bereiche.includes(praefix)) return '';
+  const url = String(basis).replace(/\/$/, '') + '/browse/' + encodeURIComponent(key);
+  return '<a class="btn" href="' + esc(url) + '" target="_blank" rel="noopener" ' +
+         'title="Vorgang in Jira öffnen">In Jira öffnen</a> ';
+}
+
+/* ---------------------------------------------------------
+   Verlauf: Tag, Monat oder Jahr
+   Alle drei Reihen kommen fertig summiert vom Server (metrics.byPeriod) —
+   im Frontend wird nicht nachgerechnet, sonst gaebe es die Summe zweimal.
+   --------------------------------------------------------- */
+const KOERNUNG_TEXT = {
+  tag: { note: 'je Tag in USD', achse: (t) => t.slice(8) + '.' + t.slice(5, 7) + '.', voll: (t) => datum(t) },
+  monat: { note: 'je Monat in USD', achse: (t) => t.slice(5, 7) + '/' + t.slice(2, 4), voll: (t) => MONATE[+t.slice(5, 7) - 1] + ' ' + t.slice(0, 4) },
+  jahr: { note: 'je Jahr in USD', achse: (t) => t, voll: (t) => t },
+};
+const MONATE = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
+                'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
+
+function zeichneVerlauf() {
+  const d = state.summary;
+  if (!d) return;
+  const k = state.koernung;
+  const quelle = k === 'jahr' ? d.years : (k === 'monat' ? d.months : d.days);
+  const reihe = Array.isArray(quelle) ? quelle : [];
+  const t = KOERNUNG_TEXT[k] || KOERNUNG_TEXT.tag;
+
+  const punkte = reihe.map((r) => ({
+    wert: r.cost_usd || 0,
+    label: t.voll(String(r.day || '')),
+    achse: t.achse(String(r.day || '')),
+    neben: num(r.total_tokens) + ' Tokens · ' + num(r.requests) + ' Requests',
+  }));
+
+  // Die Achse traegt die kurze Form, die Zeigeranzeige die ausgeschriebene.
+  document.getElementById('c-days').innerHTML = linienChart(
+    punkte.map((p) => ({ wert: p.wert, label: p.achse, titel: p.label + ': ' + usd(p.wert) })),
+    { titel: 'API-Gegenwert ' + t.note, yFmt: (v) => nf2.format(v), breite: containerBreite('c-days') }
+  );
+  chartInteraktiv('c-days', punkte, { fmt: usd });
+
+  // Die Gesamtsumme steht im Kartenkopf, damit sie nicht in der Reihe
+  // gesucht werden muss — sie gilt fuer jede Koernung gleich.
+  const note = document.getElementById('c-days-note');
+  if (note) note.textContent = t.note + ' · gesamt ' + usd((d.summary || {}).cost_usd);
+}
+
+document.querySelectorAll('.zeitraum-schalter button').forEach((b) => {
+  b.addEventListener('click', () => {
+    state.koernung = b.dataset.koernung;
+    document.querySelectorAll('.zeitraum-schalter button').forEach((x) =>
+      x.setAttribute('aria-pressed', String(x === b)));
+    zeichneVerlauf();
+  });
+});
+
+/* ---------------------------------------------------------
+   Projekttabelle, wahlweise auf ein Modell eingeschraenkt
+   --------------------------------------------------------- */
+function zeichneProjekte() {
+  const d = state.summary;
+  if (!d) return;
+  const gefiltert = !!state.modellFilter;
+  const alle = gefiltert
+    ? (state.modellProjekte || [])
+    : (Array.isArray(d.projects) ? d.projects : []);
+  // Werkzeuge gehoeren keinem Kunden und stehen gesammelt in der Zeile
+  // "Werkzeugbetrieb" darunter. Einzeln zwischen den Kundenprojekten gelistet
+  // lesen sie sich wie abrechenbare Arbeit, obwohl sie es nicht sind. Wer die
+  // Aufschluesselung braucht, findet sie im Tab "Werkzeuge".
+  const projects = alle.filter((p) => !p.overhead);
+
+  const kopf = document.getElementById('s-projects-kopf');
+  if (kopf) {
+    kopf.innerHTML = gefiltert
+      ? '<span class="filter-hinweis">nur ' + esc(kurzModell(state.modellFilter)) +
+        '<button type="button" id="s-filter-weg" title="Filter aufheben" aria-label="Modellfilter aufheben">✕</button></span>' +
+        '<span class="note filter-note">Requests, Tokens und API-Gegenwert gelten für dieses Modell; ' +
+        'Aktive Std. und Arbeitswert weiterhin für das ganze Projekt.</span>'
+      : '';
+    const weg = document.getElementById('s-filter-weg');
+    if (weg) weg.addEventListener('click', () => setzeModellFilter(null));
+  }
+
+  const ziel = document.getElementById('s-projects');
+  if (!projects.length) {
+    ziel.innerHTML = '<div class="empty">Keine Projektdaten vorhanden.</div>';
+    return;
+  }
+
+  // Wem das Projekt gehoert, gehoert hierher: hier schaut man auf die Projekte.
+  // Erst im Kontakte-Tab nachsehen zu muessen, macht aus einer Angabe eine Suche.
+  const zuordnung = d.projekt_kontakt || {};
+
+  let h = '<div class="tablewrap"><table><thead><tr>' +
+    '<th>Projekt</th><th>Kunde</th><th>Requests</th><th>Tokens</th><th>API-Gegenwert USD</th>' +
+    '<th>Aktive Std.</th><th>Arbeitswert EUR</th>' +
+    '</tr></thead><tbody>';
+  for (const p of projects) {
+    // Aktivzeit und Arbeitswert kennen kein Modell: sie sind Zeitspannen
+    // zwischen Ereignissen, keine Eigenschaft eines Requests. Beim Modellfilter
+    // stehen sie deshalb weiter fuer das ganze Projekt. Sie zu verschweigen
+    // waere unbrauchbar — sie kommentarlos danebenzustellen irrefuehrend.
+    // Also anzeigen und gedaempft kennzeichnen, dass sie ungefiltert gelten.
+    const zeitTitel = gefiltert
+      ? ' title="Gilt für das ganze Projekt: Arbeitszeit lässt sich keinem einzelnen Modell zuordnen."'
+      : '';
+    const zeitSpalten = gefiltert
+      ? '<td class="dimlabel"' + zeitTitel + '>' + hrs((p.active_seconds || 0) / 3600) + '</td>' +
+        '<td class="dimlabel"' + zeitTitel + '>' + eur(p.arbeitswert) + '</td>'
+      : '<td>' + hrs((p.active_seconds || 0) / 3600) + '</td>' +
+        '<td class="eur">' + eur(p.arbeitswert) + '</td>';
+    // Ohne Kunde bleibt die Zelle nicht einfach leer: eine Leerstelle liest sich
+    // wie ein Anzeigefehler, der Hinweis nennt den Grund und den Weg dahin.
+    const kunde = zuordnung[p.project];
+    const kundeZelle = kunde && kunde.firma
+      ? '<td class="trunc" title="' + esc(kunde.firma) + '">' + esc(kunde.firma) + '</td>'
+      : '<td class="dimlabel" title="Keinem Kunden zugeordnet — im Reiter Kontakte beim Kunden eintragen.">–</td>';
+    h += '<tr>' +
+      '<td class="trunc" title="' + esc(p.project) + '">' + esc(p.project || '(ohne)') + '</td>' +
+      kundeZelle +
+      '<td>' + num(p.requests) + '</td>' +
+      '<td title="' + num(p.total_tokens) + ' Tokens">' + kurz(p.total_tokens) + '</td>' +
+      '<td class="usd">' + usd(p.cost_usd) + '</td>' +
+      zeitSpalten +
+    '</tr>';
+  }
+
+  // Zwei Summenzeilen: was einem Kunden zurechenbar ist und was nicht. Sie
+  // gelten fuer den ganzen Zeitraum — bei aktivem Modellfilter waeren sie
+  // groesser als die Zeilen darueber und damit irrefuehrend.
+  const sp = d.split;
+  if (sp && !gefiltert) {
+    h += '<tr class="summe">' +
+      '<td>Projektarbeit</td>' +
+      // Leerzelle fuer die Kundenspalte: eine Summe ueber mehrere Kunden.
+      '<td></td>' +
+      '<td>' + num(sp.arbeit.requests) + '</td>' +
+      '<td>' + kurz(sp.arbeit.total_tokens) + '</td>' +
+      '<td class="usd">' + usd(sp.arbeit.cost_usd) + '</td>' +
+      '<td>' + hrs(sp.arbeit.active_seconds / 3600) + '</td>' +
+      '<td class="eur">' + eur(sp.arbeit.arbeitswert) + '</td>' +
+    '</tr>' +
+    '<tr class="summe">' +
+      '<td class="dimlabel" title="Aufschlüsselung je Werkzeug im Tab &quot;Werkzeuge&quot;">' +
+        'Werkzeugbetrieb <span class="note">' + esc(sp.overhead_projekte.join(', ')) + '</span></td>' +
+      '<td class="dimlabel">–</td>' +
+      '<td class="dimlabel">' + num(sp.overhead.requests) + '</td>' +
+      '<td class="dimlabel">' + kurz(sp.overhead.total_tokens) + '</td>' +
+      '<td class="dimlabel">' + usd(sp.overhead.cost_usd) + '</td>' +
+      '<td class="dimlabel">' + hrs(sp.overhead.active_seconds / 3600) + '</td>' +
+      '<td class="dimlabel">nicht abrechenbar</td>' +
+    '</tr>';
+  }
+  ziel.innerHTML = h + '</tbody></table></div>';
+}
+
+async function setzeModellFilter(modell) {
+  state.modellFilter = modell;
+  if (!modell) {
+    state.modellProjekte = null;
+    zeichneProjekte();
+    return;
+  }
+  try {
+    state.modellProjekte = await hole('/api/projects?model=' + encodeURIComponent(modell));
+  } catch {
+    state.modellProjekte = [];
+  }
+  zeichneProjekte();
+}
+
+/* =========================================================
+   Ansicht TICKETS
+   ========================================================= */
+const SPALTEN = [
+  { key: 'ticket',            label: 'Ticket',       txt: true },
+  { key: 'requests',          label: 'Requests' },
+  { key: 'total_tokens',      label: 'Tokens' },
+  { key: 'api_gegenwert_usd', label: 'API-Gegenwert USD' },
+  { key: 'abo_anteil_usd',    label: 'Abo-Anteil' },
+  { key: 'active_hours',      label: 'Aktive Std.' },
+  { key: 'lokal_tokens',      label: 'Tokens lokal' },
+  { key: 'arbeitswert',       label: 'Arbeitswert EUR' },
+  { key: 'first_day',         label: 'Zeitraum',     txt: true, nosort: false },
+];
+
+function zeichneTickets() {
+  const d = state.summary;
+  if (!d) return;
+  const rows = Array.isArray(d.tickets) ? d.tickets.slice() : [];
+
+  document.getElementById('t-count').textContent =
+    rows.length ? num(rows.length) + ' Tickets erfasst' : '';
+
+  const ziel = document.getElementById('t-table');
+  if (!rows.length) {
+    ziel.innerHTML = '<div class="empty"><span class="big">Noch keine Tickets erkannt</span>' +
+      'Sobald ein Ticket-Schlüssel (z.&nbsp;B. ABC-123) in Branch oder Sitzung auftaucht, erscheint er hier.</div>';
+    return;
+  }
+
+  // Sortieren
+  const { key, dir } = state.sort;
+  const spalte = SPALTEN.find((c) => c.key === key);
+  rows.sort((a, b) => {
+    const va = a[key], vb = b[key];
+    if (spalte && spalte.txt) return String(va || '').localeCompare(String(vb || ''), 'de') * dir;
+    return ((Number(va) || 0) - (Number(vb) || 0)) * dir;
+  });
+
+  let h = '<div class="tablewrap"><table><thead><tr>';
+  for (const c of SPALTEN) {
+    const aktiv = c.key === key;
+    h += '<th class="sortable" data-key="' + c.key + '">' + esc(c.label) +
+         '<span class="arrow">' + (aktiv ? (dir === 1 ? '▲' : '▼') : '') + '</span></th>';
+  }
+  h += '</tr></thead><tbody>';
+
+  const abrechnung = (state.summary && state.summary.abrechnung) || {};
+  for (const t of rows) {
+    const sel = state.offenesTicket === t.ticket ? ' sel' : '';
+    const abr = abrechnung[t.ticket];
+    h += '<tr class="clickable' + sel + '" data-ticket="' + esc(t.ticket) + '">' +
+      '<td class="mono">' + esc(t.ticket) +
+        (abr ? '<span class="tag tag-abgerechnet" title="Abgerechnet: ' +
+          esc(abr.nummern.join(', ') + ' · ' + eur(abr.betrag_eur)) + '">abgerechnet</span>' : '') +
+      '</td>' +
+      '<td>' + num(t.requests) + '</td>' +
+      '<td title="' + num(t.total_tokens) + ' Tokens">' + kurz(t.total_tokens) + '</td>' +
+      '<td class="usd">' + usd(t.api_gegenwert_usd) + '</td>' +
+      '<td class="usd-neben">' + abo(t.abo_anteil_usd) + '</td>' +
+      '<td>' + hrs(t.active_hours) + '</td>' +
+      '<td title="' + (t.lokal_tokens
+        ? num(t.lokal_tokens) + ' Tokens · ' + esc((t.lokal_modelle || []).join(', '))
+        : 'keine lokalen Modelle') + '">' +
+        (t.lokal_tokens ? kurz(t.lokal_tokens) : '<span class="faint">–</span>') + '</td>' +
+      '<td class="eur">' + eur(t.arbeitswert) + '</td>' +
+      '<td class="faint">' + datum(t.first_day) + ' – ' + datum(t.last_day) + '</td>' +
+    '</tr>';
+  }
+  ziel.innerHTML = h + '</tbody></table></div>';
+
+  ziel.querySelectorAll('th.sortable').forEach((th) => {
+    th.addEventListener('click', () => {
+      const k = th.dataset.key;
+      if (state.sort.key === k) state.sort.dir *= -1;
+      else state.sort = { key: k, dir: SPALTEN.find((c) => c.key === k && c.txt) ? 1 : -1 };
+      zeichneTickets();
+    });
+  });
+
+  ziel.querySelectorAll('tr.clickable').forEach((tr) => {
+    tr.addEventListener('click', () => {
+      const k = tr.dataset.ticket;
+      state.offenesTicket = state.offenesTicket === k ? null : k;
+      zeichneTickets();
+      zeichneDetail();
+      if (state.offenesTicket) {
+        document.getElementById('detail').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    });
+  });
+
+  zeichneDetail();
+}
+
+/* Detailbereich — Abrechnungsstand, Wertaufstellung, Modelle, Tagesverlauf.
+   Alles ausser der Token-Aufteilung kommt aus /api/ticket, weil der
+   Abrechnungsstand aus den gestellten Rechnungen stammt. */
+function zeichneDetail() {
+  const box = document.getElementById('detail');
+  const key = state.offenesTicket;
+  if (!key || !state.summary) { box.classList.remove('show'); box.innerHTML = ''; return; }
+
+  const t = (state.summary.tickets || []).find((x) => x.ticket === key);
+  if (!t) { box.classList.remove('show'); box.innerHTML = ''; return; }
+
+  box.classList.add('show');
+
+
+  box.innerHTML =
+    '<div class="detail-head">' +
+      '<h2 class="mono">' + esc(t.ticket) + '</h2>' +
+      '<span class="meta">' + datum(t.first_day) + ' – ' + datum(t.last_day) + ' · ' +
+        num(t.sessions) + ' Sitzungen · ' + num(t.requests) + ' Requests · ' +
+        hrs(t.active_hours) + ' aktiv</span>' +
+      '<span style="margin-left:auto">' + jiraLink(t.ticket) +
+        '<button class="btn" id="d-close">Schließen</button></span>' +
+    '</div>' +
+
+    '<div class="detail-grid">' +
+
+      '<div>' +
+        '<h2 style="font-size:12px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin:0 0 8px">Token-Aufteilung</h2>' +
+        '<div class="tablewrap"><table style="min-width:0"><tbody>' +
+          zeile('Input', t.input_tokens) +
+          zeile('Output', t.output_tokens) +
+          zeile('Cache geschrieben', t.cache_write_tokens) +
+          zeile('Cache gelesen', t.cache_read_tokens) +
+          '<tr><td><b>Gesamt</b></td><td><b>' + num(t.total_tokens) + '</b></td></tr>' +
+        '</tbody></table></div>' +
+      '</div>' +
+
+      '<div class="calc">' +
+        '<div id="d-status" class="statuszeile"></div>' +
+        '<dl id="d-werte"><dd><small>wird geladen…</small></dd></dl>' +
+      '</div>' +
+
+    '</div>' +
+
+    '<div style="margin-top:18px">' +
+      '<h2 style="font-size:12px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin:0 0 8px">Modelle</h2>' +
+      '<div id="d-models"></div>' +
+    '</div>' +
+
+    '<div style="margin-top:18px">' +
+      '<h2 style="font-size:12px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin:0 0 8px">Tagesverlauf (API-Gegenwert USD)</h2>' +
+      '<div id="d-days"></div>' +
+    '</div>';
+
+  // Modelle des Tickets: aus dem Gesamtbestand nicht ableitbar, daher gezielt
+  // beim Server holen. /api/ticket liefert models + days für genau dieses Ticket.
+  document.getElementById('d-models').innerHTML = '<div class="empty">wird geladen…</div>';
+  document.getElementById('d-days').innerHTML = '<div class="empty">wird geladen…</div>';
+  hole('/api/ticket?key=' + encodeURIComponent(key)).then((det) => {
+    if (state.offenesTicket !== key) return;   // inzwischen umgeschaltet
+
+    // Abrechnungsstand kommt aus den gestellten Rechnungen, nicht aus einer
+    // Eingabe: was nicht in Rechnung steht, gilt als nicht abgerechnet.
+    const abr = det.abgerechnet;
+    const ds = document.getElementById('d-status');
+    const dw = document.getElementById('d-werte');
+    if (ds) ds.innerHTML = statusHtml(abr);
+    if (dw) dw.innerHTML = werteHtml(t, det.wert);
+
+    const dm = document.getElementById('d-models');
+    const dd = document.getElementById('d-days');
+    if (!dm || !dd) return;
+
+    const modellPunkte = (det.models || []).map((m) => ({
+      label: kurzModell(m.model),
+      wert: m.cost_usd || 0,
+      neben: num(m.requests) + ' Requests',
+      titel: kurzModell(m.model) + ': ' + usd(m.cost_usd) + ' · ' + num(m.requests) + ' Requests',
+    }));
+    dm.innerHTML = balkenChart(modellPunkte, { fmt: usd, breite: containerBreite('d-models') });
+    chartInteraktiv('d-models', modellPunkte, { fmt: usd });
+
+    const tagPunkte = (det.days || []).map((r) => ({
+      wert: r.cost_usd || 0,
+      label: datum(r.day),
+      achse: String(r.day || '').slice(8) + '.' + String(r.day || '').slice(5, 7) + '.',
+      neben: num(r.total_tokens) + ' Tokens',
+    }));
+    dd.innerHTML = linienChart(
+      tagPunkte.map((p) => ({ wert: p.wert, label: p.achse, titel: p.label + ': ' + usd(p.wert) })),
+      { hoehe: 160, yFmt: (v) => nf2.format(v), breite: containerBreite('d-days') }
+    );
+    chartInteraktiv('d-days', tagPunkte, { fmt: usd });
+  }).catch(() => {
+    if (state.offenesTicket !== key) return;
+    const ziele = ['d-status', 'd-werte', 'd-models', 'd-days'];
+    for (const id of ziele) {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = '<div class="empty">Details konnten nicht geladen werden.</div>';
+    }
+  });
+
+  document.getElementById('d-close').addEventListener('click', () => {
+    state.offenesTicket = null; zeichneTickets();
+  });
+}
+
+// "Abgerechnet" heisst: zu diesem Vorgang existiert mindestens eine gestellte
+// Rechnung — nicht zwingend, dass der gesamte Zeitraum darin enthalten ist.
+function statusHtml(abr) {
+  if (!abr) {
+    return '<span class="tag tag-offen">Nicht abgerechnet</span>' +
+      '<small>zu diesem Vorgang gibt es keine gestellte Rechnung</small>';
+  }
+  return '<span class="tag tag-abgerechnet" title="Es gibt eine Rechnung mit diesem Vorgang. ' +
+      'Ob der gesamte Zeitraum darin steckt, sagt der Rechnungszeitraum.">Abgerechnet</span>' +
+    '<small>' + esc(abr.nummern.join(', ') + ' · ' + eur(abr.betrag_eur)) + '</small>';
+}
+
+function zeile(label, wert) {
+  return '<tr><td class="dim">' + esc(label) + '</td><td>' + num(wert) + '</td></tr>';
+}
+
+// Margen-Ampel. Die Stufen haengen an der Zielmarge, damit sie mitwandern,
+// wenn das Ziel geaendert wird. Eine knapp verfehlte Marge ist kein Fehlschlag
+// und bekommt deshalb kein Rot — Rot ist der Bereich, in dem es wehtut.
+//   ueber Ziel      -> kraeftiges Gruen      genau Ziel   -> Gruen
+//   bis 2 Pp drunter-> Gelbgruen             bis 4 Pp     -> Gelb
+//   bis 7 Pp        -> Orange                darunter     -> Rot
+function margeKlasse(prozent, ziel) {
+  if (prozent == null) return '';
+  if (ziel == null || !(ziel > 0)) return prozent >= 0 ? 'pos' : 'neg';
+  const d = prozent - ziel;
+  if (d > 0.05) return 'm-top';
+  if (d >= -0.05) return 'm-ok';      // Rundungsfenster um das Ziel herum
+  if (d >= -2) return 'm-fast';
+  if (d >= -4) return 'm-knapp';
+  if (d > -7) return 'm-schwach';
+  return 'm-bad';   // 7 Pp unter Ziel (bei Ziel 32 also 25 %) ist rot
+}
+
+// Stellt die Wertaufstellung aus metrics.mehrwert() dar. Gerechnet wird
+// ausschliesslich auf dem Server — eine zweite Formel hier waere eine Kopie,
+// die beim naechsten Eingriff auseinanderlaeuft.
+// Alle Betraege in Euro. Die Dollarwerte stehen zusaetzlich als Herkunft dabei,
+// damit nachvollziehbar bleibt, woraus die Euro-Zahl entstanden ist.
+function werteHtml(t, w) {
+  if (!w) return '<dd><small>Werte nicht verfügbar</small></dd>';
+  const vz = (v) => (v > 0 ? 'pos' : (v < 0 ? 'neg' : ''));
+  const geld = (v) => '<dd class="' + vz(v) + '">' + eur(v) + '</dd>';
+  const leer = (text) => '<dd><small>' + text + '</small></dd>';
+
+  // Prozentzeile nur, wenn der Bezugswert existiert.
+  const mitProzent = (betrag, prozent) =>
+    '<dd class="' + vz(betrag) + '">' + eur(betrag) +
+      (prozent != null ? ' <small>(' + nf1.format(prozent) + ' %)</small>' : '') + '</dd>';
+
+  const erloesHerkunft = w.erloes_ist_rechnung ? 'gestellte Rechnung' : 'Arbeitswert, noch nicht abgerechnet';
+
+  // Soll/Ist nur zeigen, wenn eine Zielmarge hinterlegt ist.
+  const zielZeile = w.zielmarge_prozent == null ? '' :
+    '<dt>Zielmarge <small>angestrebt</small></dt>' +
+      (w.zielmarge_abweichung == null
+        ? '<dd><small>' + nf1.format(w.zielmarge_prozent) + ' %</small></dd>'
+        : '<dd class="' + margeKlasse(w.marge_prozent, w.zielmarge_prozent) + '">' +
+          nf1.format(w.zielmarge_prozent) + ' % <small>(' +
+          (w.zielmarge_abweichung > 0 ? '+' : '') +
+          nf1.format(w.zielmarge_abweichung) + ' Pp)</small></dd>');
+
+  return '' +
+    '<dt>Arbeitswert <small>' + hrs(t.active_hours) + ' × Stundensatz</small></dt>' +
+      '<dd class="eur">' + eur(w.arbeitswert) + '</dd>' +
+    '<dt>API-Gegenwert <small>aus ' + usd(t.api_gegenwert_usd) + '</small></dt>' +
+      '<dd class="eur">' + eur(w.api_gegenwert) + '</dd>' +
+    // Lokale Modelle nur zeigen, wenn welche liefen. Eine Nullzeile bei jedem
+    // Vorgang macht die Aufstellung laenger, ohne etwas zu sagen.
+    (t.lokal_tokens
+      ? '<dt>Lokale Modelle <small>' + kurz(t.lokal_tokens) + ' Tokens × ' +
+          eur(t.lokal_eur_pro_mio) + '/Mio.</small></dt>' +
+        '<dd class="eur">' + eur(t.lokal_betrag_eur) + '</dd>'
+      : '') +
+    '<div class="sep"></div>' +
+    '<dt>Gegenwert gesamt</dt><dd class="eur">' + eur(w.gegenwert) + '</dd>' +
+    '<dt>Rechnungsbetrag</dt>' +
+      (w.erloes_ist_rechnung ? '<dd class="eur">' + eur(w.rechnungsbetrag) + '</dd>'
+                             : leer('noch nicht abgerechnet')) +
+    '<dt>Mehrwert <small>Gegenwert − Rechnung</small></dt>' + geld(w.mehrwert) +
+    '<div class="sep"></div>' +
+
+    '<dt>Erlös <small>' + erloesHerkunft + '</small></dt>' +
+      '<dd class="eur">' + eur(w.erloes) + '</dd>' +
+    '<dt>Abo-Anteil <small>Sachkosten, aus ' + abo(t.abo_anteil_usd) + '</small></dt>' +
+      '<dd class="eur">' + eur(w.eigene_kosten) + '</dd>' +
+    (w.lokal_kosten
+      ? '<dt>Lokale Rechenzeit <small>Sachkosten, ' + hrs(w.lokal_stunden) +
+          ' Strom und Abschreibung</small></dt>' +
+        '<dd class="eur">' + eur(w.lokal_kosten) + '</dd>'
+      : '') +
+    '<dt>Deckungsbeitrag <small>Erlös − Sachkosten (Abo und lokale Rechenzeit)</small></dt>' +
+      (w.deckungsbeitrag == null ? leer('kein Erlös')
+                                 : mitProzent(w.deckungsbeitrag, w.deckungsbeitrag_prozent)) +
+    '<div class="sep"></div>' +
+
+    '<dt>Eigene Arbeitszeit <small>' + hrs(t.active_hours) + ' × ' +
+        (w.selbstkosten_stunde > 0 ? eur(w.selbstkosten_stunde) : '?') + ' Selbstkosten</small></dt>' +
+      (w.zeitkosten == null ? leer('kein Selbstkostensatz in config.json')
+                            : '<dd class="eur">' + eur(w.zeitkosten) + '</dd>') +
+    '<dt>Marge <small>nach Sachkosten und eigener Zeit</small></dt>' +
+      (w.marge == null
+        ? leer('Selbstkostensatz fehlt')
+        : '<dd class="' + margeKlasse(w.marge_prozent, w.zielmarge_prozent) + '">' +
+            eur(w.marge) +
+            (w.marge_prozent != null ? ' <small>(' + nf1.format(w.marge_prozent) + ' %)</small>' : '') +
+          '</dd>') +
+    zielZeile +
+    vergleichZeile(t, w) +
+    '<div class="sep"></div>' +
+    '<dt><small>Umrechnung</small></dt>' +
+      '<dd><small>1 USD = ' + nf2.format(w.kurs) + ' EUR (fest, aus config.json)</small></dd>';
+}
+
+// Vergleichsaufwand ohne KI. Bewusst nur Zeit und ohne Ampelfarbe: die Farben
+// sind der Zielabweichung vorbehalten, und ein Eurobetrag waere hier ein
+// hypothetischer Preis neben einem echten. Die Bezugsgroesse steht im Label,
+// damit niemand die Zahl fuer eine Messung haelt.
+function vergleichZeile(t, w) {
+  if (w.vergleich_stunden == null) {
+    return '<div class="sep"></div>' +
+      '<dt>Vergleichsaufwand <small>klassische Entwicklung ohne KI</small></dt>' +
+      '<dd><small>kein Vergleichsfaktor hinterlegt</small></dd>';
+  }
+  return '<div class="sep"></div>' +
+    '<dt>Vergleichsaufwand <small>geschätzt, Faktor ' + nf2.format(w.vergleich_faktor) +
+      ' auf die erfassten ' + hrs(t.active_hours) + '</small></dt>' +
+    '<dd>' + hrs(w.vergleich_stunden) +
+      ' <small>(+' + hrs(w.vergleich_mehrstunden) + ')</small></dd>';
+}
+
+/* =========================================================
+   Einstellungen
+   Werte, die sonst nur in config.json stehen. Geschrieben wird ueber
+   /api/einstellungen; der Server prueft die Grenzen noch einmal selbst,
+   die Angaben hier sind nur die Bedienhilfe.
+   ========================================================= */
+const E_HILFE = {
+  stundensatz: 'Gilt für Projekte ohne eigenen Satz.',
+  selbstkostenStunde: 'Was eine Arbeitsstunde kostet, bevor Gewinn entsteht — eigene Zeit zu Marktwert plus anteilige Sachkosten. Basis der Marge; steht hier 0, wird nur der Deckungsbeitrag ausgewiesen. Herleitung siehe Kommentar in config.json.',
+  zielmargeProzent: 'Angestrebter Gewinnanteil am Erlös. Reiner Soll-Ist-Vergleich, verändert keine Rechnung. 0 blendet den Vergleich aus.',
+  aboPreisMonat: 'Monatspreis des Claude-Abos. Wird anteilig auf die Vorgänge verteilt.',
+  usdToEur: 'Fester Umrechnungskurs. Gestellte Rechnungen behalten den Kurs, der beim Erstellen galt.',
+  gapMinutes: 'Ab dieser Pause zählt die Aktivzeit nicht weiter — trennt echte Arbeit von offenen Fenstern.',
+  lokalEurProMioTokens: 'Pauschale je Million Tokens für lokal laufende Modelle. Erscheint als eigene Rechnungsposition und folgt dem Projektrabatt. 0 schaltet die Position ab — die Nutzung bleibt dann nur informativ sichtbar.',
+  lokalSelbstkostenStunde: 'Was eine Stunde lokaler Rechenzeit tatsächlich kostet (Strom plus anteilige Abschreibung der Grafikkarte). Geht nur in die Marge ein, nie auf eine Rechnung.',
+  lokalZuordnungsfenster: 'Lokale Anfragen tragen kein Projekt. Sie werden dem Vorgang zugeschlagen, an dem in diesem Zeitfenster ringsum gearbeitet wurde. Größer als das Fenster für Werkzeuge, weil Vorarbeit der eigentlichen Sitzung oft vorausgeht.',
+  vergleichsFaktor: 'Rein darstellend: um welchen Faktor hätte dieselbe Arbeit ohne KI länger gedauert. Ausgewiesen wird nur Zeit, nie ein Betrag. 0 blendet die Angabe aus, sonst sind 1 bis 1,5 zulässig — die Studienlage trägt nicht mehr (Begründung im Kommentar in config.json).',
+};
+
+let eGeladen = false;
+
+async function ladeEinstellungen() {
+  const ziel = document.getElementById('e-felder');
+  if (!ziel) return;
+  try {
+    const d = await hole('/api/einstellungen');
+    let h = '<dl class="e-liste">';
+    for (const [feld, info] of Object.entries(d.werte || {})) {
+      const ganzzahlig = feld === 'gapMinutes' || feld === 'lokalZuordnungsfenster';
+      const schritt = ganzzahlig ? '1' : '0.01';
+      // Felder mit Aus-Wert lassen auch diesen zu; das HTML-Minimum muss dann
+      // tiefer liegen, sonst weist der Browser eine Eingabe ab, die der Server
+      // annimmt — und der Nutzer sucht den Fehler bei sich.
+      const minAttr = info.aus !== undefined ? Math.min(info.aus, info.min) : info.min;
+      h += '<dt><label for="e-' + feld + '">' + esc(info.label) + '</label>' +
+             '<small>' + esc(E_HILFE[feld] || '') + '</small></dt>' +
+           '<dd><input id="e-' + feld + '" class="feld" type="number" inputmode="decimal" ' +
+             'step="' + schritt + '" min="' + minAttr + '" max="' + info.max + '" ' +
+             'data-feld="' + feld + '" value="' + esc(String(info.wert ?? '')) + '">' +
+             '<span class="e-einheit">' + esc(einheitFuer(feld, d.waehrung)) + '</span></dd>';
+    }
+    ziel.innerHTML = h + '</dl>';
+    eGeladen = true;
+  } catch (err) {
+    ziel.innerHTML = '<div class="empty">Einstellungen nicht geladen: ' + esc(err.message) + '</div>';
+  }
+}
+
+function einheitFuer(feld, waehrung) {
+  if (feld === 'vergleichsFaktor') return '× (0 = aus)';
+  if (feld === 'zielmargeProzent') return '%';
+  if (feld === 'gapMinutes') return 'Minuten';
+  if (feld === 'lokalZuordnungsfenster') return 'Minuten';
+  if (feld === 'lokalEurProMioTokens') return (waehrung || 'EUR') + ' / Mio. Tokens';
+  if (feld === 'usdToEur') return 'EUR je USD';
+  if (feld === 'aboPreisMonat') return 'USD';
+  return (waehrung || 'EUR') + ' / h';
+}
+
+async function speichereEinstellungen() {
+  const status = document.getElementById('e-status');
+  const knopf = document.getElementById('e-speichern');
+  const felder = document.querySelectorAll('#e-felder input[data-feld]');
+  if (!felder.length) return;
+
+  const nutzlast = {};
+  for (const f of felder) nutzlast[f.dataset.feld] = f.value;
+
+  knopf.disabled = true;
+  status.textContent = 'wird gespeichert…';
+  status.className = 'saetze-status';
+  try {
+    const r = await fetch('/api/einstellungen', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(nutzlast),
+    });
+    const antwort = await r.json();
+    if (!r.ok || antwort.error) throw new Error(antwort.error || 'Speichern fehlgeschlagen');
+    status.textContent = 'Gespeichert. Die Auswertung rechnet ab sofort damit.';
+    status.className = 'saetze-status ok';
+    // Zahlen neu holen, sonst stehen im Dashboard noch die alten Werte.
+    await ladeSummary();
+    if (state.offenesTicket) zeichneDetail();
+  } catch (err) {
+    status.textContent = err.message;
+    status.className = 'saetze-status err';
+  } finally {
+    knopf.disabled = false;
+  }
+}
+
+document.getElementById('e-speichern').addEventListener('click', speichereEinstellungen);
+
+/* =========================================================
+   Rechnungs-Stammdaten
+   Anders als die Zahlen oben duerfen sie unvollstaendig gespeichert werden —
+   sie entstehen schrittweise. Was fuer eine Rechnung fehlt, meldet der Server
+   zurueck (dieselbe Pruefung, die auch das Erstellen abbricht), und steht als
+   Warnzeile unter den Feldern.
+   ========================================================= */
+const SD_HILFE = {
+  name: 'Wie du auf der Rechnung stehst — vollständiger Name oder Firmierung.',
+  anschrift: 'Eine Zeile je Zeile: Straße, dann PLZ und Ort.',
+  steuernummer: 'Steuernummer oder USt-IdNr. — eines von beiden genügt.',
+  ustIdNr: 'Nur nötig, wenn keine Steuernummer angegeben ist oder du innergemeinschaftlich abrechnest.',
+  bank: 'Bleibt das Feld leer, entfällt der Zahlungsblock auf der Rechnung.',
+  iban: 'Ohne Leerzeichen oder mit — wird beim Speichern vereinheitlicht.',
+  bic: 'Optional, bei deutschen IBANs meist entbehrlich.',
+  kleinunternehmer: 'Aktiv: keine Umsatzsteuer, dafür der Hinweis nach § 19 UStG auf der Rechnung.',
+  ustSatz: 'Gilt nur bei Regelbesteuerung. Bereits gestellte Rechnungen behalten ihren Satz.',
+  zahlungszielTage: 'Tage ab Rechnungsdatum bis zur Fälligkeit.',
+};
+
+let sdGeladen = false;
+
+function sdWarnung(fehlt) {
+  if (!fehlt || !fehlt.length) return '';
+  const namen = {
+    'rechnung.aussteller.name': 'Name',
+    'rechnung.aussteller.anschrift': 'Anschrift',
+    'rechnung.aussteller.steuernummer oder ustIdNr': 'Steuernummer oder USt-IdNr.',
+  };
+  const liste = fehlt.map((f) => namen[f] || f).join(', ');
+  return '<p class="hinweis" id="sd-fehlt">Rechnungen lassen sich erst erstellen, wenn ' +
+         'diese Pflichtangaben stehen: <strong>' + esc(liste) + '</strong>.</p>';
+}
+
+async function ladeStammdaten() {
+  const ziel = document.getElementById('sd-felder');
+  if (!ziel) return;
+  try {
+    const d = await hole('/api/stammdaten');
+    let h = '<dl class="e-liste">';
+    for (const [feld, info] of Object.entries(d.werte || {})) {
+      const id = 'sd-' + feld;
+      let eingabe;
+      if (info.typ === 'schalter') {
+        eingabe = '<input id="' + id + '" type="checkbox" data-feld="' + feld + '" data-typ="schalter"' +
+                  (info.wert ? ' checked' : '') + '>';
+      } else if (info.typ === 'zeilen') {
+        const text = Array.isArray(info.wert) ? info.wert.join('\n') : String(info.wert || '');
+        eingabe = '<textarea id="' + id + '" class="feld" rows="' + (info.zeilen || 4) + '" ' +
+                  'data-feld="' + feld + '" data-typ="zeilen">' + esc(text) + '</textarea>';
+      } else if (info.typ === 'zahl') {
+        eingabe = '<input id="' + id + '" class="feld" type="number" inputmode="decimal" step="0.01" ' +
+                  'min="' + info.min + '" max="' + info.max + '" data-feld="' + feld + '" data-typ="zahl" ' +
+                  'value="' + esc(String(info.wert ?? '')) + '">';
+      } else {
+        eingabe = '<input id="' + id + '" class="feld" type="text" maxlength="' + info.max + '" ' +
+                  'data-feld="' + feld + '" data-typ="text" value="' + esc(String(info.wert ?? '')) + '">';
+      }
+      h += '<dt><label for="' + id + '">' + esc(info.label) + (info.pflicht ? ' *' : '') + '</label>' +
+             '<small>' + esc(SD_HILFE[feld] || '') + '</small></dt>' +
+           '<dd>' + eingabe + '</dd>';
+    }
+    ziel.innerHTML = h + '</dl>' + sdWarnung(d.fehlt);
+    sdSatzSperre();
+    const schalter = document.getElementById('sd-kleinunternehmer');
+    if (schalter) schalter.addEventListener('change', sdSatzSperre);
+    sdGeladen = true;
+  } catch (err) {
+    ziel.innerHTML = '<div class="empty">Stammdaten nicht geladen: ' + esc(err.message) + '</div>';
+  }
+}
+
+// Bei Kleinunternehmern gibt es keinen Steuersatz. Das Feld bleibt sichtbar,
+// damit der Wert beim Zurueckschalten erhalten ist, nimmt aber keine Eingabe an.
+function sdSatzSperre() {
+  const schalter = document.getElementById('sd-kleinunternehmer');
+  const satz = document.getElementById('sd-ustSatz');
+  if (!schalter || !satz) return;
+  satz.disabled = schalter.checked;
+  satz.title = schalter.checked ? 'Nach § 19 UStG wird keine Umsatzsteuer ausgewiesen.' : '';
+}
+
+async function speichereStammdaten() {
+  const status = document.getElementById('sd-status');
+  const knopf = document.getElementById('sd-speichern');
+  const felder = document.querySelectorAll('#sd-felder [data-feld]');
+  if (!felder.length) return;
+
+  const nutzlast = {};
+  for (const f of felder) {
+    nutzlast[f.dataset.feld] = f.dataset.typ === 'schalter' ? f.checked : f.value;
+  }
+
+  knopf.disabled = true;
+  status.textContent = 'wird gespeichert…';
+  status.className = 'saetze-status';
+  try {
+    const r = await fetch('/api/stammdaten', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(nutzlast),
+    });
+    const antwort = await r.json();
+    if (!r.ok || antwort.error) throw new Error(antwort.error || 'Speichern fehlgeschlagen');
+
+    const fehlt = antwort.fehlt || [];
+    status.textContent = fehlt.length
+      ? 'Gespeichert. Für Rechnungen fehlen noch Pflichtangaben.'
+      : 'Gespeichert. Die Stammdaten sind vollständig.';
+    status.className = 'saetze-status ' + (fehlt.length ? 'err' : 'ok');
+
+    const alt = document.getElementById('sd-fehlt');
+    if (alt) alt.remove();
+    const ziel = document.getElementById('sd-felder');
+    if (fehlt.length && ziel) ziel.insertAdjacentHTML('beforeend', sdWarnung(fehlt));
+  } catch (err) {
+    status.textContent = err.message;
+    status.className = 'saetze-status err';
+  } finally {
+    knopf.disabled = false;
+  }
+}
+
+document.getElementById('sd-speichern').addEventListener('click', speichereStammdaten);
+
+/* =========================================================
+   Angebote
+   Zwei Quellen fuer Positionen: frei geschaetzte Posten und uebernommene
+   Vorgaenge. Anders als bei der Rechnung darf hier geloescht werden — ein
+   Angebot ist keine steuerlich relevante Aufzeichnung.
+   ========================================================= */
+const aZustand = { posten: [], zeilen: [], gewaehlt: new Set() };
+
+// wo = Feld-ID. Angebotsaktionen laufen aus zwei Tabs; die Rueckmeldung muss
+// dort stehen, wo geklickt wurde, sonst bleibt sie ungesehen.
+function aStatus(text, art, wo) {
+  const el = document.getElementById(wo || 'a-status');
+  if (!el) return;
+  el.className = 'saetze-status' + (art ? ' ' + art : '');
+  el.textContent = text;
+}
+
+function zeichnePosten() {
+  const ziel = document.getElementById('a-posten');
+  if (!aZustand.posten.length) {
+    ziel.innerHTML = '<div class="empty">Noch keine Position. Über den Knopf unten hinzufügen.</div>';
+    aSummeAktualisieren();
+    return;
+  }
+  let h = '<div class="tablewrap"><table class="saetze"><thead><tr>' +
+    '<th>Leistung</th><th>Art</th><th>Stunden</th><th>Satz EUR</th><th>Betrag</th><th></th>' +
+    '</tr></thead><tbody>';
+  aZustand.posten.forEach((p, i) => {
+    const pauschal = p.typ === 'pauschal';
+    h += '<tr data-i="' + i + '">' +
+      '<td><input class="feld p-bez" type="text" maxlength="200" value="' + esc(p.bezeichnung) + '" placeholder="z. B. Konzept und Umsetzung"></td>' +
+      '<td><select class="feld p-typ" aria-label="Abrechnungsart">' +
+        '<option value="stunden"' + (pauschal ? '' : ' selected') + '>Stunden</option>' +
+        '<option value="pauschal"' + (pauschal ? ' selected' : '') + '>Pauschal</option>' +
+      '</select></td>' +
+      // Bei einer Pauschale steht der Festpreis in der Betragsspalte; Stunden
+      // und Satz entfallen, statt mit unbenutzbaren Feldern dazustehen.
+      (pauschal
+        ? '<td class="ergibt">–</td><td class="ergibt">–</td>' +
+          '<td><input class="feld p-betrag" type="number" step="0.01" min="0" max="1000000" value="' + esc(String(p.betrag ?? '')) + '" aria-label="Festpreis in Euro"></td>'
+        : '<td><input class="feld p-std" type="number" step="0.25" min="0" max="10000" value="' + esc(String(p.stunden ?? '')) + '"></td>' +
+          '<td><input class="feld p-satz" type="number" step="0.01" min="0" max="10000" value="' + esc(String(p.satz ?? '')) + '"></td>' +
+          '<td class="ergibt">' + eur((Number(p.stunden) || 0) * (Number(p.satz) || 0)) + '</td>') +
+      '<td><button class="btn p-weg" title="Position entfernen">✕</button></td>' +
+    '</tr>';
+  });
+  ziel.innerHTML = h + '</tbody></table></div>';
+
+  ziel.querySelectorAll('tr[data-i]').forEach((tr) => {
+    const i = Number(tr.dataset.i);
+    const lies = () => {
+      const alt = aZustand.posten[i];
+      if (alt.typ === 'pauschal') {
+        aZustand.posten[i] = {
+          bezeichnung: tr.querySelector('.p-bez').value,
+          typ: 'pauschal',
+          betrag: tr.querySelector('.p-betrag').value,
+        };
+      } else {
+        aZustand.posten[i] = {
+          bezeichnung: tr.querySelector('.p-bez').value,
+          stunden: tr.querySelector('.p-std').value,
+          satz: tr.querySelector('.p-satz').value,
+        };
+        tr.querySelector('.ergibt').textContent =
+          eur((Number(aZustand.posten[i].stunden) || 0) * (Number(aZustand.posten[i].satz) || 0));
+      }
+      aSummeAktualisieren();
+    };
+    tr.querySelectorAll('input').forEach((el) => el.addEventListener('input', lies));
+    // Der Wechsel der Art aendert die Felder der Zeile, deshalb neu zeichnen.
+    tr.querySelector('.p-typ').addEventListener('change', (ev) => {
+      const p = aZustand.posten[i];
+      aZustand.posten[i] = ev.target.value === 'pauschal'
+        ? { bezeichnung: p.bezeichnung, typ: 'pauschal', betrag: '' }
+        : { bezeichnung: p.bezeichnung, stunden: '', satz: standardSatz() };
+      zeichnePosten();
+    });
+    tr.querySelector('.p-weg').addEventListener('click', () => {
+      aZustand.posten.splice(i, 1);
+      zeichnePosten();
+    });
+  });
+  aSummeAktualisieren();
+}
+
+function aSummeAktualisieren() {
+  // Nur die Vorschau. Verbindlich rechnet allein der Server — zwei Rechenwege
+  // fuer denselben Betrag laufen frueher oder spaeter auseinander.
+  const ausPosten = aZustand.posten.reduce((s, p) => s + (p.typ === 'pauschal'
+    ? (Number(p.betrag) || 0)
+    : (Number(p.stunden) || 0) * (Number(p.satz) || 0)), 0);
+  const ausVorgaengen = aZustand.zeilen
+    .filter((t) => aZustand.gewaehlt.has(t.ticket))
+    .reduce((s, t) => s + (t.arbeitswert || 0), 0);
+  const summe = ausPosten + ausVorgaengen;
+  const anzahl = aZustand.posten.length + aZustand.gewaehlt.size;
+  document.getElementById('a-summe').textContent = anzahl
+    ? anzahl + ' Position' + (anzahl === 1 ? '' : 'en') + ' · ' + eur(summe)
+    : '–';
+}
+
+// Blendet die geladene Vorgangsliste wieder aus. Die Auswahl faellt dabei
+// weg — was nicht sichtbar ist, darf nicht stillschweigend mitgerechnet werden.
+function leereAngebotsVorgaenge() {
+  aZustand.zeilen = [];
+  aZustand.gewaehlt.clear();
+  document.getElementById('a-tickets').innerHTML =
+    '<div class="empty">Noch keine Vorgänge geladen.</div>';
+  document.getElementById('a-laden').textContent = 'Vorgänge laden';
+  aSummeAktualisieren();
+}
+
+async function ladeAngebotsVorgaenge() {
+  if (aZustand.zeilen.length) { leereAngebotsVorgaenge(); return; }
+  const von = document.getElementById('a-von').value;
+  const bis = document.getElementById('a-bis').value;
+  const ziel = document.getElementById('a-tickets');
+  if (!von || !bis) { ziel.innerHTML = '<div class="empty">Bitte beide Datumsfelder ausfüllen.</div>'; return; }
+  if (von > bis) { ziel.innerHTML = '<div class="empty">Das Startdatum liegt nach dem Enddatum.</div>'; return; }
+
+  ziel.innerHTML = '<div class="empty">wird geladen…</div>';
+  aZustand.gewaehlt.clear();
+  try {
+    const d = await hole('/api/summary?from=' + von + '&to=' + bis);
+    aZustand.zeilen = (d.tickets || []).filter((t) => t.arbeitswert > 0);
+  } catch (err) {
+    ziel.innerHTML = '<div class="empty">Vorgänge nicht geladen: ' + esc(err.message) + '</div>';
+    return;
+  }
+  if (!aZustand.zeilen.length) {
+    ziel.innerHTML = '<div class="empty">Im Zeitraum gibt es keine abrechenbaren Vorgänge.</div>';
+    aSummeAktualisieren();
+    return;
+  }
+  document.getElementById('a-laden').textContent = 'Vorgänge ausblenden';
+
+  let h = '<div class="tablewrap"><table class="rechnung"><thead><tr>' +
+    '<th><input type="checkbox" id="a-alle"></th><th>Vorgang</th><th>Stunden</th><th>Betrag EUR</th>' +
+    '</tr></thead><tbody>';
+  for (const t of aZustand.zeilen) {
+    h += '<tr><td><input type="checkbox" data-ticket="' + esc(t.ticket) + '"></td>' +
+      '<td class="mono">' + esc(t.ticket) + '</td>' +
+      '<td>' + hrs(t.active_hours) + '</td>' +
+      '<td class="eur">' + eur(t.arbeitswert) + '</td></tr>';
+  }
+  ziel.innerHTML = h + '</tbody></table></div>';
+
+  ziel.querySelectorAll('input[data-ticket]').forEach((c) => {
+    c.addEventListener('change', () => {
+      if (c.checked) aZustand.gewaehlt.add(c.dataset.ticket);
+      else aZustand.gewaehlt.delete(c.dataset.ticket);
+      aSummeAktualisieren();
+    });
+  });
+  const alle = document.getElementById('a-alle');
+  if (alle) alle.addEventListener('change', () => {
+    ziel.querySelectorAll('input[data-ticket]').forEach((c) => {
+      c.checked = alle.checked;
+      if (alle.checked) aZustand.gewaehlt.add(c.dataset.ticket);
+      else aZustand.gewaehlt.delete(c.dataset.ticket);
+    });
+    aSummeAktualisieren();
+  });
+  aSummeAktualisieren();
+}
+
+async function erstelleAngebot() {
+  const knopf = document.getElementById('a-erstellen');
+  const name = document.getElementById('a-name').value.trim();
+  if (!name) { aStatus('Der Empfänger braucht mindestens einen Namen.', 'err'); return; }
+
+  // Positionen mit leerer Bezeichnung fallen unten raus. Ohne diese Pruefung
+  // ginge ein Angebot ohne jede Position wortlos an den Server.
+  const echtePosten = aZustand.posten.filter((p) => String(p.bezeichnung || '').trim());
+  if (!echtePosten.length && !aZustand.gewaehlt.size) {
+    aStatus(aZustand.posten.length
+      ? 'Jede Position braucht eine Bezeichnung.'
+      : 'Ein Angebot braucht mindestens eine Position oder einen ausgewählten Vorgang.', 'err');
+    return;
+  }
+
+  const nutzlast = {
+    posten: echtePosten
+      .map((p) => (p.typ === 'pauschal'
+        ? { bezeichnung: p.bezeichnung, typ: 'pauschal', betrag_eur: p.betrag }
+        : { bezeichnung: p.bezeichnung, stunden: p.stunden, satz: p.satz })),
+    empfaenger: {
+      name,
+      anschrift: document.getElementById('a-anschrift').value
+        .split('\n').map((z) => z.trim()).filter(Boolean),
+    },
+    gueltigTage: Number(document.getElementById('a-gueltig').value) || 30,
+    // Nur gesetzt, wenn der Name aus der Kontaktsuche uebernommen und seither
+    // nicht veraendert wurde. Der Empfaenger oben bleibt die Abschrift.
+    kontaktId: aZustand.kontaktId || undefined,
+  };
+  if (aZustand.gewaehlt.size) {
+    nutzlast.from = document.getElementById('a-von').value;
+    nutzlast.to = document.getElementById('a-bis').value;
+    nutzlast.tickets = [...aZustand.gewaehlt];
+  }
+
+  knopf.disabled = true;
+  aStatus('wird erstellt…');
+  try {
+    const r = await fetch('/api/angebot', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(nutzlast),
+    });
+    const a = await r.json();
+    if (!r.ok || a.error) throw new Error(a.error || 'Erstellen fehlgeschlagen');
+    aStatus('Angebot ' + a.nr + ' erstellt (' + eur(a.brutto_eur) + ').', 'ok');
+    // Vollstaendig leeren. Bleibt der vorige Empfaenger stehen, geht das
+    // naechste Angebot an die falsche Anschrift.
+    aZustand.posten = [];
+    aZustand.kontaktId = null;
+    document.getElementById('a-name').value = '';
+    document.getElementById('a-anschrift').value = '';
+    document.getElementById('a-gueltig').value = '30';
+    leereAngebotsVorgaenge();
+    ladeKontakte();
+    zeichnePosten();
+    ladeAngebote();
+  } catch (err) {
+    aStatus('Nicht erstellt: ' + err.message, 'err');
+  } finally {
+    knopf.disabled = false;
+  }
+}
+
+async function ladeAngebote() {
+  const ziel = document.getElementById('a-liste');
+  let d;
+  try {
+    d = await hole('/api/angebote');
+  } catch (err) {
+    ziel.innerHTML = '<div class="empty">Angebote nicht geladen: ' + esc(err.message) + '</div>';
+    return;
+  }
+  const liste = d.angebote || [];
+  if (!liste.length) { ziel.innerHTML = '<div class="empty">Noch kein Angebot erstellt.</div>'; return; }
+
+  let h = '<div class="tablewrap"><table><thead><tr>' +
+    '<th>Nummer</th><th>Datum</th><th>Gültig bis</th><th>Empfänger</th>' +
+    '<th>Betrag</th><th>Status</th><th></th></tr></thead><tbody>';
+  for (const a of liste) {
+    // Nur Abgelehntes wird durchgestrichen. Ein angenommenes Angebot ist der
+    // Normalfall und muss lesbar bleiben — daraus entsteht ja die Rechnung.
+    h += '<tr data-nr="' + esc(a.nr) + '"' + (a.status === 'abgelehnt' ? ' class="storniert"' : '') + '>' +
+      '<td class="mono">' + esc(a.nr) + '</td>' +
+      '<td>' + esc(datum(a.erstellt_am)) + '</td>' +
+      '<td>' + esc(datum(a.gueltig_bis)) + '</td>' +
+      '<td class="trunc" title="' + esc(a.empfaenger) + '">' + esc(a.empfaenger) + '</td>' +
+      '<td class="eur">' + eur(a.brutto_eur) + '</td>' +
+      '<td><span class="a-st a-st-' + esc(a.status) + '">' + esc(a.status) + '</span>' +
+        (a.rechnung_nr ? ' <span class="tag tag-abgerechnet">' + esc(a.rechnung_nr) + '</span>' : '') + '</td>' +
+      '<td><div class="r-aktionen">' +
+        '<a class="btn" href="/angebot/' + encodeURIComponent(a.nr) + '" target="_blank" rel="noopener">Ansehen</a>' +
+        // "abgelaufen" wird beim Lesen abgeleitet und ist kein setzbarer
+        // Status — gesendet wird nur offen, angenommen oder abgelehnt.
+        // Angenommen und abgelehnt sind beide zuruecknehmbar, solange keine
+        // Rechnung daran haengt — ein Fehlklick darf keine Sackgasse sein.
+        (a.rechnung_nr ? '' :
+          (a.status === 'abgelehnt' || a.status === 'angenommen'
+            ? '<button class="btn a-status" data-status="offen">Wieder öffnen</button>'
+            : '<button class="btn a-status" data-status="angenommen">Angenommen</button>' +
+              '<button class="btn a-status" data-status="abgelehnt">Abgelehnt</button>')) +
+        (a.rechnung_nr ? '' : '<button class="btn a-rechnung">In Rechnung</button>') +
+        (a.rechnung_nr ? '' : '<button class="btn a-weg">Löschen</button>') +
+      '</div></td>' +
+    '</tr>';
+  }
+  ziel.innerHTML = h + '</tbody></table></div>';
+
+  ziel.querySelectorAll('tr[data-nr]').forEach((tr) => {
+    const nr = tr.dataset.nr;
+    const inR = tr.querySelector('.a-rechnung');
+    if (inR) inR.addEventListener('click', () => {
+      if (!confirm('Aus Angebot ' + nr + ' eine Rechnung erstellen? Das Angebot bleibt unverändert erhalten.')) return;
+      aAktion(inR, '/api/angebot-rechnung', { nr }, (a) => 'Rechnung ' + a.nr + ' aus ' + nr + ' erstellt.');
+    });
+    tr.querySelectorAll('.a-status').forEach((knopf) => {
+      knopf.addEventListener('click', () => {
+        const status = knopf.dataset.status;
+        aAktion(knopf, '/api/angebot-status', { nr, status },
+          () => 'Angebot ' + nr + ' auf "' + status + '" gesetzt.');
+      });
+    });
+    const weg = tr.querySelector('.a-weg');
+    if (weg) weg.addEventListener('click', () => {
+      if (!confirm('Angebot ' + nr + ' löschen? Das lässt sich nicht rückgängig machen.')) return;
+      aAktion(weg, '/api/angebot-loeschen', { nr }, () => 'Angebot ' + nr + ' gelöscht.');
+    });
+  });
+}
+
+async function aAktion(knopf, pfad, nutzlast, meldung, wo) {
+  const alt = knopf.textContent;
+  knopf.disabled = true;
+  knopf.textContent = '…';
+  try {
+    const r = await fetch(pfad, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(nutzlast),
+    });
+    const a = await r.json();
+    if (!r.ok || a.error) throw new Error(a.error || 'Aktion fehlgeschlagen');
+    aStatus(meldung(a), 'ok', wo);
+    ladeAngebote();
+    ladeRechnungen();
+    // Eine Annahme kann aus einem Lead einen Kunden gemacht haben.
+    ladeKontakte();
+  } catch (err) {
+    aStatus('Fehlgeschlagen: ' + err.message, 'err', wo);
+    knopf.disabled = false;
+    knopf.textContent = alt;
+  }
+}
+
+function standardSatz() {
+  return String((state.summary && state.summary.config && state.summary.config.stundensatz) || 0);
+}
+
+document.getElementById('a-posten-plus').addEventListener('click', () => {
+  aZustand.posten.push({ bezeichnung: '', stunden: '', satz: standardSatz() });
+  zeichnePosten();
+});
+
+/* =========================================================
+   Kontakte: Leads und Kunden
+   ========================================================= */
+// Der Bestand wird gehalten, weil die Kontaktsuche bei jedem Tastendruck
+// filtert. Ein Abruf je Anschlag waere fuer eine Handvoll Kontakte Unfug.
+const kZustand = { liste: [], bearbeitet: null, gewaehlt: null, filter: 'alle', suche: '' };
+
+const K_FELDER = ['firma', 'vorname', 'nachname', 'anschrift', 'steuernummer',
+  'ustIdNr', 'email', 'notiz', 'status'];
+
+function kStatus(text, art) {
+  const el = document.getElementById('k-status-text');
+  el.className = 'saetze-status' + (art ? ' ' + art : '');
+  el.textContent = text;
+}
+
+async function ladeKontakte() {
+  try {
+    const d = await hole('/api/kontakte');
+    kZustand.liste = d.kontakte || [];
+  } catch {
+    kZustand.liste = [];
+    kStatus('Kontakte konnten nicht geladen werden.', 'fehler');
+  }
+  zeichneKontakte();
+  ladeProjektnamen();
+}
+
+// Projektzuordnung als zwei Spalten. Die Auswahl steht im Zustand, nicht im
+// DOM: sie ueberlebt damit das Neuzeichnen, und die K_FELDER-Schleife fasst sie
+// gar nicht erst an (die liest .value und wuerde eine Liste verstuemmeln).
+const kProjekte = { alle: [], gewaehlt: [] };
+
+// Die Projektnamen stammen aus den Logs, nicht aus einer Pflegeliste: ein
+// Projekt, an dem nie gearbeitet wurde, kann keinem Kunden gehoeren — es gaebe
+// dazu keine abrechenbare Zeit. Ohne Zeitraum abgerufen, damit auch ein
+// ruhendes Projekt zuordenbar bleibt.
+async function ladeProjektnamen() {
+  try {
+    kProjekte.alle = (await hole('/api/projects'))
+      // Werkzeugbetrieb und lokale Modelle gehoeren keinem Kunden: ihre Kosten
+      // liegen ueber die Zeitzuordnung bereits anteilig auf den echten
+      // Vorgaengen. Zuordenbar waeren sie nur scheinbar, abrechenbar gar nicht.
+      .filter((p) => !p.overhead && p.project !== '(lokal)')
+      .map((p) => p.project).filter(Boolean).sort();
+  } catch {
+    kProjekte.alle = [];
+    kStatus('Projektliste konnte nicht geladen werden.', 'fehler');
+  }
+  zeichneProjektzuordnung();
+}
+
+function projektauswahlSetzen(namen) {
+  kProjekte.gewaehlt = [...(namen || [])];
+  zeichneProjektzuordnung();
+}
+
+function projektauswahlLesen() {
+  return [...kProjekte.gewaehlt];
+}
+
+// Links steht nur, was tatsaechlich frei ist. Ein Projekt, das schon einem
+// anderen Kunden gehoert, gar nicht erst anzubieten ist der einzige Weg, die
+// Regel "ein Projekt, ein Kunde" durchzuhalten — eine Warnung beim Klicken
+// wuerde irgendwann weggeklickt.
+function zeichneProjektzuordnung() {
+  const frei = document.getElementById('k-frei');
+  const zug = document.getElementById('k-zugeordnet');
+  if (!frei || !zug) return;
+
+  const vergeben = new Set();
+  for (const k of kZustand.liste) {
+    if (k.id === kZustand.bearbeitet) continue;
+    for (const p of k.projekte || []) vergeben.add(p);
+  }
+  const gewaehlt = new Set(kProjekte.gewaehlt);
+  const offen = kProjekte.alle.filter((p) => !gewaehlt.has(p) && !vergeben.has(p));
+
+  const zeichne = (ziel, namen, leerText) => {
+    ziel.innerHTML = namen.length
+      ? namen.map((n) => '<li role="option" data-projekt="' + esc(n) + '">' + esc(n) + '</li>').join('')
+      : '<li class="leer">' + esc(leerText) + '</li>';
+  };
+  zeichne(frei, offen, vergeben.size ? 'Alle übrigen Projekte sind vergeben.' : 'Keine Projekte gefunden.');
+  zeichne(zug, kProjekte.gewaehlt, 'Noch kein Projekt zugeordnet.');
+
+  frei.querySelectorAll('li[data-projekt]').forEach((li) => {
+    li.addEventListener('click', () => {
+      kProjekte.gewaehlt = [...kProjekte.gewaehlt, li.dataset.projekt].sort();
+      zeichneProjektzuordnung();
+    });
+  });
+  zug.querySelectorAll('li[data-projekt]').forEach((li) => {
+    li.addEventListener('click', () => {
+      kProjekte.gewaehlt = kProjekte.gewaehlt.filter((p) => p !== li.dataset.projekt);
+      zeichneProjektzuordnung();
+    });
+  });
+}
+
+// Was die Liste nach Suche und Filter tatsaechlich zeigt.
+function kSichtbar() {
+  const suche = (kZustand.suche || '').trim().toLowerCase();
+  return kZustand.liste.filter((k) => {
+    if (kZustand.filter !== 'alle' && k.status !== kZustand.filter) return false;
+    if (!suche) return true;
+    return [k.firma, k.vorname, k.nachname, k.email]
+      .filter(Boolean).join(' ').toLowerCase().includes(suche);
+  });
+}
+
+function zeichneKontakte() {
+  const ziel = document.getElementById('k-liste');
+  const zeilen = kSichtbar();
+
+  // Der zuletzt gewaehlte Kontakt kann geloescht oder weggefiltert worden sein.
+  if (kZustand.gewaehlt && !zeilen.some((k) => k.id === kZustand.gewaehlt)) kZustand.gewaehlt = null;
+
+  if (!zeilen.length) {
+    ziel.innerHTML = '<div class="empty">' + esc(kZustand.liste.length
+      ? 'Kein Kontakt passt zu Suche und Filter.'
+      : 'Noch kein Kontakt erfasst.') + '</div>';
+    zeichneKontaktDetail();
+    return;
+  }
+
+  let h = '';
+  for (const k of zeilen) {
+    const person = [k.vorname, k.nachname].filter(Boolean).join(' ');
+    const unter = [person, k.email].filter(Boolean).join(' · ');
+    h += '<button type="button" class="k-zeile" data-k="' + k.id + '"' +
+      (k.id === kZustand.gewaehlt ? ' aria-current="true"' : '') + '>' +
+      '<span class="k-firma">' + esc(k.firma) +
+        (k.status === 'kunde' ? ' <span class="k-marke kunde">Kunde</span>' : '') + '</span>' +
+      '<span class="k-unter">' + esc(unter || '–') + '</span>' +
+    '</button>';
+  }
+  ziel.innerHTML = h;
+
+  ziel.querySelectorAll('.k-zeile').forEach((b) => {
+    b.addEventListener('click', () => {
+      kZustand.gewaehlt = Number(b.dataset.k);
+      zeichneKontakte();
+    });
+  });
+  zeichneKontaktDetail();
+}
+
+function zeichneKontaktDetail() {
+  const ziel = document.getElementById('k-detail');
+  const k = kZustand.liste.find((x) => x.id === kZustand.gewaehlt);
+  if (!k) {
+    ziel.innerHTML = '<div class="empty">Links einen Kontakt wählen.</div>';
+    return;
+  }
+  const person = [k.vorname, k.nachname].filter(Boolean).join(' ');
+  const anschrift = (k.anschrift || []).filter(Boolean).join('\n');
+
+  // Die Notiz steht hier vollstaendig — in der Liste war sie nur ein title.
+  const zeile = (bez, wert) => wert
+    ? '<dt>' + esc(bez) + '</dt><dd>' + esc(wert) + '</dd>' : '';
+
+  ziel.innerHTML =
+    '<h3>' + esc(k.firma) + '</h3>' +
+    '<span class="k-marke' + (k.status === 'kunde' ? ' kunde' : '') + '">' +
+      (k.status === 'kunde' ? 'Kunde' : 'Lead') + '</span>' +
+    '<dl>' +
+      zeile('Ansprechpartner', person) +
+      zeile('E-Mail', k.email) +
+      zeile('Anschrift', anschrift) +
+      zeile('Steuernummer', k.steuernummer) +
+      zeile('USt-IdNr.', k.ustIdNr) +
+      zeile('Projekte', (k.projekte || []).join(', ')) +
+      zeile('Notiz', k.notiz) +
+    '</dl>' +
+    '<div class="r-aktionen" style="margin-top:16px">' +
+      '<button class="btn" data-k="' + k.id + '" data-tun="bearbeiten">Bearbeiten</button>' +
+      (k.status === 'lead' ? '<button class="btn" data-k="' + k.id + '" data-tun="kunde">→ Kunde</button>' : '') +
+      '<button class="btn" data-k="' + k.id + '" data-tun="loeschen">Löschen</button>' +
+    '</div>';
+
+  ziel.querySelectorAll('button[data-k]').forEach((b) => {
+    b.addEventListener('click', () => kontaktAktion(b, Number(b.dataset.k), b.dataset.tun));
+  });
+}
+
+async function kontaktAktion(knopf, id, tun) {
+  const k = kZustand.liste.find((x) => x.id === id);
+  if (!k) return;
+
+  if (tun === 'bearbeiten') {
+    kZustand.bearbeitet = id;
+    for (const f of K_FELDER) {
+      const el = document.getElementById('k-' + f);
+      el.value = f === 'anschrift' ? (k.anschrift || []).join('\n') : (k[f] || '');
+    }
+    // Die eigenen Projekte nach rechts; die Namensliste steht bereits.
+    projektauswahlSetzen(k.projekte);
+    document.getElementById('k-titel').textContent = 'Kontakt bearbeiten';
+    document.getElementById('k-speichern').textContent = 'Änderungen speichern';
+    document.getElementById('k-abbrechen').hidden = false;
+    kStatus('');
+    document.getElementById('k-firma').focus();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    return;
+  }
+
+  // Loeschen ist nicht umkehrbar und trifft Stammdaten, deshalb nachfragen.
+  if (tun === 'loeschen' && !confirm('Kontakt "' + k.firma + '" löschen?\n\nBereits erstellte Angebote und Rechnungen bleiben unverändert.')) return;
+
+  knopf.disabled = true;
+  try {
+    if (tun === 'kunde') {
+      await sende('/api/kontakt', { id, status: 'kunde' });
+      kStatus('"' + k.firma + '" ist jetzt Kunde.', 'ok');
+    } else {
+      await sende('/api/kontakt-loeschen', { id });
+      kStatus('"' + k.firma + '" gelöscht.', 'ok');
+      // Seine Projekte sind jetzt wieder ohne Kunden — sonst stuende der
+      // geloeschte Name in der Auswertung weiter neben dem Projekt.
+      ladeSummary();
+      if (kZustand.bearbeitet === id) kFormularZuruecksetzen();
+    }
+    await ladeKontakte();
+  } catch (err) {
+    kStatus(err.message, 'fehler');
+    knopf.disabled = false;
+  }
+}
+
+function kFormularZuruecksetzen() {
+  kZustand.bearbeitet = null;
+  for (const f of K_FELDER) document.getElementById('k-' + f).value = f === 'status' ? 'lead' : '';
+  projektauswahlSetzen([]);
+  document.getElementById('k-titel').textContent = 'Neuer Kontakt';
+  document.getElementById('k-speichern').textContent = 'Kontakt anlegen';
+  document.getElementById('k-abbrechen').hidden = true;
+}
+
+async function speichereKontakt() {
+  const knopf = document.getElementById('k-speichern');
+  const nutzlast = {};
+  for (const f of K_FELDER) {
+    const wert = document.getElementById('k-' + f).value;
+    nutzlast[f] = f === 'anschrift' ? wert.split('\n') : wert;
+  }
+  if (kZustand.bearbeitet) nutzlast.id = kZustand.bearbeitet;
+  nutzlast.projekte = projektauswahlLesen();
+
+  knopf.disabled = true;
+  kStatus('wird gespeichert…');
+  try {
+    const d = await sende('/api/kontakt', nutzlast);
+    kStatus((d.kontakt ? d.kontakt.firma : 'Kontakt') + ' gespeichert.', 'ok');
+    // Die Auswertung traegt den Kunden neben dem Projekt. Ohne das Nachziehen
+    // stuende dort bis zum naechsten Takt ein Strich, obwohl die Zuordnung steht.
+    ladeSummary();
+    // Der eben gespeicherte Kontakt bleibt rechts stehen — auch der neu angelegte.
+    if (d.kontakt && d.kontakt.id) kZustand.gewaehlt = d.kontakt.id;
+    kFormularZuruecksetzen();
+    await ladeKontakte();
+  } catch (err) {
+    kStatus(err.message, 'fehler');
+  } finally {
+    knopf.disabled = false;
+  }
+}
+
+document.getElementById('k-speichern').addEventListener('click', speichereKontakt);
+document.getElementById('k-abbrechen').addEventListener('click', () => {
+  kFormularZuruecksetzen();
+  kStatus('');
+});
+
+document.getElementById('k-suche').addEventListener('input', (e) => {
+  kZustand.suche = e.target.value;
+  zeichneKontakte();
+});
+document.querySelectorAll('.k-filter .chip').forEach((chip) => {
+  chip.addEventListener('click', () => {
+    kZustand.filter = chip.dataset.filter;
+    document.querySelectorAll('.k-filter .chip').forEach((c) => {
+      c.setAttribute('aria-pressed', String(c === chip));
+    });
+    zeichneKontakte();
+  });
+});
+
+/* =========================================================
+   Kontaktsuche am Empfaengerfeld
+   ========================================================= */
+// Bewusst keine datalist: bei der Auswahl muessen drei Dinge passieren (Name
+// setzen, Anschrift fuellen, Verweis merken). Eine datalist liefert nur einen
+// Text zurueck und laesst getippt und gewaehlt nicht unterscheiden — genau
+// diese Unterscheidung entscheidet, ob ein Verweis gespeichert wird.
+// Name, Anschrift und der Verweis auf den Kontakt — die drei gehoeren
+// zusammen. Herausgeloest, weil der Kundenfilter im Rechnungen-Tab denselben
+// Schritt macht: zwei Fassungen wuerden frueher oder spaeter auseinanderlaufen.
+function kontaktUebernehmen(k, feldId, anschriftId, merkeId) {
+  const feld = document.getElementById(feldId);
+  const anschrift = document.getElementById(anschriftId);
+  feld.value = k.firma;
+  const person = [k.vorname, k.nachname].filter(Boolean).join(' ');
+  anschrift.value = [person, ...(k.anschrift || [])].filter(Boolean).join('\n');
+  merkeId(k.id);
+}
+
+function kontaktPicker(feldId, anschriftId, merkeId) {
+  const feld = document.getElementById(feldId);
+  const liste = document.getElementById(feldId + '-liste');
+  let treffer = [];
+  let aktiv = -1;
+
+  const schliessen = () => {
+    liste.hidden = true;
+    liste.innerHTML = '';
+    feld.setAttribute('aria-expanded', 'false');
+    aktiv = -1;
+  };
+
+  const markiere = () => {
+    liste.querySelectorAll('li').forEach((li, i) => li.classList.toggle('aktiv', i === aktiv));
+  };
+
+  const uebernimm = (k) => {
+    kontaktUebernehmen(k, feldId, anschriftId, merkeId);
+    schliessen();
+    feld.focus();
+  };
+
+  const zeichne = () => {
+    const q = feld.value.trim().toLowerCase();
+    if (!q) return schliessen();
+    treffer = kZustand.liste.filter((k) =>
+      k.firma.toLowerCase().includes(q) ||
+      [k.vorname, k.nachname].filter(Boolean).join(' ').toLowerCase().includes(q)
+    ).slice(0, 8);
+    if (!treffer.length) return schliessen();
+
+    liste.innerHTML = treffer.map((k) => {
+      const person = [k.vorname, k.nachname].filter(Boolean).join(' ');
+      const zusatz = [person, k.status === 'kunde' ? 'Kunde' : 'Lead'].filter(Boolean).join(' · ');
+      return '<li role="option" data-id="' + k.id + '">' + esc(k.firma) +
+        '<small>' + esc(zusatz) + '</small></li>';
+    }).join('');
+    liste.hidden = false;
+    feld.setAttribute('aria-expanded', 'true');
+    aktiv = -1;
+    liste.querySelectorAll('li').forEach((li) => {
+      // mousedown statt click: ein blur des Feldes wuerde die Liste sonst
+      // schliessen, bevor der Klick ankommt.
+      li.addEventListener('mousedown', (ev) => {
+        ev.preventDefault();
+        uebernimm(treffer.find((k) => k.id === Number(li.dataset.id)));
+      });
+    });
+  };
+
+  feld.addEventListener('input', () => {
+    // Wer den Namen von Hand aendert, meint einen freien Empfaenger: der
+    // Verweis auf den Kontakt gilt nur fuer eine unveraenderte Auswahl.
+    merkeId(null);
+    zeichne();
+  });
+  feld.addEventListener('keydown', (ev) => {
+    if (liste.hidden) return;
+    if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+      ev.preventDefault();
+      aktiv = ev.key === 'ArrowDown'
+        ? Math.min(aktiv + 1, treffer.length - 1)
+        : Math.max(aktiv - 1, 0);
+      markiere();
+    } else if (ev.key === 'Enter' && aktiv >= 0) {
+      ev.preventDefault();
+      uebernimm(treffer[aktiv]);
+    } else if (ev.key === 'Escape') {
+      schliessen();
+    }
+  });
+  feld.addEventListener('blur', () => setTimeout(schliessen, 120));
+}
+
+kontaktPicker('a-name', 'a-anschrift', (id) => { aZustand.kontaktId = id; });
+kontaktPicker('r-name', 'r-anschrift', (id) => { rZustand.kontaktId = id; });
+
+/* =========================================================
+   Positionsvorlagen
+   ========================================================= */
+let vListe = [];
+
+function vStatus(text, art) {
+  const el = document.getElementById('v-status');
+  el.className = 'saetze-status' + (art ? ' ' + art : '');
+  el.textContent = text;
+}
+
+async function ladeVorlagen() {
+  try {
+    const d = await hole('/api/vorlagen');
+    vListe = d.vorlagen || [];
+  } catch {
+    vListe = [];
+  }
+  zeichneVorlagenAuswahl();
+  zeichneVorlagenListe();
+}
+
+// Auswahl im Angebotsformular: fuellt eine neue Zeile vor und springt zurueck.
+function zeichneVorlagenAuswahl() {
+  const sel = document.getElementById('a-vorlage');
+  sel.innerHTML = '<option value="">Vorlage wählen…</option>' +
+    vListe.map((v) => '<option value="' + v.id + '">' + esc(v.bezeichnung) + '</option>').join('');
+  sel.disabled = vListe.length === 0;
+}
+
+function zeichneVorlagenListe() {
+  const ziel = document.getElementById('v-liste');
+  if (!ziel) return;
+  if (!vListe.length) {
+    ziel.innerHTML = '<div class="empty">Noch keine Vorlage. Wiederkehrende Leistungen hier einmal anlegen.</div>';
+    return;
+  }
+  let h = '<div class="tablewrap"><table class="saetze"><thead><tr>' +
+    '<th>Bezeichnung</th><th>Satz EUR</th><th></th></tr></thead><tbody>';
+  for (const v of vListe) {
+    h += '<tr data-v="' + v.id + '">' +
+      '<td><input class="feld v-bez" type="text" maxlength="200" value="' + esc(v.bezeichnung) + '"></td>' +
+      '<td><input class="feld v-satz" type="number" step="0.01" min="0" max="10000" value="' +
+        esc(v.satz === null ? '' : String(v.satz)) + '" placeholder="Standard"></td>' +
+      '<td><button class="btn v-weg" title="Vorlage entfernen">✕</button></td>' +
+    '</tr>';
+  }
+  ziel.innerHTML = h + '</tbody></table></div>';
+
+  ziel.querySelectorAll('tr[data-v]').forEach((tr) => {
+    const id = Number(tr.dataset.v);
+    // Beim Verlassen des Feldes speichern, nicht bei jedem Anschlag: sonst
+    // entsteht je Buchstabe ein Schreibvorgang.
+    const sichern = async () => {
+      try {
+        await sende('/api/vorlage', {
+          id, bezeichnung: tr.querySelector('.v-bez').value, satz: tr.querySelector('.v-satz').value,
+        });
+        vStatus('Vorlage gespeichert.', 'ok');
+        await ladeVorlagen();
+      } catch (err) {
+        vStatus(err.message, 'fehler');
+      }
+    };
+    tr.querySelectorAll('input').forEach((el) => el.addEventListener('change', sichern));
+    tr.querySelector('.v-weg').addEventListener('click', async (ev) => {
+      ev.target.disabled = true;
+      try {
+        await sende('/api/vorlage-loeschen', { id });
+        vStatus('Vorlage gelöscht.', 'ok');
+        await ladeVorlagen();
+      } catch (err) {
+        vStatus(err.message, 'fehler');
+        ev.target.disabled = false;
+      }
+    });
+  });
+}
+
+document.getElementById('v-anlegen').addEventListener('click', async (ev) => {
+  const bez = document.getElementById('v-bezeichnung');
+  const satz = document.getElementById('v-satz');
+  ev.target.disabled = true;
+  try {
+    await sende('/api/vorlage', { bezeichnung: bez.value, satz: satz.value });
+    bez.value = '';
+    satz.value = '';
+    vStatus('Vorlage angelegt.', 'ok');
+    await ladeVorlagen();
+  } catch (err) {
+    vStatus(err.message, 'fehler');
+  } finally {
+    ev.target.disabled = false;
+  }
+});
+
+document.getElementById('a-vorlage').addEventListener('change', (ev) => {
+  const v = vListe.find((x) => x.id === Number(ev.target.value));
+  ev.target.value = '';
+  if (!v) return;
+  aZustand.posten.push({
+    bezeichnung: v.bezeichnung,
+    stunden: '',
+    satz: v.satz === null ? standardSatz() : String(v.satz),
+  });
+  zeichnePosten();
+});
+document.getElementById('a-laden').addEventListener('click', ladeAngebotsVorgaenge);
+document.getElementById('a-erstellen').addEventListener('click', erstelleAngebot);
+zeichnePosten();
+
+/* =========================================================
+   Start + automatische Aktualisierung
+   ========================================================= */
+ladeLive();
+ladeSummary();
+setInterval(ladeLive, 30_000);
+setInterval(ladeSummary, 60_000);
+// "vor X Min" altert zwischen den Abrufen — jede Minute nachziehen.
+setInterval(() => { if (state.live) zeichneLive(); }, 60_000);
+
+// Diagramme messen ihre Breite beim Zeichnen — nach dem Verkleinern des
+// iframes neu aufbauen, sonst bleibt die alte Skalierung stehen.
+let resizeTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => { if (state.summary) { zeichneUeberblick(); zeichneTickets(); zeichneWerkzeuge(); zeichneSaetze(); } }, 200);
+});
+/* =========================================================
+   Rechnungen
+   Ablauf: Zeitraum -> Vorgaenge auswaehlen -> Empfaenger -> erstellen.
+   Die Betraege stammen aus derselben Auswertung wie der Tickets-Tab; die
+   gestellte Rechnung friert sie serverseitig ein.
+   ========================================================= */
+// Jede Zeile traegt einen Schluessel: bei Vorgaengen mit Nummer die Nummer,
+// sonst der Projektname. Getrennt gehalten wird erst beim Absenden — der
+// Server darf einen Projektnamen nicht als Vorgangsnummer erhalten.
+const rZustand = { zeilen: [], gewaehlt: new Set(), projektKontakt: {}, von: '' };
+const rKey = (t) => t.ticket || t.gruppe;
+
+// Welcher Kunde hinter einer Vorgangszeile steht — ueber ihr Projekt. Beide
+// Sichten tragen es: byTicket das mehrheitlich beteiligte Projekt, ohneTicket
+// das eigene. Ohne Zuordnung bleibt die Zeile kundenlos, nicht falsch zugeteilt.
+const rKontaktVon = (t) => (rZustand.projektKontakt[t.project] || {}).id || null;
+
+function rStatus(text, art) {
+  const el = document.getElementById('r-status');
+  el.className = 'saetze-status' + (art ? ' ' + art : '');
+  el.textContent = text;
+}
+
+async function ladeVorgaenge() {
+  const von = document.getElementById('r-von').value;
+  const bis = document.getElementById('r-bis').value;
+  const ziel = document.getElementById('r-tickets');
+  if (!von || !bis) {
+    ziel.innerHTML = '<div class="empty">Bitte beide Datumsfelder ausfüllen.</div>';
+    return;
+  }
+  if (von > bis) {
+    ziel.innerHTML = '<div class="empty">Das Startdatum liegt nach dem Enddatum.</div>';
+    return;
+  }
+
+  ziel.innerHTML = '<div class="empty">wird geladen…</div>';
+  rZustand.gewaehlt.clear();
+  rZustand.von = von;
+  try {
+    const d = await hole('/api/summary?from=' + von + '&to=' + bis);
+    // Arbeit ohne Vorgangsnummer ist genauso abrechenbar — sie fehlte hier
+    // bisher vollstaendig und war damit ueber die Oberflaeche nicht zu stellen.
+    rZustand.zeilen = [...(d.tickets || []), ...(d.ohne_ticket || [])]
+      .filter((t) => t.arbeitswert > 0);
+    rZustand.projektKontakt = d.projekt_kontakt || {};
+  } catch (err) {
+    ziel.innerHTML = '<div class="empty">Vorgänge nicht geladen: ' + esc(err.message) + '</div>';
+    return;
+  }
+  fuelleKundenauswahl();
+
+  zeichneVorgaenge();
+}
+
+// Nur Kunden anbieten, die ueberhaupt ein Projekt tragen — ohne Zuordnung
+// bewirkt die Auswahl nichts und weckt einen falschen Eindruck.
+function fuelleKundenauswahl() {
+  const feld = document.getElementById('r-kunde');
+  if (!feld) return;
+  const merk = feld.value;
+  const mitProjekt = kZustand.liste.filter((k) => (k.projekte || []).length);
+  feld.innerHTML = '<option value="">alle Vorgänge</option>' +
+    mitProjekt.map((k) => '<option value="' + k.id + '">' + esc(k.firma) + '</option>').join('');
+  feld.value = merk;
+  // Der zuvor gewaehlte Kunde kann inzwischen geloescht sein.
+  if (feld.value !== merk) feld.value = '';
+}
+
+// Getrennt vom Laden: ein Kundenwechsel ordnet nur um, was schon da ist.
+// Wuerde hier neu abgerufen, kostete jeder Wechsel eine volle Auswertung.
+function zeichneVorgaenge() {
+  const ziel = document.getElementById('r-tickets');
+  const von = rZustand.von;
+
+  if (rZustand.zeilen.length === 0) {
+    ziel.innerHTML = '<div class="empty">Keine abrechenbaren Vorgänge in diesem Zeitraum.</div>';
+    document.getElementById('r-formular').hidden = true;
+    return;
+  }
+
+  const kundeId = Number(document.getElementById('r-kunde').value) || null;
+  const kunde = kundeId ? kZustand.liste.find((k) => k.id === kundeId) : null;
+
+  // Ein Vorgang, an dem schon vor dem gewaehlten Zeitraum gearbeitet wurde,
+  // erscheint hier nur mit dem angeschnittenen Teil. Ohne Hinweis rechnet man
+  // stillschweigend zu wenig ab — der Tabelle sieht man das nicht an.
+  const angeschnitten = [];
+  for (const t of rZustand.zeilen) {
+    if (t.first_day <= von) angeschnitten.push(rKey(t));
+  }
+
+  // Bei gewaehltem Kunden bestimmt die Zuordnung die Auswahl neu. Vorher
+  // Gehaktes bliebe sonst stehen und liefe unbemerkt auf seine Rechnung.
+  if (kunde) {
+    rZustand.gewaehlt.clear();
+    for (const t of rZustand.zeilen) {
+      if (rKontaktVon(t) === kundeId) rZustand.gewaehlt.add(rKey(t));
+    }
+  }
+
+  let h = '<div class="tablewrap"><table class="rechnung"><thead><tr>' +
+    '<th><input type="checkbox" id="r-alle" title="Alle auswählen"></th>' +
+    '<th>Vorgang</th><th>Stunden</th><th>Satz</th>' +
+    '<th>Rabatt</th><th>Betrag</th><th>Zeitraum</th></tr></thead><tbody>';
+  for (const t of rZustand.zeilen) {
+    const schnitt = t.first_day <= von;
+    const key = rKey(t);
+    const kid = rKontaktVon(t);
+    // Fremde Vorgaenge werden gedaempft, nicht ausgeblendet: unsichtbar bliebe
+    // vor allem die Zeile ohne Kundenzuordnung — und die kostet Geld, wenn sie
+    // niemandem auffaellt.
+    const fremd = kunde && kid !== kundeId;
+    h += '<tr data-ticket="' + esc(key) + '"' + (fremd ? ' class="r-fremd"' : '') + '>' +
+      '<td><input type="checkbox" class="r-wahl" aria-label="' + esc(key) + ' auswählen"' +
+        (rZustand.gewaehlt.has(key) ? ' checked' : '') + '></td>' +
+      '<td>' + esc(key) +
+        // Ohne Kennzeichnung sieht ein Projektname wie eine Vorgangsnummer aus.
+        (t.ticket ? '' : ' <span class="r-schnitt" title="Arbeit ohne Vorgangsnummer, zusammengefasst über das Projekt.">ohne Nummer</span>') +
+        (kid ? '' : ' <span class="r-schnitt" title="Das Projekt dieses Vorgangs ist keinem Kunden zugeordnet — im Reiter Kontakte am Kunden nachtragen.">ohne Kunde</span>') +
+        (schnitt ? ' <span class="r-schnitt" title="Die Arbeit beginnt am oder vor dem Starttag — frühere Anteile sind nicht enthalten.">angeschnitten</span>' : '') + '</td>' +
+      '<td>' + hrs(t.active_hours) + '</td>' +
+      '<td>' + eur(t.stundensatz) + '</td>' +
+      '<td>' + (t.rabatt_prozent > 0 ? nf0.format(t.rabatt_prozent) + ' %' : '–') + '</td>' +
+      '<td>' + eur(t.arbeitswert) + '</td>' +
+      '<td>' + esc(t.first_day) + ' – ' + esc(t.last_day) + '</td>' +
+    '</tr>';
+  }
+  h += '</tbody></table></div>';
+  const ohneKunde = rZustand.zeilen.filter((t) => !rKontaktVon(t)).map(rKey);
+  if (ohneKunde.length) {
+    h += '<div class="r-warnung">Ohne Kundenzuordnung: ' + ohneKunde.map(esc).join(', ') +
+      '. Diese Arbeit lässt sich abrechnen, wird aber von keiner Kundenauswahl ' +
+      'erfasst — im Reiter <b>Kontakte</b> das Projekt beim Kunden eintragen.</div>';
+  }
+  if (angeschnitten.length) {
+    h += '<div class="r-warnung">Bei ' + angeschnitten.map(esc).join(', ') +
+      ' beginnt die Arbeit am oder vor dem ' + esc(von) +
+      '. Enthalten ist nur der Anteil ab diesem Tag — frühere Arbeit an diesen ' +
+      'Vorgängen fehlt in der Rechnung. Startdatum weiter zurücklegen, wenn sie mit abgerechnet werden soll.</div>';
+  }
+  ziel.innerHTML = h;
+
+  ziel.querySelectorAll('tr[data-ticket]').forEach((tr) => {
+    tr.querySelector('.r-wahl').addEventListener('change', (e) => {
+      if (e.target.checked) rZustand.gewaehlt.add(tr.dataset.ticket);
+      else rZustand.gewaehlt.delete(tr.dataset.ticket);
+      rSummeAktualisieren();
+    });
+  });
+  document.getElementById('r-alle').addEventListener('change', (e) => {
+    ziel.querySelectorAll('tr[data-ticket]').forEach((tr) => {
+      tr.querySelector('.r-wahl').checked = e.target.checked;
+      if (e.target.checked) rZustand.gewaehlt.add(tr.dataset.ticket);
+      else rZustand.gewaehlt.delete(tr.dataset.ticket);
+    });
+    rSummeAktualisieren();
+  });
+
+  if (kunde) {
+    // Denselben Weg wie die Kontaktsuche im Empfaengerfeld: Name, Anschrift und
+    // der Verweis. Ohne den Verweis bliebe die Rechnung ohne Kontakt und der
+    // Lead wuerde nie zum Kunden.
+    kontaktUebernehmen(kunde, 'r-name', 'r-anschrift', (id) => { rZustand.kontaktId = id; });
+  } else {
+    // Empfaenger aus den Stammdaten vorschlagen, wenn alle Vorgaenge zum
+    // selben Kunden gehoeren — sonst leer lassen statt zu raten.
+    const kunden = [...new Set(rZustand.zeilen.map((t) => t.kunde).filter(Boolean))];
+    const feld = document.getElementById('r-name');
+    if (kunden.length === 1 && !feld.value) feld.value = kunden[0];
+  }
+
+  document.getElementById('r-formular').hidden = false;
+  rSummeAktualisieren();
+}
+
+function rSummeAktualisieren() {
+  const gewaehlt = rZustand.zeilen.filter((t) => rZustand.gewaehlt.has(rKey(t)));
+  const summe = gewaehlt.reduce((s, t) => s + (t.arbeitswert || 0), 0);
+  const stunden = gewaehlt.reduce((s, t) => s + (t.active_hours || 0), 0);
+  const el = document.getElementById('r-summe');
+  el.textContent = gewaehlt.length === 0
+    ? 'Noch kein Vorgang ausgewählt.'
+    : `${gewaehlt.length} Vorgang/Vorgänge · ${hrs(stunden)} · ${eur(summe)}`;
+  document.getElementById('r-erstellen').disabled = gewaehlt.length === 0;
+}
+
+async function erstelleRechnung() {
+  const knopf = document.getElementById('r-erstellen');
+  const anschrift = document.getElementById('r-anschrift').value
+    .split('\n').map((z) => z.trim()).filter(Boolean);
+  // Getrennt senden: der Server darf einen Projektnamen nicht mit einer
+  // Vorgangsnummer verwechseln, sonst steht er als solche auf der Rechnung.
+  const gewaehlteZeilen = rZustand.zeilen.filter((t) => rZustand.gewaehlt.has(rKey(t)));
+  const nutzlast = {
+    from: document.getElementById('r-von').value,
+    to: document.getElementById('r-bis').value,
+    tickets: gewaehlteZeilen.filter((t) => t.ticket).map((t) => t.ticket),
+    projekte: gewaehlteZeilen.filter((t) => !t.ticket).map((t) => t.gruppe),
+    empfaenger: { name: document.getElementById('r-name').value.trim(), anschrift },
+    kontaktId: rZustand.kontaktId || undefined,
+  };
+  if (!nutzlast.empfaenger.name) {
+    rStatus('Bitte den Namen des Empfängers eintragen.', 'err');
+    document.getElementById('r-name').focus();
+    return;
+  }
+
+  knopf.disabled = true;
+  rStatus('wird erstellt…');
+  try {
+    const r = await fetch('/api/rechnung', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(nutzlast),
+    });
+    const a = await r.json();
+    if (!r.ok || a.error) throw new Error(a.error || 'Erstellen fehlgeschlagen');
+    rStatus('Rechnung ' + a.nr + ' erstellt (' + eur(a.brutto_eur) + ').', 'ok');
+    rZustand.gewaehlt.clear();
+    rZustand.kontaktId = null;
+    // Auch die Kundenwahl zuruecknehmen: bliebe sie stehen, haekte der naechste
+    // Zeichenlauf dieselben Vorgaenge erneut an — und die sind eben abgerechnet.
+    document.getElementById('r-kunde').value = '';
+    ladeKontakte();
+    document.querySelectorAll('#r-tickets input[type=checkbox]').forEach((c) => { c.checked = false; });
+    rSummeAktualisieren();
+    ladeRechnungen();
+  } catch (err) {
+    rStatus('Nicht erstellt: ' + err.message, 'err');
+  } finally {
+    knopf.disabled = false;
+  }
+}
+
+// Angenommene Angebote, aus denen noch keine Rechnung entstanden ist. Nutzt
+// denselben Endpunkt wie der Knopf im Angebote-Tab — ein Weg, zwei Einstiege.
+async function ladeAbrechenbareAngebote() {
+  const karte = document.getElementById('r-angebote-karte');
+  const ziel = document.getElementById('r-angebote');
+  let liste;
+  try {
+    const d = await hole('/api/angebote');
+    liste = (d.angebote || []).filter((a) => a.status === 'angenommen' && !a.rechnung_nr);
+  } catch (err) {
+    karte.hidden = false;
+    ziel.innerHTML = '<div class="empty">Angebote nicht geladen: ' + esc(err.message) + '</div>';
+    return;
+  }
+  // Leere Karte waere nur Rauschen im Alltag.
+  karte.hidden = liste.length === 0;
+  if (!liste.length) { ziel.innerHTML = ''; return; }
+
+  let h = '<div class="tablewrap"><table><thead><tr>' +
+    '<th>Nummer</th><th>Datum</th><th>Empfänger</th><th>Betrag</th><th></th>' +
+    '</tr></thead><tbody>';
+  for (const a of liste) {
+    h += '<tr data-nr="' + esc(a.nr) + '">' +
+      '<td class="mono">' + esc(a.nr) + '</td>' +
+      '<td>' + esc(datum(a.erstellt_am)) + '</td>' +
+      '<td class="trunc" title="' + esc(a.empfaenger) + '">' + esc(a.empfaenger) + '</td>' +
+      '<td class="eur">' + eur(a.brutto_eur) + '</td>' +
+      '<td><div class="r-aktionen">' +
+        '<a class="btn" href="/angebot/' + encodeURIComponent(a.nr) + '" target="_blank" rel="noopener">Ansehen</a>' +
+        '<button class="btn ra-rechnung">Abrechnen</button>' +
+      '</div></td></tr>';
+  }
+  ziel.innerHTML = h + '</tbody></table></div>';
+
+  ziel.querySelectorAll('tr[data-nr]').forEach((tr) => {
+    const nr = tr.dataset.nr;
+    tr.querySelector('.ra-rechnung').addEventListener('click', () => {
+      if (!confirm('Aus Angebot ' + nr + ' eine Rechnung erstellen? Das Angebot bleibt unverändert erhalten.')) return;
+      aAktion(tr.querySelector('.ra-rechnung'), '/api/angebot-rechnung', { nr },
+        (r) => 'Rechnung ' + r.nr + ' aus ' + nr + ' erstellt.', 'ra-status');
+    });
+  });
+}
+
+async function ladeRechnungen() {
+  ladeAbrechenbareAngebote();
+  const ziel = document.getElementById('r-liste');
+  let d;
+  try {
+    d = await hole('/api/rechnungen');
+  } catch (err) {
+    ziel.innerHTML = '<div class="empty">Rechnungen nicht geladen: ' + esc(err.message) + '</div>';
+    return;
+  }
+  const liste = d.rechnungen || [];
+  if (liste.length === 0) {
+    ziel.innerHTML = '<div class="empty">Noch keine Rechnung gestellt.</div>';
+    return;
+  }
+
+  let h = '<div class="tablewrap"><table><thead><tr>' +
+    '<th>Nummer</th><th>Datum</th><th>Empfänger</th><th>Betrag</th>' +
+    '<th>Status</th><th></th></tr></thead><tbody>';
+  for (const r of liste) {
+    h += '<tr data-nr="' + esc(r.nr) + '"' + (r.status === 'storniert' ? ' class="storniert"' : '') + '>' +
+      '<td>' + esc(r.nr) + '</td>' +
+      '<td>' + esc(datum(r.erstellt_am)) + '</td>' +
+      '<td class="trunc" title="' + esc(r.empfaenger) + '">' + esc(r.empfaenger) + '</td>' +
+      '<td>' + eur(r.brutto_eur) + '</td>' +
+      '<td>' + esc(r.status) + '</td>' +
+      '<td><div class="r-aktionen">' +
+        '<a class="btn" href="/rechnung/' + encodeURIComponent(r.nr) + '" target="_blank" rel="noopener">Ansehen</a>' +
+        // Liegt bereits ein PDF, ist der direkte Weg dorthin der nuetzlichere:
+        // erst erzeugen und dann suchen muessen waere ein Umweg.
+        (r.hat_pdf
+          ? '<a class="btn" href="/rechnung-pdf/' + encodeURIComponent(r.nr) + '" target="_blank" rel="noopener">PDF öffnen</a>'
+          : '') +
+        '<button class="btn r-pdf">' + (r.hat_pdf ? 'PDF neu' : 'PDF') + '</button>' +
+        (r.status === 'erstellt' ? '<button class="btn r-storno">Stornieren</button>' : '') +
+      '</div></td>' +
+    '</tr>';
+  }
+  ziel.innerHTML = h + '</tbody></table></div>';
+
+  ziel.querySelectorAll('tr[data-nr]').forEach((tr) => {
+    const nr = tr.dataset.nr;
+    const pdf = tr.querySelector('.r-pdf');
+    // Das fertige PDF gleich oeffnen. Sonst entsteht eine Datei im Datenordner,
+    // von der die Oberflaeche nichts zeigt — es sieht aus, als sei nichts
+    // geschehen. Ein neuer Tab statt eines erzwungenen Downloads: so bleibt
+    // die Wahl beim Nutzer, ob er nur schauen oder speichern will.
+    pdf.addEventListener('click', () => rAktion(pdf, '/api/rechnung-pdf', { nr },
+      () => 'PDF für ' + nr + ' erzeugt und geöffnet.',
+      () => window.open('/rechnung-pdf/' + encodeURIComponent(nr), '_blank', 'noopener')));
+    const storno = tr.querySelector('.r-storno');
+    if (storno) {
+      storno.addEventListener('click', () => {
+        // Storno vergibt eine neue Rechnungsnummer und laesst sich nicht
+        // zuruecknehmen — deshalb eine Rueckfrage davor.
+        if (!confirm(`Rechnung ${nr} stornieren? Es entsteht eine Stornorechnung mit eigener Nummer. Rückgängig machen ist nicht möglich.`)) return;
+        rAktion(storno, '/api/rechnung-storno', { nr }, (a) => 'Storno ' + a.nr + ' erstellt.');
+      });
+    }
+  });
+}
+
+async function rAktion(knopf, pfad, nutzlast, meldung, danach) {
+  const alt = knopf.textContent;
+  knopf.disabled = true;
+  knopf.textContent = '…';
+  try {
+    const r = await fetch(pfad, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(nutzlast),
+    });
+    const a = await r.json();
+    if (!r.ok || a.error) throw new Error(a.error || 'Aktion fehlgeschlagen');
+    rStatus(meldung(a), 'ok');
+    if (danach) danach(a);
+    ladeRechnungen();
+  } catch (err) {
+    rStatus('Fehlgeschlagen: ' + err.message, 'err');
+    knopf.disabled = false;
+    knopf.textContent = alt;
+  }
+}
+
+document.getElementById('r-laden').addEventListener('click', ladeVorgaenge);
+// Nur neu zeichnen: die Zeilen liegen bereits vor, ein erneuter Abruf waere
+// eine volle Auswertung fuer eine reine Umsortierung.
+document.getElementById('r-kunde').addEventListener('change', () => {
+  if (rZustand.zeilen.length) zeichneVorgaenge();
+});
+document.getElementById('r-erstellen').addEventListener('click', erstelleRechnung);
+
+// Vorbelegung: laufender Monat, der uebliche Abrechnungszeitraum.
+(function rZeitraumVorbelegen() {
+  const heute = new Date();
+  const iso = (d) => d.toISOString().slice(0, 10);
+  document.getElementById('a-von').value = iso(new Date(heute.getFullYear(), heute.getMonth(), 1));
+  document.getElementById('a-bis').value = iso(heute);
+  document.getElementById('r-von').value = iso(new Date(heute.getFullYear(), heute.getMonth(), 1));
+  document.getElementById('r-bis').value = iso(heute);
+})();
+
+</script>
+</body>
+</html>
