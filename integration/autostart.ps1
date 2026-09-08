@@ -1,9 +1,12 @@
-# Richtet den Token-Ledger als Aufgabe ein, die bei der Anmeldung startet.
+# Richtet c2invoice als Aufgabe ein, die bei der Anmeldung startet.
 # Ausfuehren:  powershell -ExecutionPolicy Bypass -File integration\autostart.ps1
 # Entfernen:   powershell -ExecutionPolicy Bypass -File integration\autostart.ps1 -Remove
 param([switch]$Remove)
 
 $ErrorActionPreference = 'Stop'
+# Der Aufgabenname stammt aus der Zeit vor der Umbenennung und bleibt so.
+# Wer ihn aendert, legt bei jedem Bestandsnutzer eine zweite Aufgabe an,
+# waehrend die alte weiterlaeuft - und -Remove findet die alte nicht mehr.
 $TaskName = 'TokenLedger'
 $Root = Split-Path -Parent $PSScriptRoot
 $Server = Join-Path $Root 'server.js'
@@ -47,7 +50,7 @@ $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoi
 try { Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false } catch {}
 
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger @($triggerLogon, $triggerLoop) `
-  -Settings $settings -Description 'Token-Ledger: Auswertung des Token-Verbrauchs auf 127.0.0.1' | Out-Null
+  -Settings $settings -Description 'c2invoice: Auswertung des Token-Verbrauchs auf 127.0.0.1' | Out-Null
 
 Start-ScheduledTask -TaskName $TaskName
 

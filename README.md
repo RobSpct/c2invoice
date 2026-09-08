@@ -1,8 +1,16 @@
-# devbill
+# c2invoice
 
 **Turn Claude Code usage into an invoice.**
 
-Token counters tell you what you consumed. `devbill` answers the question a
+Local time tracking, cost analysis and invoicing for freelancers who work with
+Claude Code. It reads the session logs, reconstructs actual working time, and
+produces an invoice PDF. No cloud, no account, no telemetry.
+
+![Node](https://img.shields.io/badge/node-%3E%3D22.5-brightgreen)
+![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
+![Dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)
+
+Token counters tell you what you consumed. `c2invoice` answers the question a
 freelancer actually has: *what can I bill for this, and what's left after
 costs?*
 
@@ -46,11 +54,15 @@ sit four steps:
 4. **Margin → invoice.** Sequential numbering, legally required fields,
    immutable issued documents, cancellation instead of deletion.
 
+*Published as `devbill` until version 1.0. Renamed in 1.1 to avoid confusion
+with an unrelated commercial product of the same name. Same tool, same repo —
+the old GitHub URL redirects here, and nothing in your setup needs changing.*
+
 ## Quick start
 
 ```bash
-git clone https://github.com/RobSpct/devbill.git
-cd devbill
+git clone https://github.com/RobSpct/c2invoice.git
+cd c2invoice
 cp config.example.json config.json     # Windows: copy config.example.json config.json
 npm start                              # http://127.0.0.1:4747
 ```
@@ -125,7 +137,7 @@ after direct costs and own time". A missing cost block is invisible otherwise.
 
 Claude Code writes the same API request to the log **multiple times** (one line
 per content block, all carrying identical usage figures). Summing naively
-overcounts by more than 100%. `devbill` keeps only the latest state per
+overcounts by more than 100%. `c2invoice` keeps only the latest state per
 `requestId`. Verified against `ccusage` over a full month: **0.02% deviation**
 ($2076.67 vs $2076.65).
 

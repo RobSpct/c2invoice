@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>devbill</title>
+<title>c2invoice</title>
 <!-- Inline statt Datei: spart den 404 auf /favicon.ico ohne zusaetzliches Asset. -->
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230a0a0b'/%3E%3Crect x='7' y='17' width='4' height='9' fill='%23f97316'/%3E%3Crect x='14' y='11' width='4' height='15' fill='%23f97316'/%3E%3Crect x='21' y='6' width='4' height='20' fill='%23f97316'/%3E%3C/svg%3E">
 <!-- Fira Sans fuer Labels, Fira Code fuer Zahlen. Laedt das Dashboard offline
@@ -617,7 +617,7 @@
 <div class="wrap">
 
   <header>
-    <h1>devbill</h1>
+    <h1>c2invoice</h1>
     <span class="sub" id="zeitraum" data-i18n>wird geladen…</span>
   </header>
 
@@ -1096,7 +1096,9 @@
 const SPRACHEN = ['de', 'en'];
 function leseSprache() {
   try {
-    const g = localStorage.getItem('devbill.sprache');
+    // Bis Version 1.0 hiess das Werkzeug devbill. Sein Schluessel wird weiter
+    // gelesen, damit die Sprachwahl die Umbenennung ueberlebt.
+    const g = localStorage.getItem('c2invoice.sprache') || localStorage.getItem('devbill.sprache');
     if (SPRACHEN.includes(g)) return g;
   } catch { /* privater Modus: dann eben die Voreinstellung */ }
   return (navigator.language || '').toLowerCase().startsWith('de') ? 'de' : 'en';
@@ -1563,7 +1565,7 @@ function uebersetzeHtml() {
 function setzeSprache(neu) {
   if (!SPRACHEN.includes(neu) || neu === SPRACHE) return;
   SPRACHE = neu;
-  try { localStorage.setItem('devbill.sprache', neu); } catch { /* privater Modus */ }
+  try { localStorage.setItem('c2invoice.sprache', neu); } catch { /* privater Modus */ }
   document.documentElement.lang = neu;
   // Die Saetze-Tabelle baut nur neu auf, wenn sich die Projektliste aendert.
   // Beim Sprachwechsel aendert sie sich nicht - der Merker muss also weg,

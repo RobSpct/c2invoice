@@ -589,7 +589,7 @@ function handle(req, res) {
       }
       res.writeHead(200, {
         'content-type': 'text/csv; charset=utf-8',
-        'content-disposition': 'attachment; filename="token-ledger.csv"',
+        'content-disposition': 'attachment; filename="c2invoice.csv"',
       });
       // BOM, damit Excel die Umlaute richtig anzeigt.
       return res.end('﻿' + lines.join('\n'));
@@ -994,7 +994,7 @@ async function main() {
 
   server.listen(config.port, '127.0.0.1', () => {
     const s = metrics.summary(db);
-    console.log(`devbill laeuft auf http://127.0.0.1:${config.port}`);
+    console.log(`c2invoice laeuft auf http://127.0.0.1:${config.port}`);
     console.log(
       `Daten: ${s.requests} Requests, ${(s.total_tokens / 1e6).toFixed(0)} Mio Tokens, ` +
       `$${s.cost_usd.toFixed(2)} (${s.first_day} bis ${s.last_day})`

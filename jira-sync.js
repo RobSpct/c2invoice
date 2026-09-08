@@ -5,6 +5,10 @@
 const config = require('./config.json');
 const metrics = require('./metrics');
 
+// Die Marker stammen aus der Zeit vor der Umbenennung und bleiben so. An
+// ihnen erkennt der naechste Lauf den eigenen Kommentar wieder. Wer sie
+// aendert, findet jeden bereits geschriebenen Kommentar nicht mehr und haengt
+// einen zweiten daneben - genau das, was diese Datei verhindern soll.
 const MARKER = 'token-ledger:auto';
 // Eigener Marker fuer Tickets, zu denen es keine Rohdaten mehr gibt. Ohne
 // diesen Hinweis am Ticket sieht ein leeres Feld nach "kostete nichts" aus.
@@ -101,7 +105,7 @@ function buildComment(t, models) {
   const content = [
     {
       type: 'paragraph',
-      content: [{ type: 'text', text: 'devbill', marks: [{ type: 'strong' }] }],
+      content: [{ type: 'text', text: 'c2invoice', marks: [{ type: 'strong' }] }],
     },
     {
       type: 'bulletList',
@@ -315,7 +319,7 @@ function nodataKommentar(startDatum) {
       content: [{
         type: 'text',
         text:
-          'devbill: keine Token-Daten vorhanden. Die Arbeit an diesem ' +
+          'c2invoice: keine Token-Daten vorhanden. Die Arbeit an diesem ' +
           `Vorgang liegt vor Beginn der Aufzeichnung (${startDatum}); die ` +
           'Protokolle von Claude Code waren zu diesem Zeitpunkt bereits ' +
           `aufgeraeumt. (${MARKER_NODATA})`,

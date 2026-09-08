@@ -1,4 +1,4 @@
-' Startet den Token-Ledger-Proxy (Port 11435) ohne sichtbares Fenster.
+' Startet den c2invoice-Proxy (Port 11435) ohne sichtbares Fenster.
 ' Der Proxy sitzt zwischen dem Modell-Werkzeug und Ollama und schreibt mit, wie viele
 ' Tokens die lokalen Modelle verbrauchen. Ohne ihn wird nichts erfasst.
 ' Verknuepft im Autostart-Ordner, damit die Erfassung keine Luecken bekommt.

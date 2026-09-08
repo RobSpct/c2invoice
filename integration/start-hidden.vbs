@@ -1,4 +1,4 @@
-' Startet den Token-Ledger ohne sichtbares Konsolenfenster.
+' Startet c2invoice ohne sichtbares Konsolenfenster.
 ' node.exe ist ein Konsolenprogramm, Windows oeffnet dafuer immer ein Fenster.
 ' Der Umweg ueber wscript mit Fenstermodus 0 unterdrueckt das.
 Option Explicit
