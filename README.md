@@ -28,7 +28,7 @@ session logs → active working time → hourly value → margin → invoice PDF
 
 Per job — active hours and billable value next to what the API would have cost:
 
-![Jobs table: hours, API equivalent and billable value per job](docs/jobs.png)
+![Jobs table: hours, API equivalent, subscription share and billable value per job](docs/jobs.png)
 
 Live, while you work — sessions can be booked onto a job by hand:
 
