@@ -26,15 +26,21 @@ session logs → active working time → hourly value → margin → invoice PDF
 
 ![Overview: spend over time, split by model, and per project with active hours and billable value](docs/overview.png)
 
-Per job — active hours and billable value next to what the API would have cost:
+Per job — the margin bar is scaled against your target margin, so "above or
+below what I aimed for" is readable at a glance:
 
-![Jobs table: hours, API equivalent, subscription share and billable value per job](docs/jobs.png)
+![Job detail: token split, work value, contribution margin and margin with a bar scaled against the target](docs/jobs.png)
+
+Where the tokens actually went — MCP servers and skills as ranked bars. Open a
+server to see its individual tools, drawn at the same scale as their parent:
+
+![Tools tab: MCP servers as horizontal bars, one expanded to show its individual tools indented below](docs/tools.png)
 
 Live, while you work — sessions can be booked onto a job by hand:
 
 ![Live tab: running sessions with tokens, cost and a field to assign a job](docs/live.png)
 
-*Screenshots use anonymised project and job names.*
+*Screenshots use anonymised project, job and tool names.*
 
 ## Why this exists
 
@@ -132,6 +138,24 @@ with the sync endpoint, background job, deep links and UI elements all disabled.
 
 Every figure carries its reference in the label. Not "margin", but "margin —
 after direct costs and own time". A missing cost block is invisible otherwise.
+
+### Where the tokens went
+
+Beyond *how much*, the Tools tab answers *what consumed it*. Requests are
+attributed to the MCP server that triggered them and to the skill that was
+active at the time, each as a ranked bar chart; a server can be opened to show
+its individual tools. On real data this surfaced that a single context tool
+accounted for the bulk of one server's spend — the kind of thing a flat list of
+a hundred rows hides.
+
+Two separate lists on purpose: an MCP server *causes* the request, so the
+tokens are genuinely its own. A skill does not — it adds text to a request that
+was happening anyway. Its row says *how much ran while this skill was active*,
+not *how much the skill cost*. Read as cost attribution, that number would be
+wrong, so the tab says so rather than letting you assume otherwise.
+
+This section changes no billing figure. It is marked as such in the interface,
+because the numbers above it do feed invoices and the difference matters.
 
 ### Accuracy
 
