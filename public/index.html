@@ -40,9 +40,50 @@
        waren im schwarz/orangen Schema eine Farbe zu viel. Reines Weiss zieht
        hier mehr Blick als der Akzent, deshalb eine Stufe darunter. */
     --eur: #d4d4d8;
+    /* Aufgehellter Akzent fuer Hover auf Flaechen, die schon den Akzent tragen
+       (Balken). Wurde in .chart .bar:hover benutzt, war aber nie definiert —
+       der Fallback im var() hat den Fehler verdeckt. */
+    --accent-hell: #fb923c;
     --radius: 10px;
+    /* Kleiner Radius fuer Elemente im Fliesstext (Felder, Knoepfe, Chips);
+       der grosse gehoert den Flaechen (Karten, Kacheln, Banner). */
+    --radius-klein: 6px;
     --font-ui: "Fira Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
     --font-zahl: "Fira Code", ui-monospace, SFMono-Regular, Consolas, monospace;
+
+    /* Abstaende: Vierer-Schritte, dicht gehalten. Ein Abrechnungs-Dashboard
+       zeigt viele Zahlen nebeneinander — grosszuegige Raster kosten hier
+       Zeilen, die der Nutzer sonst scrollen muesste. */
+    --raum-1: 4px;
+    --raum-2: 8px;
+    --raum-3: 12px;
+    --raum-4: 16px;
+    --raum-5: 22px;
+    --raum-6: 32px;
+
+    /* Schriftgroessen. Die Werte sind die bereits im Haus verwendeten; als
+       Token benannt, damit neue Stellen nicht wieder frei wuerfeln. */
+    --schrift-mikro: 10px;   /* Pillen, Achsenbeschriftung */
+    --schrift-klein: 11px;   /* Labels, Hinweise */
+    --schrift-zahl: 12.5px;  /* Tabellenzellen */
+    --schrift-text: 13px;    /* Fliesstext, Knoepfe */
+    --schrift-gross: 15px;   /* Detail-Ueberschrift */
+    --schrift-wert: 24px;    /* Kennzahl */
+
+    /* Tiefe. Auf fast schwarzem Grund traegt ein Schatten wenig — die Stufen
+       arbeiten deshalb ueber Rand plus Schatten, nicht ueber Schatten allein. */
+    --schatten-1: 0 1px 2px rgba(0,0,0,.4);
+    --schatten-2: 0 4px 14px rgba(0,0,0,.45);
+    --schatten-3: 0 10px 30px rgba(0,0,0,.55);
+
+    /* Bewegung. Drei Dauern nach Weg und Groesse der Aenderung, nicht eine
+       fuer alles: Farbwechsel kurz, Flaechen mittel, eintreffende Daten lang.
+       Easing nach Richtung — Ankommendes bremst aus, Gehendes zieht an. */
+    --zeit-kurz: 120ms;
+    --zeit-mittel: 180ms;
+    --zeit-lang: 320ms;
+    --kurve-aus: cubic-bezier(.2, .8, .3, 1);
+    --kurve-ein: cubic-bezier(.4, 0, 1, 1);
   }
 
   * { box-sizing: border-box; }
@@ -73,11 +114,26 @@
   }
   header .sub { color: var(--text-faint); font-size: 12px; }
 
+  /* Die Leiste scrollt auf schmalen Geraeten waagerecht, zeigt aber keine
+     Bildlaufleiste — ohne Hinweis ist nicht zu sehen, dass rechts weitere
+     Reiter stehen. Die weiche Kante macht das sichtbar: sie faerbt sich nur
+     dort ein, wo tatsaechlich Inhalt ueber den Rand hinausgeht.
+     scroll-driven, also ohne Zuhoerer am Scroll-Ereignis. */
+  .tabs-halter { position: relative; }
+  .tabs-halter::after {
+    content: ''; position: absolute; right: 0; top: 0; bottom: 1px; width: 36px;
+    pointer-events: none;
+    background: linear-gradient(to right, transparent, var(--bg));
+    opacity: 0; transition: opacity var(--zeit-mittel) ease;
+  }
+  .tabs-halter.mehr-rechts::after { opacity: 1; }
   nav.tabs {
-    display: flex; gap: 2px; margin-bottom: 18px;
+    display: flex; gap: 2px;
     border-bottom: 1px solid var(--line);
     overflow-x: auto; scrollbar-width: none;
+    scroll-behavior: smooth;
   }
+  .tabs-halter { margin-bottom: 18px; }
   nav.tabs::-webkit-scrollbar { display: none; }
   nav.tabs button {
     appearance: none; background: none; border: 0;
@@ -104,9 +160,14 @@
   .kpi {
     background: var(--panel); border: 1px solid var(--line-soft);
     border-radius: var(--radius); padding: 12px 14px;
-    transition: border-color .15s ease, background .15s ease;
+    box-shadow: var(--schatten-1);
+    transition: border-color var(--zeit-mittel) ease, background var(--zeit-mittel) ease,
+                box-shadow var(--zeit-mittel) ease, transform var(--zeit-mittel) var(--kurve-aus);
   }
-  .kpi:hover { border-color: var(--line); background: var(--panel-2); }
+  .kpi:hover {
+    border-color: var(--line); background: var(--panel-2);
+    box-shadow: var(--schatten-2); transform: translateY(-1px);
+  }
   .kpi .label {
     font-size: 11px; text-transform: uppercase; letter-spacing: .07em;
     color: var(--text-faint); margin-bottom: 6px;
@@ -125,6 +186,7 @@
   .card {
     background: var(--panel); border: 1px solid var(--line-soft);
     border-radius: var(--radius); padding: 14px; margin-bottom: 16px;
+    box-shadow: var(--schatten-1);
   }
   .card > h2 {
     margin: 0 0 12px; font-size: 13px; font-weight: 600;
@@ -253,14 +315,31 @@
   .r-zeitraum input:focus, .r-empfaenger input:focus, .r-empfaenger textarea:focus {
     outline: 2px solid var(--accent); outline-offset: -1px;
   }
+  /* Bleibt beim Scrollen am unteren Rand der Karte stehen: wer weiter unten
+     Vorgänge ankreuzt, sieht Summe und Knopf weiterhin, statt zum Erstellen
+     wieder hochscrollen zu müssen. */
   .r-abschluss {
     display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
-    gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line-soft);
+    gap: 10px; margin-top: 14px; padding: 12px 0 2px;
+    border-top: 1px solid var(--line-soft);
+    position: sticky; bottom: 0; z-index: 2;
+    background: var(--panel);
   }
   .r-summe { font-size: 14px; color: var(--text); }
   .r-summe .note { margin-left: 0; }
   /* Ankreuzfelder gross genug zum Treffen, auch mit dem Finger. */
   table.rechnung input[type=checkbox] { width: 17px; height: 17px; cursor: pointer; accent-color: var(--accent); }
+  /* Eine angekreuzte Zeile geht auf die Rechnung — das darf man im
+     Ueberfliegen sehen, nicht nur am Haken in der ersten Spalte. Kante plus
+     Flaeche wie bei der ausgewaehlten Vorgangszeile, damit Auswahl im ganzen
+     Werkzeug gleich aussieht. */
+  table.rechnung tbody tr:has(input[type=checkbox]:checked) {
+    background: var(--accent-soft);
+  }
+  table.rechnung tbody tr:has(input[type=checkbox]:checked) td:first-child {
+    box-shadow: inset 2px 0 0 var(--accent);
+  }
+  table.rechnung tbody tr { transition: background var(--zeit-kurz) ease; }
   table.rechnung th:nth-child(2), table.rechnung td:nth-child(2) { text-align: left; }
   table.rechnung td:first-child, table.rechnung th:first-child { width: 34px; text-align: center; }
   tr.storniert td { opacity: .5; text-decoration: line-through; }
@@ -337,9 +416,19 @@
   .mono { font-family: var(--font-zahl); font-size: 12px; }
 
   .empty {
-    padding: 26px 14px; text-align: center; color: var(--text-dim); font-size: 13px;
+    padding: 26px 14px; text-align: center; color: var(--text-dim);
+    font-size: var(--schrift-text);
   }
   .empty .big { display: block; font-size: 14px; color: var(--text); margin-bottom: 4px; }
+  /* Zeichen ueber dem Text: gibt der leeren Flaeche einen Halt, statt sie wie
+     einen Ladefehler aussehen zu lassen. Rein schmueckend, deshalb vor dem
+     Vorlesen verborgen — die Aussage steht im Text darunter. */
+  .empty .e-zeichen {
+    display: block; margin: 0 auto var(--raum-3);
+    width: 26px; height: 26px; color: var(--line);
+  }
+  .empty .e-zeichen svg { width: 100%; height: 100%; display: block; }
+  .empty .e-tat { margin-top: var(--raum-3); }
 
   /* ---------- Charts ---------- */
   .chart { width: 100%; display: block; overflow: visible; }
@@ -352,12 +441,34 @@
   .chart .dot { fill: var(--accent); }
   /* Interaktion: Fadenkreuz und Markierung liegen still, bis die Maus kommt.
      pointer-events aus, sonst faengt die Fangflaeche ihre eigenen Ereignisse. */
-  .chart .cross { stroke: var(--text-faint); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0; }
-  .chart .marker { fill: var(--accent); stroke: var(--panel); stroke-width: 2; opacity: 0; }
+  .chart .cross { stroke: var(--text-faint); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0; transition: opacity var(--zeit-kurz) ease; }
+  .chart .marker { fill: var(--accent); stroke: var(--panel); stroke-width: 2; opacity: 0; transition: opacity var(--zeit-kurz) ease; }
   .chart .cross, .chart .marker, .chart text, .chart .line, .chart .area { pointer-events: none; }
   .chart .fang { fill: transparent; }
-  .chart .bar { transition: fill .12s ease; }
-  .chart .bar:hover { fill: var(--accent-hell, #fb923c); }
+  .chart .bar { transition: fill var(--zeit-kurz) ease; }
+  .chart .bar:hover { fill: var(--accent-hell); }
+
+  /* Eintreffende Daten zeichnen sich ein statt aufzublitzen: die Linie laeuft
+     von links, Flaeche und Punkte ziehen nach, Balken wachsen aus ihrer
+     Grundlinie. Rein ueber CSS — die Animation startet beim Einfuegen ins
+     Dokument, die Geometrie im SVG bleibt unberuehrt.
+     pathLength normiert jeden Pfad auf 100, damit ein Strichmuster ohne
+     Messung der echten Laenge passt. */
+  .chart .line {
+    stroke-dasharray: 100; stroke-dashoffset: 100;
+    animation: linie-zeichnen var(--zeit-lang) var(--kurve-aus) forwards;
+  }
+  @keyframes linie-zeichnen { to { stroke-dashoffset: 0; } }
+  .chart .area, .chart .dot {
+    opacity: 0;
+    animation: einblenden var(--zeit-mittel) var(--kurve-aus) var(--zeit-mittel) forwards;
+  }
+  @keyframes einblenden { to { opacity: 1; } }
+  .chart .bar {
+    transform-box: fill-box; transform-origin: left center;
+    animation: balken-wachsen var(--zeit-mittel) var(--kurve-aus) backwards;
+  }
+  @keyframes balken-wachsen { from { transform: scaleX(0); } }
   .chart-halter { position: relative; }
   .zeitraum-schalter { display: flex; gap: 2px; margin: -4px 0 14px; }
   .zeitraum-schalter button {
@@ -393,9 +504,10 @@
     position: absolute; z-index: 5; pointer-events: none; opacity: 0;
     transform: translate(-50%, -100%);
     background: var(--panel-2); border: 1px solid var(--line);
-    border-radius: 6px; padding: 5px 9px; white-space: nowrap;
-    font-size: 11px; line-height: 1.5; color: var(--text);
-    box-shadow: 0 4px 14px rgba(0,0,0,.45);
+    border-radius: var(--radius-klein); padding: 5px 9px; white-space: nowrap;
+    font-size: var(--schrift-klein); line-height: 1.5; color: var(--text);
+    box-shadow: var(--schatten-2);
+    transition: opacity var(--zeit-kurz) ease;
   }
   .chart-tip .tip-wert { font-family: var(--font-zahl); color: var(--accent); font-weight: 600; }
   .chart-tip .tip-neben { font-family: var(--font-zahl); color: var(--text-faint); }
@@ -424,6 +536,113 @@
   }
   .banner.show { display: block; }
 
+  /* ---------- Ladezustand ----------
+     Ersetzt die Textzeile "wird geladen…": der Platzhalter hat die Groesse
+     des spaeteren Inhalts, die Seite springt beim Eintreffen der Daten also
+     nicht mehr. Der Schimmer laeuft ueber einen Verlauf statt ueber eine
+     Positionsaenderung — keine Layoutarbeit je Bild. */
+  .skel {
+    display: block; border-radius: var(--radius-klein);
+    background: linear-gradient(90deg, var(--panel-2) 25%, var(--line) 37%, var(--panel-2) 63%);
+    background-size: 400% 100%;
+    animation: schimmer 1.4s ease-in-out infinite;
+  }
+  @keyframes schimmer {
+    from { background-position: 100% 50%; }
+    to { background-position: 0 50%; }
+  }
+  .skel-zeile { height: 11px; margin: 7px 0; }
+  .skel-wert { height: 26px; width: 70%; margin: 2px 0 6px; }
+  /* Keine feste Höhe: das Diagramm ist ein SVG, das mit der Breite skaliert
+     (viewBox 720 × H). Eine Pixelhöhe stimmt deshalb nur bei genau einer
+     Fensterbreite — gemessen wurden 295 px für das Liniendiagramm, aber nur
+     bei 1280 px Fensterbreite. Über aspect-ratio wächst der Platzhalter
+     genauso wie das spätere Bild, auf jeder Breite.
+     Das Seitenverhältnis kommt aus der viewBox: 720/190 für die Linie. */
+  .skel-chart { aspect-ratio: 720 / 190; border-radius: var(--radius); }
+  /* Die Balken wachsen mit der Zahl der Modelle (26 px je Zeile), die beim
+     ersten Aufbau noch nicht feststeht — der Platzhalter steht im Markup,
+     die Daten kommen erst danach. Angesetzt ist deshalb die übliche Größe
+     von acht Modellen; bei mehr bleibt ein Rest an Sprung, der aber klein
+     ist gegen die Textzeile, die vorher dort stand. */
+  .skel-chart.balken { aspect-ratio: 720 / 220; }
+  /* Gestaffelte Breiten: gleich lange Balken sehen aus wie ein Raster, nicht
+     wie kommender Text. */
+  .skel-block .skel-zeile:nth-child(1) { width: 96%; }
+  .skel-block .skel-zeile:nth-child(2) { width: 82%; }
+  .skel-block .skel-zeile:nth-child(3) { width: 91%; }
+  .skel-block .skel-zeile:nth-child(4) { width: 74%; }
+  .skel-block .skel-zeile:nth-child(5) { width: 86%; }
+
+  /* ---------- Toast ----------
+     Die Statuszeilen bleiben, wo sie sind; der Toast ist die zweite Anzeige
+     fuer dieselbe Meldung. Grund: die Statuszeile steht teils weit vom Knopf
+     entfernt und aendert sich lautlos — nach "Rechnung erstellen" sah das aus
+     wie keine Reaktion. */
+  .toast-halter {
+    position: fixed; z-index: 60; right: 16px; bottom: 16px;
+    display: flex; flex-direction: column; align-items: flex-end;
+    gap: var(--raum-2); pointer-events: none;
+  }
+  .toast {
+    pointer-events: auto; max-width: min(380px, calc(100vw - 32px));
+    display: flex; align-items: flex-start; gap: var(--raum-2);
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--line); border-left: 3px solid var(--text-faint);
+    border-radius: var(--radius-klein); box-shadow: var(--schatten-3);
+    padding: 10px 12px; font-size: var(--schrift-text); line-height: 1.45;
+    animation: toast-ein var(--zeit-mittel) var(--kurve-aus);
+  }
+  .toast.ok { border-left-color: var(--ok); }
+  .toast.err { border-left-color: var(--bad); }
+  .toast .toast-text { flex: 1; overflow-wrap: anywhere; }
+  .toast .toast-zu {
+    background: none; border: 0; color: var(--text-faint); cursor: pointer;
+    font: inherit; font-size: var(--schrift-text); line-height: 1; padding: 2px 4px;
+    border-radius: 4px;
+  }
+  .toast .toast-zu:hover { color: var(--text); }
+  .toast .toast-zu:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .toast .btn { flex: none; }
+  /* Gehendes zieht an und wird schneller als Ankommendes — sonst wirkt das
+     Verschwinden wie Haengenbleiben. */
+  .toast.geht { animation: toast-raus var(--zeit-kurz) var(--kurve-ein) forwards; }
+  @keyframes toast-ein {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes toast-raus {
+    from { opacity: 1; transform: none; }
+    to { opacity: 0; transform: translateY(6px); }
+  }
+
+  /* ---------- Laufende Sitzung ----------
+     Nur ein Zusatzzeichen neben der Zeitangabe: die Zeit selbst ("vor 1 Min")
+     bleibt die Aussage, der Punkt macht sie im Ueberfliegen auffindbar.
+     aria-hidden, weil er nichts sagt, was nicht danebensteht. */
+  .puls {
+    display: inline-block; width: 6px; height: 6px; margin-right: 6px;
+    border-radius: 50%; background: var(--ok); vertical-align: middle;
+    animation: pulsieren 2s ease-in-out infinite;
+  }
+  @keyframes pulsieren {
+    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 55%, transparent); }
+    50% { opacity: .65; box-shadow: 0 0 0 4px transparent; }
+  }
+
+  /* ---------- Knopf waehrend einer Aktion ----------
+     Sperrt zugleich den Doppelklick: "Rechnung erstellen" zweimal ausgeloest
+     haette zwei Nummern aus dem fortlaufenden Kreis gezogen. */
+  .btn[data-laeuft] { opacity: .6; cursor: progress; }
+  .btn .spinner {
+    display: inline-block; width: 10px; height: 10px; margin-right: 6px;
+    vertical-align: -1px;
+    border: 2px solid currentColor; border-right-color: transparent;
+    border-radius: 50%;
+    animation: dreh .6s linear infinite;
+  }
+  @keyframes dreh { to { transform: rotate(360deg); } }
+
   .info {
     font-size: 12px; color: var(--text-dim); line-height: 1.6;
     border-left: 2px solid var(--line); padding: 2px 0 2px 11px;
@@ -432,7 +651,22 @@
 
   /* ---------- Detailbereich ---------- */
   #detail { display: none; }
-  #detail.show { display: block; }
+  #detail.show { display: block; animation: detail-ein var(--zeit-mittel) var(--kurve-aus); }
+  @keyframes detail-ein {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: none; }
+  }
+
+  /* Gestaffelt eintreffende Tabellenzeilen. Nur die ersten Zeilen tragen
+     einen Verzug (siehe zeilenStaffeln) — bei einer langen Liste waere das
+     Warten auf die letzte Zeile laestig statt hilfreich. */
+  tbody tr.eintritt {
+    animation: zeile-ein var(--zeit-mittel) var(--kurve-aus) backwards;
+  }
+  @keyframes zeile-ein {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: none; }
+  }
   .detail-head {
     display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px;
     margin-bottom: 12px;
@@ -452,6 +686,11 @@
   }
   .btn:hover { color: var(--text); border-color: var(--accent); }
   .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  /* Gedrueckt-Zustand: ohne ihn fuehlt sich ein Klick auf Touch wie nichts an,
+     weil dort kein Hover existiert. */
+  .btn:active:not([data-laeuft]) { background: var(--line-soft); transform: translateY(1px); }
+  nav.tabs button:active { color: var(--text); }
+  .chip:active, .zeitraum-schalter button:active { transform: translateY(1px); }
 
   .calc { margin-top: 4px; }
   .statuszeile { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; min-height: 20px; }
@@ -587,6 +826,24 @@
   .calc .sep { grid-column: 1 / -1; border-top: 1px solid var(--line-soft); margin: 2px 0; }
   .pos { color: var(--ok); }
   .neg { color: var(--bad); }
+  /* Margen-Balken: erbt die Ampelfarbe ueber currentColor von seiner Zeile,
+     damit Farbe und Laenge nie auseinanderlaufen koennen. */
+  /* Kein overflow: hidden — die Zielmarke steht oben und unten bewusst ueber
+     und wuerde sonst abgeschnitten. Die Fuellung rundet sich selbst. */
+  .marge-balken {
+    display: block; position: relative; height: 4px; margin-top: 5px;
+    background: var(--line-soft); border-radius: 2px;
+  }
+  .marge-balken .mb-fuell {
+    display: block; height: 100%; background: currentColor; border-radius: 2px;
+    transition: width var(--zeit-lang) var(--kurve-aus);
+  }
+  /* Zielmarke bei halber Skala: der Bezugspunkt, gegen den die Laenge etwas
+     aussagt. */
+  .marge-balken .mb-ziel {
+    position: absolute; left: 50%; top: -1px; bottom: -1px; width: 1px;
+    background: var(--text-faint); opacity: .8;
+  }
   .m-top { color: var(--marge-top); font-weight: 600; }
   .m-ok { color: var(--marge-ok); }
   .m-fast { color: var(--marge-fast); }
@@ -599,6 +856,43 @@
     justify-content: space-between; margin-bottom: 12px;
   }
 
+  /* ---------- Schrittfolge ----------
+     Zeigt den Weg zur Rechnung und den erreichten Stand. Geführt wird
+     weiterhin über die Formulare — das hier ist Orientierung, kein Assistent
+     mit eigenen Knöpfen. */
+  .schritte {
+    display: flex; flex-wrap: wrap; align-items: center;
+    gap: var(--raum-2) var(--raum-4);
+    list-style: none; margin: 0 0 var(--raum-4); padding: 0;
+    font-size: var(--schrift-klein); color: var(--text-faint);
+  }
+  .schritte li { display: flex; align-items: center; gap: var(--raum-2); }
+  /* Trennstrich zwischen den Schritten, nicht vor dem ersten. */
+  .schritte li + li::before {
+    content: ''; width: 16px; height: 1px; background: var(--line);
+    margin-right: var(--raum-2);
+  }
+  .schritte .s-nr {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 18px; height: 18px; border-radius: 50%;
+    border: 1px solid var(--line); background: var(--panel-2);
+    font-family: var(--font-zahl); font-size: var(--schrift-mikro);
+    transition: background var(--zeit-mittel) ease, color var(--zeit-mittel) ease,
+                border-color var(--zeit-mittel) ease;
+  }
+  .schritte li.aktiv { color: var(--text); }
+  .schritte li.aktiv .s-nr {
+    border-color: var(--accent); background: var(--accent-soft); color: var(--accent);
+  }
+  /* Erledigt: Haken statt Ziffer. Die Ziffer bleibt im Markup, damit der
+     Schrittname vorlesbar bleibt. */
+  .schritte li.fertig { color: var(--text-dim); }
+  .schritte li.fertig .s-nr {
+    border-color: var(--ok); background: color-mix(in srgb, var(--ok) 16%, transparent);
+    color: var(--ok); font-size: 0;
+  }
+  .schritte li.fertig .s-nr::after { content: '✓'; font-size: 11px; }
+
   @media (max-width: 560px) {
     .wrap { padding: 12px 10px 40px; }
     .kpi .value { font-size: 20px; }
@@ -610,6 +904,33 @@
       animation-duration: .01ms !important; animation-iteration-count: 1 !important;
       transition-duration: .01ms !important;
     }
+    /* Die Regel oben friert jede Animation nach einem Bild ein. Bei den beiden
+       Ladeanzeigen ist der eingefrorene Zustand ein Zufallsbild — der Spinner
+       bliebe als schiefer Halbkreis stehen, der Schimmer in einer beliebigen
+       Verlaufsposition. Beides liest sich als Defekt, nicht als "laedt".
+       Deshalb hier eine ruhige Ersatzdarstellung statt eines Standbilds. */
+    .skel { background: var(--panel-2); }
+    .btn .spinner {
+      border-right-color: currentColor; opacity: .5;
+      border-radius: 2px;
+    }
+    /* Dasselbe fuer die Diagramme, und hier waere das Standbild schlimmer als
+       unschoen: der Anfangszustand der Einzeichen-Bewegung ist eine
+       unsichtbare Linie und ein Balken der Breite null. Eingefroren bliebe
+       das Diagramm leer — die Daten waeren schlicht weg. */
+    /* Der Punkt bleibt, nur ruhig: er markiert die laufende Sitzung, diese
+       Aussage darf die Bewegungsvorliebe nicht kosten. */
+    .puls { animation: none; opacity: 1; box-shadow: none; }
+    .chart .line { stroke-dasharray: none; stroke-dashoffset: 0; animation: none; }
+    .chart .area, .chart .dot { opacity: 1; animation: none; }
+    .chart .bar { transform: none; animation: none; }
+    .btn:active:not([data-laeuft]) { transform: none; }
+    .chip:active, .zeitraum-schalter button:active { transform: none; }
+    .kpi:hover { transform: none; }
+    /* Eingefroren blieben Zeilen und Detailbereich bei opacity 0 stehen —
+       der Inhalt waere unsichtbar. */
+    tbody tr.eintritt { animation: none; opacity: 1; transform: none; }
+    #detail.show { animation: none; opacity: 1; transform: none; }
   }
 </style>
 </head>
@@ -621,16 +942,18 @@
     <span class="sub" id="zeitraum" data-i18n>wird geladen…</span>
   </header>
 
-  <nav class="tabs" role="tablist">
-    <button role="tab" aria-selected="true"  data-view="live" data-i18n>Live</button>
-    <button role="tab" aria-selected="false" data-view="ueberblick" data-i18n>Überblick</button>
-    <button role="tab" aria-selected="false" data-view="tickets" data-i18n>Tickets</button>
-    <button role="tab" aria-selected="false" data-view="werkzeuge" data-i18n>Werkzeuge</button>
-    <button role="tab" aria-selected="false" data-view="kontakte" data-i18n>Kontakte</button>
-    <button role="tab" aria-selected="false" data-view="angebote" data-i18n>Angebote</button>
-    <button role="tab" aria-selected="false" data-view="rechnungen" data-i18n>Rechnungen</button>
-    <button role="tab" aria-selected="false" data-view="einstellungen" data-i18n>Einstellungen</button>
-  </nav>
+  <div class="tabs-halter" id="tabs-halter">
+    <nav class="tabs" role="tablist" id="tabs">
+      <button role="tab" aria-selected="true"  data-view="live" data-i18n>Live</button>
+      <button role="tab" aria-selected="false" data-view="ueberblick" data-i18n>Überblick</button>
+      <button role="tab" aria-selected="false" data-view="tickets" data-i18n>Tickets</button>
+      <button role="tab" aria-selected="false" data-view="werkzeuge" data-i18n>Werkzeuge</button>
+      <button role="tab" aria-selected="false" data-view="kontakte" data-i18n>Kontakte</button>
+      <button role="tab" aria-selected="false" data-view="angebote" data-i18n>Angebote</button>
+      <button role="tab" aria-selected="false" data-view="rechnungen" data-i18n>Rechnungen</button>
+      <button role="tab" aria-selected="false" data-view="einstellungen" data-i18n>Einstellungen</button>
+    </nav>
+  </div>
 
   <div class="banner" id="banner"></div>
 
@@ -664,7 +987,14 @@
       <p class="note"><span data-i18n>Arbeit ohne Ticket-Branch trägt keinen Vorgang und bleibt damit unabrechenbar. Im Feld</span>
         <b data-i18n>Vorgang</b>
         <span data-i18n>lässt sich eine Sitzung von Hand buchen — ein Jira-Schlüssel oder ein frei gewählter Name. Leeren stellt die automatische Zuordnung wieder her.</span></p>
-      <div id="l-sessions"><div class="empty" data-i18n>wird geladen…</div></div>
+      <!-- Platzhalter in der Größe der späteren Tabelle: früher stand hier
+           eine einzeilige Textmeldung, beim Eintreffen der Daten sprang alles
+           darunter nach unten. -->
+      <div id="l-sessions" aria-busy="true"><div class="skel-block">
+        <span class="skel skel-zeile"></span><span class="skel skel-zeile"></span>
+        <span class="skel skel-zeile"></span><span class="skel skel-zeile"></span>
+        <span class="skel skel-zeile"></span>
+      </div></div>
       <div id="l-buchung-status" class="status"></div>
     </div>
 
@@ -703,17 +1033,24 @@
         <button type="button" data-koernung="monat" aria-pressed="false" data-i18n>Monat</button>
         <button type="button" data-koernung="jahr" aria-pressed="false" data-i18n>Jahr</button>
       </div>
-      <div id="c-days"><div class="empty" data-i18n>wird geladen…</div></div>
+      <!-- Platzhalter im Seitenverhältnis des Diagramms: eine Textzeile an
+           dieser Stelle ließ die halbe Seite springen, sobald die Daten da
+           waren. -->
+      <div id="c-days" aria-busy="true"><span class="skel skel-chart"></span></div>
     </div>
 
     <div class="card">
       <h2><span data-i18n>Verteilung nach Modell</span> <span class="note" data-i18n>API-Gegenwert in USD — Modell anklicken, um die Projekte darunter zu filtern</span></h2>
-      <div id="c-models"><div class="empty" data-i18n>wird geladen…</div></div>
+      <div id="c-models" aria-busy="true"><span class="skel skel-chart balken"></span></div>
     </div>
 
     <div class="card">
       <h2><span data-i18n>Nach Projekt</span><span id="s-projects-kopf"></span></h2>
-      <div id="s-projects"><div class="empty" data-i18n>wird geladen…</div></div>
+      <div id="s-projects" aria-busy="true"><div class="skel-block">
+        <span class="skel skel-zeile"></span><span class="skel skel-zeile"></span>
+        <span class="skel skel-zeile"></span><span class="skel skel-zeile"></span>
+        <span class="skel skel-zeile"></span>
+      </div></div>
     </div>
 
     <div class="card">
@@ -736,7 +1073,11 @@
 
     <div class="card">
       <h2><span data-i18n>Tickets</span> <span class="note" data-i18n>Spaltenkopf klicken zum Sortieren, Zeile klicken für Details</span></h2>
-      <div id="t-table"><div class="empty" data-i18n>wird geladen…</div></div>
+      <div id="t-table" aria-busy="true"><div class="skel-block">
+        <span class="skel skel-zeile"></span><span class="skel skel-zeile"></span>
+        <span class="skel skel-zeile"></span><span class="skel skel-zeile"></span>
+        <span class="skel skel-zeile"></span>
+      </div></div>
     </div>
 
     <div class="card" id="detail"></div>
@@ -817,7 +1158,16 @@
     </div>
 
     <div class="card">
-      <h2><span data-i18n>Neue Rechnung</span> <span class="note" data-i18n>Zeitraum wählen, Vorgänge auswählen, Rechnung erstellen</span></h2>
+      <h2><span data-i18n>Neue Rechnung</span></h2>
+      <!-- Der Weg zur Rechnung als Schrittfolge. Die drei Schritte standen
+           vorher als Fließtext in der Überschrift; sichtbar gemacht zeigen
+           sie zusätzlich, wo man gerade steht. Reine Anzeige — geführt wird
+           weiterhin über die Formulare selbst. -->
+      <ol class="schritte" id="r-schritte">
+        <li data-schritt="1" class="aktiv"><span class="s-nr">1</span><span data-i18n>Zeitraum wählen</span></li>
+        <li data-schritt="2"><span class="s-nr">2</span><span data-i18n>Vorgänge auswählen</span></li>
+        <li data-schritt="3"><span class="s-nr">3</span><span data-i18n>Empfänger und Rechnung</span></li>
+      </ol>
       <div class="r-zeitraum">
         <label for="r-von" data-i18n>Leistung von</label>
         <input type="date" id="r-von">
@@ -1389,6 +1739,28 @@ EN[" Ereignisse"] = " events";
 EN["Keine Aktivität in den letzten 60 Minuten"] = "No activity in the last 60 minutes";
 EN["Sobald wieder gearbeitet wird, erscheinen die Sitzungen hier automatisch."] = "Sessions appear here automatically as soon as work resumes.";
 EN["Lokale Modelle"] = "Local models";
+EN["Meldung schließen"] = "Dismiss message";
+EN["Zeitraum wählen"] = "Choose period";
+EN["Vorgänge auswählen"] = "Select jobs";
+EN["Empfänger und Rechnung"] = "Recipient and invoice";
+EN["Alle Vorgänge auswählen"] = "Select all jobs";
+EN["Noch keine Tickets erkannt"] = "No jobs detected yet";
+/* Bindewort der aria-Labels in der Saetze-Tabelle ("Stundensatz für X").
+   Steht als eigener Eintrag, damit der Satzbau übersetzbar bleibt. */
+EN[" für "] = " for ";
+EN["Entfernen"] = "Remove";
+EN["Stundensatz"] = "Hourly rate";
+EN["Rabatt in Prozent"] = "Discount in percent";
+EN["Sobald ein Ticket-Schlüssel (z. B. ABC-123) in Branch oder Sitzung auftaucht, erscheint er hier."] =
+  "As soon as a job key (e.g. ABC-123) appears in a branch or session, it shows up here.";
+EN["Positionen oben zusammenstellen oder erfasste Vorgänge übernehmen."] =
+  "Compose items above or take over recorded jobs.";
+EN["Oben einen Zeitraum wählen, Vorgänge auswählen und die erste Rechnung erstellen."] =
+  "Choose a period above, select jobs and create the first invoice.";
+EN["Kein Kontakt passt zu Suche und Filter."] = "No contact matches the search and filter.";
+EN["Suchbegriff ändern oder Filter zurücksetzen."] = "Change the search term or reset the filter.";
+EN["Über das Formular oben den ersten Kunden oder Lead anlegen."] =
+  "Use the form above to add the first customer or lead.";
 function uebersetze(de) {
   if (SPRACHE === 'de') return de;
   const e = EN[de];
@@ -1463,6 +1835,16 @@ function vor(iso) {
                  : zahl + ' ' + einheit + ' ago';
 }
 
+/* Laeuft diese Sitzung gerade? Die Schwelle liegt bei zwei Minuten und damit
+   bewusst unter dem Pausenabstand (gapMinutes, standardmaessig 5): der Punkt
+   soll sagen "hier passiert etwas", nicht "das zaehlt noch als Arbeitszeit".
+   Die beiden Fragen haben verschiedene Antworten, und nur die zweite geht in
+   die Abrechnung ein — die entscheidet ohnehin der Server. */
+function istAktiv(ts) {
+  const t = Date.parse(ts);
+  return isFinite(t) && (Date.now() - t) < 120000;
+}
+
 // Deckungsgleich mit esc() in rechnung.js, einschliesslich des Apostrophs.
 // Der ist heute entbehrlich, weil jedes Attribut hier doppelte
 // Anfuehrungszeichen verwendet — aber die naechste Zeile, die einfache nimmt,
@@ -1473,6 +1855,183 @@ const esc = (s) => String(s == null ? '' : s)
 
 // Modellnamen kürzen: "claude-opus-5" -> "opus-5"
 const kurzModell = (m) => String(m || '–').replace(/^claude-/, '');
+
+/* =========================================================
+   Rückmeldung: Toast + laufender Knopf
+   ========================================================= */
+
+/* Die vier Statuszeilen (a/k/v/rStatus) bleiben unveraendert stehen — der
+   Toast ist eine zweite Anzeige derselben Meldung, kein zweiter Code-Pfad.
+   Grund: die Statuszeile sitzt teils weit vom ausloesenden Knopf entfernt und
+   wechselt lautlos; nach "Rechnung erstellen" sah Erfolg aus wie keine
+   Reaktion. Nur ok/err werden gemeldet — eine neutrale Zwischenmeldung
+   ("wird gespeichert…") gehoert in die Zeile, nicht in ein Fenster, das sich
+   ueber die Seite legt. */
+function toast(text, art, aktion) {
+  if (!text) return;
+  let halter = document.getElementById('toasts');
+  if (!halter) {
+    halter = document.createElement('div');
+    halter.id = 'toasts';
+    halter.className = 'toast-halter';
+    // Meldungen kommen unaufgefordert: assertive wuerde den Screenreader
+    // mitten im Satz unterbrechen, polite wartet auf die naechste Pause.
+    halter.setAttribute('aria-live', 'polite');
+    halter.setAttribute('role', 'status');
+    document.body.appendChild(halter);
+  }
+  const el = document.createElement('div');
+  el.className = 'toast' + (art ? ' ' + art : '');
+  const txt = document.createElement('span');
+  txt.className = 'toast-text';
+  txt.textContent = text;
+  el.appendChild(txt);
+  if (aktion && aktion.text && typeof aktion.tu === 'function') {
+    const k = document.createElement('button');
+    k.className = 'btn';
+    k.textContent = aktion.text;
+    k.addEventListener('click', () => { weg(); aktion.tu(); });
+    el.appendChild(k);
+  }
+  const zu = document.createElement('button');
+  zu.className = 'toast-zu';
+  zu.setAttribute('aria-label', uebersetze('Meldung schließen'));
+  zu.textContent = '×';
+  zu.addEventListener('click', () => weg());
+  el.appendChild(zu);
+  halter.appendChild(el);
+
+  let fort = null;
+  function weg() {
+    if (!el.isConnected) return;
+    clearTimeout(fort);
+    el.classList.add('geht');
+    // Nach der Ausblendbewegung entfernen. Der Rueckfall-Timer greift, wenn
+    // die Bewegung gar nicht laeuft (reduzierte Bewegung, Hintergrundtab) —
+    // sonst bliebe der Toast unsichtbar, aber klickbar liegen.
+    let fertig = false;
+    const raus = () => { if (fertig) return; fertig = true; el.remove(); };
+    el.addEventListener('animationend', raus, { once: true });
+    setTimeout(raus, 400);
+  }
+  // Fehler bleiben laenger stehen: sie sind laenger, und wer sie liest, will
+  // sie meist abschreiben oder danach handeln.
+  fort = setTimeout(weg, art === 'err' ? 7000 : 4000);
+  return weg;
+}
+
+/* Zaehlt eine Kennzahl auf ihren Wert hoch. Reine Darstellung: der letzte
+   Schritt setzt immer format(ziel), nie einen gerundeten Zwischenwert — die
+   Kachel zeigt am Ende exakt, was die API geliefert hat. Gerechnet wird
+   nach wie vor nur im Server (metrics.js), hier wird nichts abgeleitet.
+
+   Laeuft nur beim ersten Fuellen einer Kachel. Bei jeder Aktualisierung
+   (alle 30 s) neu hochzaehlen zu lassen, waere Unruhe ohne Aussage — und
+   ein Wert, der staendig durch Zwischenstaende laeuft, ist nicht ablesbar. */
+const zaehlerLaeuft = new WeakMap();
+function zaehleHoch(el, ziel, format) {
+  if (!el) return;
+  const fertig = () => { el.textContent = format(ziel); };
+  const vorher = zaehlerLaeuft.get(el);
+  if (vorher) cancelAnimationFrame(vorher);
+  // Nicht animieren, wenn die Kachel schon einen Wert trug, der Wert keine
+  // Zahl ist, oder der Nutzer weniger Bewegung wuenscht.
+  const schonGefuellt = el.dataset.gefuellt === '1';
+  const wenigerBewegung = window.matchMedia
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  el.dataset.gefuellt = '1';
+  const z = Number(ziel);
+  if (schonGefuellt || wenigerBewegung || !isFinite(z) || z === 0) return fertig();
+
+  const dauer = 600;
+  const start = performance.now();
+  const schritt = (jetzt) => {
+    const t = Math.min(1, (jetzt - start) / dauer);
+    if (t >= 1) { zaehlerLaeuft.delete(el); return fertig(); }
+    // Ausbremsen: schnell los, ruhig ankommen.
+    const e = 1 - Math.pow(1 - t, 3);
+    el.textContent = format(z * e);
+    zaehlerLaeuft.set(el, requestAnimationFrame(schritt));
+  };
+  zaehlerLaeuft.set(el, requestAnimationFrame(schritt));
+}
+
+/* Nimmt die Ladekennzeichnung von einem Bereich, sobald sein Inhalt steht.
+   Bleibt aria-busy stehen, meldet die Seite dauerhaft "laedt" — fuer einen
+   Screenreader ein Widerspruch zum sichtbaren Inhalt.
+
+   Wird von den Zeichenfunktionen aufgerufen; der Platzhalter selbst
+   verschwindet ohnehin mit dem innerHTML, das ihn ersetzt. */
+function fertigGeladen(el) {
+  if (el && el.hasAttribute('aria-busy')) el.removeAttribute('aria-busy');
+}
+
+/* Leerzustand mit Zeichen, Erklaerung und — wo es eine gibt — der naechsten
+   Handlung. Ohne sie steht der Nutzer vor einer leeren Flaeche und weiss
+   nicht, ob etwas fehlt, kaputt ist oder er selbst etwas tun muss.
+
+   Die Zeichen sind bewusst schlicht und einfarbig (currentColor): sie geben
+   der Flaeche Halt, ohne mit dem Inhalt um Aufmerksamkeit zu ringen. */
+const LEER_ZEICHEN = {
+  liste: '<path d="M4 6h16M4 12h16M4 18h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"/>',
+  uhr: '<circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.6" fill="none"/>' +
+       '<path d="M12 7.5V12l3 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"/>',
+  beleg: '<path d="M6.5 3.5h11v17l-2.75-1.6-2.75 1.6-2.75-1.6L6.5 20.5z" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linejoin="round"/>' +
+         '<path d="M9.5 8.5h5M9.5 12h5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"/>',
+  person: '<circle cx="12" cy="8.5" r="3.5" stroke="currentColor" stroke-width="1.6" fill="none"/>' +
+          '<path d="M5.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"/>',
+};
+function leerHtml(zeichen, titel, text, tat) {
+  return '<div class="empty">' +
+    '<span class="e-zeichen" aria-hidden="true"><svg viewBox="0 0 24 24">' +
+      (LEER_ZEICHEN[zeichen] || LEER_ZEICHEN.liste) + '</svg></span>' +
+    '<span class="big">' + esc(uebersetze(titel)) + '</span>' +
+    esc(uebersetze(text)) +
+    (tat ? '<div class="e-tat">' + tat + '</div>' : '') +
+  '</div>';
+}
+
+/* Laesst die ersten Zeilen einer frisch gezeichneten Tabelle nacheinander
+   eintreffen. Gedeckelt bei zwoelf: danach traegt die Staffelung nichts mehr
+   bei, verzoegert aber sichtbar, bis die Liste vollstaendig dasteht.
+
+   Wird nach innerHTML aufgerufen, nicht davor — die Klasse muss an Zeilen
+   haengen, die schon im Dokument stehen. */
+function zeilenStaffeln(wurzel, max) {
+  if (!wurzel) return;
+  const zeilen = wurzel.querySelectorAll('tbody tr');
+  const grenze = Math.min(zeilen.length, max || 12);
+  for (let i = 0; i < grenze; i++) {
+    zeilen[i].classList.add('eintritt');
+    zeilen[i].style.animationDelay = (i * 25) + 'ms';
+  }
+}
+
+/* Fuehrt eine Aktion aus und sperrt den ausloesenden Knopf solange. Deckt
+   zwei Dinge in einem: die fehlende Rueckmeldung waehrend des Wartens und den
+   Doppelklick. Letzterer war bei "Rechnung erstellen" kein Schoenheitsfehler,
+   sondern haette zwei Nummern aus dem fortlaufenden Kreis gezogen. */
+async function mitLauf(knopf, tu) {
+  if (!knopf) return tu();
+  if (knopf.dataset.laeuft) return;          // bereits unterwegs
+  // Gesichert wird nur das Markup. Traegt ein Knopf einmal ein Kindelement
+  // mit eigenem Zuhoerer, geht der beim Zuruecksetzen verloren — dann hier
+  // die Kinder auslagern statt innerHTML zu sichern. Heute tragen alle vier
+  // Aufrufer reinen Text, deshalb reicht das.
+  const vorher = knopf.innerHTML;
+  knopf.dataset.laeuft = '1';
+  knopf.disabled = true;
+  knopf.setAttribute('aria-busy', 'true');
+  knopf.innerHTML = '<span class="spinner" aria-hidden="true"></span>' + vorher;
+  try {
+    return await tu();
+  } finally {
+    delete knopf.dataset.laeuft;
+    knopf.disabled = false;
+    knopf.removeAttribute('aria-busy');
+    knopf.innerHTML = vorher;
+  }
+}
 
 /* =========================================================
    Zustand
@@ -1591,6 +2150,9 @@ function setzeSprache(neu) {
   if (eGeladen) { eGeladen = false; ladeEinstellungen(); }
   if (sdGeladen) { sdGeladen = false; ladeStammdaten(); }
   bannerSetzen();
+  // Die Reiter heissen in jeder Sprache anders lang — die Kante rechts muss
+  // nach dem Umschalten neu entscheiden, ob noch etwas ausserhalb liegt.
+  tabKanteSetzen();
 }
 
 async function ladeSummary() {
@@ -1625,6 +2187,22 @@ async function ladeLive() {
 /* =========================================================
    Tabs
    ========================================================= */
+
+/* Weiche Kante rechts, solange dort Reiter ausserhalb des Sichtfelds liegen.
+   Ohne sie sieht die Leiste auf schmalen Geraeten vollstaendig aus, obwohl
+   noch Reiter folgen. Toleranz von 2 Pixeln, weil die Breiten gebrochen sein
+   koennen und ein exakter Vergleich dann dauerhaft "mehr" meldet. */
+function tabKanteSetzen() {
+  const nav = document.getElementById('tabs');
+  const halter = document.getElementById('tabs-halter');
+  if (!nav || !halter) return;
+  const mehr = nav.scrollWidth - nav.clientWidth - nav.scrollLeft > 2;
+  halter.classList.toggle('mehr-rechts', mehr);
+}
+document.getElementById('tabs').addEventListener('scroll', tabKanteSetzen, { passive: true });
+window.addEventListener('resize', tabKanteSetzen);
+tabKanteSetzen();
+
 document.querySelectorAll('nav.tabs button').forEach((b) => {
   b.addEventListener('click', () => {
     document.querySelectorAll('nav.tabs button').forEach((x) =>
@@ -1700,8 +2278,9 @@ function linienChart(punkte, opt) {
   flaeche += ' L ' + x(punkte.length - 1) + ' ' + (mt + ih) + ' Z';
   s += '<path class="area" d="' + flaeche + '"/>';
 
-  // Linie
-  s += '<path class="line" d="' +
+  // Linie. pathLength normiert die Laenge auf 100, damit das Strichmuster der
+  // Einzeichen-Bewegung im CSS ohne Messung der echten Pfadlaenge passt.
+  s += '<path class="line" pathLength="100" d="' +
        punkte.map((p, i) => (i ? 'L' : 'M') + ' ' + x(i) + ' ' + y(p.wert)).join(' ') + '"/>';
 
   // Punkte nur bei wenigen Werten, sonst wird es unruhig
@@ -1766,7 +2345,12 @@ function balkenChart(reihen, opt) {
     const bh = 14;
     const bw = Math.max(1, (r.wert / max) * iw);
     s += '<text x="' + (ml - 8) + '" y="' + (y + bh / 2 + 3.5) + '" text-anchor="end">' + esc(r.label) + '</text>';
-    s += '<rect class="bar" x="' + ml + '" y="' + y + '" width="' + bw + '" height="' + bh + '" rx="2">' +
+    // Gestaffelter Start: die Rangfolge wird beim Aufbau lesbar, statt dass
+    // alle Balken gleichzeitig erscheinen. Gedeckelt, damit eine lange Liste
+    // nicht spuerbar spaeter fertig ist als eine kurze.
+    const verzug = Math.min(i * 40, 240);
+    s += '<rect class="bar" x="' + ml + '" y="' + y + '" width="' + bw + '" height="' + bh +
+         '" rx="2" style="animation-delay:' + verzug + 'ms">' +
          '<title>' + esc(r.titel || (r.label + ': ' + o.fmt(r.wert))) + '</title></rect>';
     s += '<text x="' + (ml + bw + 7) + '" y="' + (y + bh / 2 + 3.5) + '">' + esc(o.fmt(r.wert)) + '</text>';
   });
@@ -1785,6 +2369,9 @@ function balkenChart(reihen, opt) {
 function chartInteraktiv(containerId, punkte, opt) {
   const o = Object.assign({ fmt: usd, klick: null }, opt || {});
   const halter = document.getElementById(containerId);
+  // Vor dem fruehen Ausstieg: gezeichnet ist auch ein leeres Diagramm, die
+  // Ladekennzeichnung muss so oder so weg.
+  fertigGeladen(halter);
   if (!halter || !punkte || !punkte.length) return;
   const svg = halter.querySelector('svg.chart');
   if (!svg) return;
@@ -1879,10 +2466,12 @@ function zeichneLive() {
 
   // Sitzungstabelle
   const ziel = document.getElementById('l-sessions');
+  fertigGeladen(ziel);
   const sess = d && Array.isArray(d.sessions) ? d.sessions : [];
   if (!sess.length) {
-    ziel.innerHTML = '<div class="empty"><span class="big">Keine Aktivität in den letzten 60 Minuten</span>' +
-      'Sobald wieder gearbeitet wird, erscheinen die Sitzungen hier automatisch.</div>';
+    ziel.innerHTML = leerHtml('uhr',
+      'Keine Aktivität in den letzten 60 Minuten',
+      'Sobald wieder gearbeitet wird, erscheinen die Sitzungen hier automatisch.');
   } else if (buchungInArbeit(ziel)) {
     // Die Tabelle wird alle 30 Sekunden neu aufgebaut. Waehrend jemand einen
     // Vorgang eintippt, wuerde das die Eingabe verschlucken — dann bleibt sie
@@ -1948,7 +2537,9 @@ function zeichneLive() {
           '<td class="dim">' + esc(kurzModell(s.model)) + '</td>' +
           '<td class="z-tokens" title="' + num(s.total_tokens) + ' Tokens">' + kurz(s.total_tokens) + '</td>' +
           '<td class="usd z-usd">' + usd(s.cost_usd) + '</td>' +
-          '<td class="faint z-zeit">' + esc(vor(s.last_ts)) + '</td>' +
+          '<td class="faint z-zeit">' + (istAktiv(s.last_ts)
+            ? '<span class="puls" aria-hidden="true"></span>' : '') +
+            esc(vor(s.last_ts)) + '</td>' +
         '</tr>';
       });
     }
@@ -2336,15 +2927,25 @@ function zeichneSaetze() {
   // Die Felder bleiben zunaechst leer; die gespeicherten Werte traegt
   // ladeSaetze() gleich darauf ein. Leer heisst immer: Standardsatz.
   for (const p of projekte) {
+    // Jedes Feld nennt sein Projekt: die Spaltenueberschrift allein reicht
+    // vorgelesen nicht, dort steht sonst dreimal "Eingabefeld" ohne Bezug.
+    // Der Knopf ebenso — "Speichern" gibt es in dieser Tabelle je Zeile einmal.
+    //
+    // Das Bindewort gehoert in die Uebersetzung, nicht in den Satzbau: ein
+    // fest eingesetztes " für " haette im Englischen "Hourly rate für X"
+    // ergeben — falsch, ohne dass irgendetwas bricht.
+    const fuer = (was) =>
+      ' aria-label="' + esc(uebersetze(was) + uebersetze(' für ') + p.project) + '"';
     h += '<tr data-projekt="' + esc(p.project) + '">' +
       '<td class="trunc" title="' + esc(p.project) + '">' + esc(p.project) + '</td>' +
       '<td><input class="feld kunde" type="text" placeholder="–" value="' +
-        esc(p.kunde || '') + '" size="10"></td>' +
+        esc(p.kunde || '') + '" size="10"' + fuer('Kunde') + '></td>' +
       '<td><input class="feld satz" type="number" min="0" step="0.5" placeholder="' +
-        nf2.format(standard) + '"></td>' +
-      '<td><input class="feld rabatt" type="number" min="0" max="100" step="1" placeholder="0"></td>' +
+        nf2.format(standard) + '"' + fuer('Stundensatz') + '></td>' +
+      '<td><input class="feld rabatt" type="number" min="0" max="100" step="1" placeholder="0"' +
+        fuer('Rabatt in Prozent') + '></td>' +
       '<td class="ergibt eur">' + eur(p.stundensatz) + '</td>' +
-      '<td><button class="btn speichern">Speichern</button></td>' +
+      '<td><button class="btn speichern"' + fuer('Speichern') + '>Speichern</button></td>' +
     '</tr>';
   }
   ziel.innerHTML = h + '</tbody></table></div>';
@@ -2457,10 +3058,13 @@ function zeichneUeberblick() {
   if (!d) return;
   const s = d.summary || {};
   const setz = (id, v) => { document.getElementById(id).textContent = v; };
+  // Zahlenkacheln zaehlen beim ersten Fuellen hoch; der Endwert ist exakt der
+  // Wert aus der API, siehe zaehleHoch().
+  const setzZahl = (id, v, format) => zaehleHoch(document.getElementById(id), v, format);
 
-  setz('s-tokens', kurz(s.total_tokens));
+  setzZahl('s-tokens', s.total_tokens, kurz);
   setz('s-tokens-hint', num(s.total_tokens) + ' Tokens');
-  setz('s-kosten', usd(s.cost_usd));
+  setzZahl('s-kosten', s.cost_usd, usd);
 
   // Nur die Projektarbeit, nicht der Werkzeugbetrieb. Die Gesamtzeit aus
   // `summary` enthaelt auch die Hintergrundsitzungen der Werkzeuge — die
@@ -2470,12 +3074,12 @@ function zeichneUeberblick() {
   const sp = d.split;
   const stunden = sp ? sp.arbeit.active_seconds / 3600 : (s.active_seconds || 0) / 3600;
   const wzStunden = sp ? sp.overhead.active_seconds / 3600 : 0;
-  setz('s-stunden', hrs(stunden));
+  setzZahl('s-stunden', stunden, hrs);
   setz('s-stunden-hint',
     (wzStunden > 0.05 ? uebersetze('ohne ') + hrs(wzStunden) + uebersetze(' Werkzeugbetrieb · ') : '') +
     (istDE() ? 'Pausen ab ' + num(d.config && d.config.gapMinutes) + ' Min zählen nicht'
              : 'gaps from ' + num(d.config && d.config.gapMinutes) + ' min do not count'));
-  setz('s-requests', num(s.requests));
+  setzZahl('s-requests', s.requests, num);
   setz('s-zeitraum', datum(s.first_day) + ' – ' + datum(s.last_day));
   setz('zeitraum', datum(s.first_day) + ' – ' + datum(s.last_day));
 
@@ -2644,6 +3248,7 @@ function zeichneProjekte() {
   }
 
   const ziel = document.getElementById('s-projects');
+  fertigGeladen(ziel);
   if (!projects.length) {
     ziel.innerHTML = '<div class="empty">Keine Projektdaten vorhanden.</div>';
     return;
@@ -2755,9 +3360,11 @@ function zeichneTickets() {
     rows.length ? num(rows.length) + uebersetze(' Tickets erfasst') : '';
 
   const ziel = document.getElementById('t-table');
+  fertigGeladen(ziel);
   if (!rows.length) {
-    ziel.innerHTML = '<div class="empty"><span class="big">Noch keine Tickets erkannt</span>' +
-      'Sobald ein Ticket-Schlüssel (z.&nbsp;B. ABC-123) in Branch oder Sitzung auftaucht, erscheint er hier.</div>';
+    ziel.innerHTML = leerHtml('liste',
+      'Noch keine Tickets erkannt',
+      'Sobald ein Ticket-Schlüssel (z. B. ABC-123) in Branch oder Sitzung auftaucht, erscheint er hier.');
     return;
   }
 
@@ -2800,7 +3407,13 @@ function zeichneTickets() {
       '<td class="faint">' + datum(t.first_day) + ' – ' + datum(t.last_day) + '</td>' +
     '</tr>';
   }
+  // Staffeln nur beim ersten Aufbau. Beim Sortieren standen die Zeilen schon
+  // da — sie erneut eintreffen zu lassen, sieht aus wie neu geladene Daten und
+  // verzoegert das, worauf es beim Sortieren ankommt: die neue Reihenfolge.
+  const ersterAufbau = !ziel.dataset.gezeichnet;
+  ziel.dataset.gezeichnet = '1';
   ziel.innerHTML = h + '</tbody></table></div>';
+  if (ersterAufbau) zeilenStaffeln(ziel);
 
   ziel.querySelectorAll('th.sortable').forEach((th) => {
     th.addEventListener('click', () => {
@@ -2967,6 +3580,27 @@ function margeKlasse(prozent, ziel) {
   return 'm-bad';   // 7 Pp unter Ziel (bei Ziel 32 also 25 %) ist rot
 }
 
+/* Schmaler Balken unter der Margenzeile. Er zeigt dieselbe Stufe, die die
+   Textfarbe traegt — nur eben als Laenge, die sich im Ueberfliegen mit anderen
+   Vorgaengen vergleichen laesst. Wichtig: die Zahl bleibt die Aussage, der
+   Balken ergaenzt sie. Wer Farben schlecht unterscheidet, liest weiterhin den
+   Prozentwert daneben; auf Farbe allein ruht hier nichts.
+
+   Der Massstab endet beim Doppelten der Zielmarge. Eine offene Skala haette
+   keinen Bezugspunkt, und genau der ist die Frage: liege ich ueber oder unter
+   dem, was ich erreichen wollte. Ohne Ziel bleibt der Balken weg — dann gibt
+   es nichts, wogegen die Laenge etwas hiesse. */
+function margeBalken(prozent, ziel) {
+  if (prozent == null || ziel == null || !(ziel > 0)) return '';
+  const anteil = Math.max(0, Math.min(1, prozent / (ziel * 2)));
+  // Die Zielmarke sitzt bei halber Skala — das ist der Massstab, nicht ein
+  // gerechneter Wert.
+  return '<span class="marge-balken" aria-hidden="true">' +
+    '<span class="mb-fuell" style="width:' + (anteil * 100).toFixed(1) + '%"></span>' +
+    '<span class="mb-ziel"></span>' +
+  '</span>';
+}
+
 // Stellt die Wertaufstellung aus metrics.mehrwert() dar. Gerechnet wird
 // ausschliesslich auf dem Server — eine zweite Formel hier waere eine Kopie,
 // die beim naechsten Eingriff auseinanderlaeuft.
@@ -3039,6 +3673,7 @@ function werteHtml(t, w) {
         : '<dd class="' + margeKlasse(w.marge_prozent, w.zielmarge_prozent) + '">' +
             eur(w.marge) +
             (w.marge_prozent != null ? ' <small>(' + nf1.format(w.marge_prozent) + ' %)</small>' : '') +
+            margeBalken(w.marge_prozent, w.zielmarge_prozent) +
           '</dd>') +
     zielZeile +
     vergleichZeile(t, w) +
@@ -3296,8 +3931,19 @@ const aZustand = { posten: [], zeilen: [], gewaehlt: new Set() };
 function aStatus(text, art, wo) {
   const el = document.getElementById(wo || 'a-status');
   if (!el) return;
+  art = statusArt(art);
   el.className = 'saetze-status' + (art ? ' ' + art : '');
   el.textContent = text;
+  if (art) toast(text, art);
+}
+
+/* Die Aufrufer setzen teils 'fehler', teils 'err' — als CSS existiert nur
+   .err, also blieben sieben Fehlermeldungen in Kontakten und Vorlagen grau
+   statt rot. Hier normalisiert statt an sieben Aufrufstellen: eine Regel,
+   ein Ort. */
+function statusArt(art) {
+  if (art === 'fehler') return 'err';
+  return art === 'ok' || art === 'err' ? art : '';
 }
 
 function zeichnePosten() {
@@ -3486,32 +4132,31 @@ async function erstelleAngebot() {
     nutzlast.tickets = [...aZustand.gewaehlt];
   }
 
-  knopf.disabled = true;
   aStatus(uebersetze('wird erstellt…'));
-  try {
-    const r = await fetch('/api/angebot', {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(nutzlast),
-    });
-    const a = await r.json();
-    if (!r.ok || a.error) throw new Error(a.error || uebersetze('Erstellen fehlgeschlagen'));
-    aStatus('Angebot ' + a.nr + ' erstellt (' + eur(a.brutto_eur) + ').', 'ok');
-    // Vollstaendig leeren. Bleibt der vorige Empfaenger stehen, geht das
-    // naechste Angebot an die falsche Anschrift.
-    aZustand.posten = [];
-    aZustand.kontaktId = null;
-    document.getElementById('a-name').value = '';
-    document.getElementById('a-anschrift').value = '';
-    document.getElementById('a-gueltig').value = '30';
-    leereAngebotsVorgaenge();
-    ladeKontakte();
-    zeichnePosten();
-    ladeAngebote();
-  } catch (err) {
-    aStatus(uebersetze('Nicht erstellt: ') + err.message, 'err');
-  } finally {
-    knopf.disabled = false;
-  }
+  await mitLauf(knopf, async () => {
+    try {
+      const r = await fetch('/api/angebot', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(nutzlast),
+      });
+      const a = await r.json();
+      if (!r.ok || a.error) throw new Error(a.error || uebersetze('Erstellen fehlgeschlagen'));
+      aStatus('Angebot ' + a.nr + ' erstellt (' + eur(a.brutto_eur) + ').', 'ok');
+      // Vollstaendig leeren. Bleibt der vorige Empfaenger stehen, geht das
+      // naechste Angebot an die falsche Anschrift.
+      aZustand.posten = [];
+      aZustand.kontaktId = null;
+      document.getElementById('a-name').value = '';
+      document.getElementById('a-anschrift').value = '';
+      document.getElementById('a-gueltig').value = '30';
+      leereAngebotsVorgaenge();
+      ladeKontakte();
+      zeichnePosten();
+      ladeAngebote();
+    } catch (err) {
+      aStatus(uebersetze('Nicht erstellt: ') + err.message, 'err');
+    }
+  });
 }
 
 async function ladeAngebote() {
@@ -3524,7 +4169,11 @@ async function ladeAngebote() {
     return;
   }
   const liste = d.angebote || [];
-  if (!liste.length) { ziel.innerHTML = '<div class="empty">' + uebersetze('Noch kein Angebot erstellt.') + '</div>'; return; }
+  if (!liste.length) {
+    ziel.innerHTML = leerHtml('beleg', 'Noch kein Angebot erstellt.',
+      'Positionen oben zusammenstellen oder erfasste Vorgänge übernehmen.');
+    return;
+  }
 
   let h = '<div class="tablewrap"><table><thead><tr>' +
     '<th>' + uebersetze('Nummer') + '</th><th>' + uebersetze('Datum') + '</th><th>' + uebersetze('Gültig bis') + '</th><th>' + uebersetze('Empfänger') + '</th>' +
@@ -3581,26 +4230,25 @@ async function ladeAngebote() {
 }
 
 async function aAktion(knopf, pfad, nutzlast, meldung, wo) {
-  const alt = knopf.textContent;
-  knopf.disabled = true;
-  knopf.textContent = '…';
-  try {
-    const r = await fetch(pfad, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(nutzlast),
-    });
-    const a = await r.json();
-    if (!r.ok || a.error) throw new Error(a.error || uebersetze('Aktion fehlgeschlagen'));
-    aStatus(meldung(a), 'ok', wo);
-    ladeAngebote();
-    ladeRechnungen();
-    // Eine Annahme kann aus einem Lead einen Kunden gemacht haben.
-    ladeKontakte();
-  } catch (err) {
-    aStatus(uebersetze('Fehlgeschlagen: ') + err.message, 'err', wo);
-    knopf.disabled = false;
-    knopf.textContent = alt;
-  }
+  // mitLauf stellt den Knopf in jedem Fall wieder her (finally) — die frühere
+  // Fassung tat das nur im Fehlerfall und liess bei Erfolg ein "…" stehen.
+  return mitLauf(knopf, async () => {
+    try {
+      const r = await fetch(pfad, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(nutzlast),
+      });
+      const a = await r.json();
+      if (!r.ok || a.error) throw new Error(a.error || uebersetze('Aktion fehlgeschlagen'));
+      aStatus(meldung(a), 'ok', wo);
+      ladeAngebote();
+      ladeRechnungen();
+      // Eine Annahme kann aus einem Lead einen Kunden gemacht haben.
+      ladeKontakte();
+    } catch (err) {
+      aStatus(uebersetze('Fehlgeschlagen: ') + err.message, 'err', wo);
+    }
+  });
 }
 
 function standardSatz() {
@@ -3624,8 +4272,10 @@ const K_FELDER = ['firma', 'vorname', 'nachname', 'anschrift', 'steuernummer',
 
 function kStatus(text, art) {
   const el = document.getElementById('k-status-text');
+  art = statusArt(art);
   el.className = 'saetze-status' + (art ? ' ' + art : '');
   el.textContent = text;
+  if (art) toast(text, art);
 }
 
 async function ladeKontakte() {
@@ -3731,9 +4381,14 @@ function zeichneKontakte() {
   if (kZustand.gewaehlt && !zeilen.some((k) => k.id === kZustand.gewaehlt)) kZustand.gewaehlt = null;
 
   if (!zeilen.length) {
-    ziel.innerHTML = '<div class="empty">' + esc(kZustand.liste.length
-      ? 'Kein Kontakt passt zu Suche und Filter.'
-      : uebersetze('Noch kein Kontakt erfasst.')) + '</div>';
+    // Zwei verschiedene Lagen: gar keine Kontakte (dann hilft ein Hinweis auf
+    // den naechsten Schritt) oder alles weggefiltert (dann liegt es an der
+    // Suche, und ein "Kontakt anlegen" waere der falsche Rat).
+    ziel.innerHTML = kZustand.liste.length
+      ? leerHtml('person', 'Kein Kontakt passt zu Suche und Filter.',
+          'Suchbegriff ändern oder Filter zurücksetzen.')
+      : leerHtml('person', 'Noch kein Kontakt erfasst.',
+          'Über das Formular oben den ersten Kunden oder Lead anlegen.');
     zeichneKontaktDetail();
     return;
   }
@@ -4004,8 +4659,10 @@ let vListe = [];
 
 function vStatus(text, art) {
   const el = document.getElementById('v-status');
+  art = statusArt(art);
   el.className = 'saetze-status' + (art ? ' ' + art : '');
   el.textContent = text;
+  if (art) toast(text, art);
 }
 
 async function ladeVorlagen() {
@@ -4037,11 +4694,19 @@ function zeichneVorlagenListe() {
   let h = '<div class="tablewrap"><table class="saetze"><thead><tr>' +
     '<th>' + uebersetze('Bezeichnung') + '</th><th>' + uebersetze('Satz EUR') + '</th><th></th></tr></thead><tbody>';
   for (const v of vListe) {
+    // Wie in der Saetze-Tabelle: jedes Feld nennt die Vorlage, zu der es
+    // gehoert. Der Entfernen-Knopf trug bisher nur ein title — vorgelesen
+    // stand dort "Schaltflaeche" ohne Bezug, und bei mehreren Vorlagen
+    // untereinander ist nicht erkennbar, welche man trifft.
+    const fuerV = (was) =>
+      ' aria-label="' + esc(uebersetze(was) + uebersetze(' für ') + v.bezeichnung) + '"';
     h += '<tr data-v="' + v.id + '">' +
-      '<td><input class="feld v-bez" type="text" maxlength="200" value="' + esc(v.bezeichnung) + '"></td>' +
+      '<td><input class="feld v-bez" type="text" maxlength="200" value="' + esc(v.bezeichnung) + '"' +
+        fuerV('Bezeichnung') + '></td>' +
       '<td><input class="feld v-satz" type="number" step="0.01" min="0" max="10000" value="' +
-        esc(v.satz === null ? '' : String(v.satz)) + '" placeholder="Standard"></td>' +
-      '<td><button class="btn v-weg" title="Vorlage entfernen">✕</button></td>' +
+        esc(v.satz === null ? '' : String(v.satz)) + '" placeholder="Standard"' +
+        fuerV('Stundensatz') + '></td>' +
+      '<td><button class="btn v-weg" title="Vorlage entfernen"' + fuerV('Entfernen') + '>✕</button></td>' +
     '</tr>';
   }
   ziel.innerHTML = h + '</tbody></table></div>';
@@ -4160,8 +4825,10 @@ const rKontaktVon = (t) => (rZustand.projektKontakt[t.project] || {}).id || null
 
 function rStatus(text, art) {
   const el = document.getElementById('r-status');
+  art = statusArt(art);
   el.className = 'saetze-status' + (art ? ' ' + art : '');
   el.textContent = text;
+  if (art) toast(text, art);
 }
 
 async function ladeVorgaenge() {
@@ -4243,7 +4910,10 @@ function zeichneVorgaenge() {
   }
 
   let h = '<div class="tablewrap"><table class="rechnung"><thead><tr>' +
-    '<th><input type="checkbox" id="r-alle" title="Alle auswählen"></th>' +
+    /* title allein wird nicht zuverlaessig vorgelesen und auf Beruehrung gar
+       nicht angezeigt — das Label traegt die Bedeutung. */
+    '<th><input type="checkbox" id="r-alle" title="Alle auswählen"' +
+      ' aria-label="' + esc(uebersetze('Alle Vorgänge auswählen')) + '"></th>' +
     '<th>' + uebersetze('Vorgang') + '</th><th>' + uebersetze('Stunden') + '</th><th>' + uebersetze('Satz') + '</th>' +
     '<th>' + uebersetze('Rabatt') + '</th><th>' + uebersetze('Betrag') + '</th><th>' + uebersetze('Zeitraum') + '</th></tr></thead><tbody>';
   for (const t of rZustand.zeilen) {
@@ -4326,6 +4996,24 @@ function rSummeAktualisieren() {
     ? uebersetze('Noch kein Vorgang ausgewählt.')
     : `${gewaehlt.length} Vorgang/Vorgänge · ${hrs(stunden)} · ${eur(summe)}`;
   document.getElementById('r-erstellen').disabled = gewaehlt.length === 0;
+  rSchritteSetzen();
+}
+
+/* Markiert den erreichten Stand im Weg zur Rechnung. Liest den Zustand, den
+   es ohnehin gibt (geladene Zeilen, Auswahl) — kein eigener Schrittzaehler,
+   der mit der Wirklichkeit auseinanderlaufen koennte. */
+function rSchritteSetzen() {
+  const liste = document.getElementById('r-schritte');
+  if (!liste) return;
+  const geladen = rZustand.zeilen.length > 0;
+  const gewaehlt = rZustand.gewaehlt.size > 0;
+  // Erreicht ist immer der letzte offene Schritt; alles davor gilt als erledigt.
+  const stand = gewaehlt ? 3 : (geladen ? 2 : 1);
+  liste.querySelectorAll('li').forEach((li) => {
+    const nr = Number(li.dataset.schritt);
+    li.classList.toggle('fertig', nr < stand);
+    li.classList.toggle('aktiv', nr === stand);
+  });
 }
 
 async function erstelleRechnung() {
@@ -4349,31 +5037,33 @@ async function erstelleRechnung() {
     return;
   }
 
-  knopf.disabled = true;
   rStatus(uebersetze('wird erstellt…'));
-  try {
-    const r = await fetch('/api/rechnung', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(nutzlast),
-    });
-    const a = await r.json();
-    if (!r.ok || a.error) throw new Error(a.error || uebersetze('Erstellen fehlgeschlagen'));
-    rStatus('Rechnung ' + a.nr + ' erstellt (' + eur(a.brutto_eur) + ').', 'ok');
-    rZustand.gewaehlt.clear();
-    rZustand.kontaktId = null;
-    // Auch die Kundenwahl zuruecknehmen: bliebe sie stehen, haekte der naechste
-    // Zeichenlauf dieselben Vorgaenge erneut an — und die sind eben abgerechnet.
-    document.getElementById('r-kunde').value = '';
-    ladeKontakte();
-    document.querySelectorAll('#r-tickets input[type=checkbox]').forEach((c) => { c.checked = false; });
-    rSummeAktualisieren();
-    ladeRechnungen();
-  } catch (err) {
-    rStatus(uebersetze('Nicht erstellt: ') + err.message, 'err');
-  } finally {
-    knopf.disabled = false;
-  }
+  // mitLauf sperrt den Knopf fuer die Dauer des Aufrufs. Hier wiegt das mehr
+  // als anderswo: ein zweiter Klick zoege eine zweite Nummer aus dem
+  // fortlaufenden Kreis, und geloescht wird nicht, nur storniert.
+  await mitLauf(knopf, async () => {
+    try {
+      const r = await fetch('/api/rechnung', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(nutzlast),
+      });
+      const a = await r.json();
+      if (!r.ok || a.error) throw new Error(a.error || uebersetze('Erstellen fehlgeschlagen'));
+      rStatus('Rechnung ' + a.nr + ' erstellt (' + eur(a.brutto_eur) + ').', 'ok');
+      rZustand.gewaehlt.clear();
+      rZustand.kontaktId = null;
+      // Auch die Kundenwahl zuruecknehmen: bliebe sie stehen, haekte der naechste
+      // Zeichenlauf dieselben Vorgaenge erneut an — und die sind eben abgerechnet.
+      document.getElementById('r-kunde').value = '';
+      ladeKontakte();
+      document.querySelectorAll('#r-tickets input[type=checkbox]').forEach((c) => { c.checked = false; });
+      rSummeAktualisieren();
+      ladeRechnungen();
+    } catch (err) {
+      rStatus(uebersetze('Nicht erstellt: ') + err.message, 'err');
+    }
+  });
 }
 
 // Angenommene Angebote, aus denen noch keine Rechnung entstanden ist. Nutzt
@@ -4432,7 +5122,8 @@ async function ladeRechnungen() {
   }
   const liste = d.rechnungen || [];
   if (liste.length === 0) {
-    ziel.innerHTML = '<div class="empty">' + uebersetze('Noch keine Rechnung gestellt.') + '</div>';
+    ziel.innerHTML = leerHtml('beleg', 'Noch keine Rechnung gestellt.',
+      'Oben einen Zeitraum wählen, Vorgänge auswählen und die erste Rechnung erstellen.');
     return;
   }
 
@@ -4483,25 +5174,22 @@ async function ladeRechnungen() {
 }
 
 async function rAktion(knopf, pfad, nutzlast, meldung, danach) {
-  const alt = knopf.textContent;
-  knopf.disabled = true;
-  knopf.textContent = '…';
-  try {
-    const r = await fetch(pfad, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(nutzlast),
-    });
-    const a = await r.json();
-    if (!r.ok || a.error) throw new Error(a.error || uebersetze('Aktion fehlgeschlagen'));
-    rStatus(meldung(a), 'ok');
-    if (danach) danach(a);
-    ladeRechnungen();
-  } catch (err) {
-    rStatus(uebersetze('Fehlgeschlagen: ') + err.message, 'err');
-    knopf.disabled = false;
-    knopf.textContent = alt;
-  }
+  return mitLauf(knopf, async () => {
+    try {
+      const r = await fetch(pfad, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(nutzlast),
+      });
+      const a = await r.json();
+      if (!r.ok || a.error) throw new Error(a.error || uebersetze('Aktion fehlgeschlagen'));
+      rStatus(meldung(a), 'ok');
+      if (danach) danach(a);
+      ladeRechnungen();
+    } catch (err) {
+      rStatus(uebersetze('Fehlgeschlagen: ') + err.message, 'err');
+    }
+  });
 }
 
 document.getElementById('r-laden').addEventListener('click', ladeVorgaenge);
