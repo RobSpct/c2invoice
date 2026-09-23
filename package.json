@@ -1,6 +1,6 @@
 {
   "name": "c2invoice",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Turn Claude Code usage into billable work: active time, cost, margin and invoices per job",
   "license": "AGPL-3.0-or-later",
   "type": "commonjs",
