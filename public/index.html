@@ -1028,7 +1028,7 @@
       <div class="kpi usd">
         <div class="label" data-i18n>API-Gegenwert heute</div>
         <div class="value" id="l-kosten">–</div>
-        <div class="hint" data-i18n>API-Gegenwert</div>
+        <div class="hint" data-i18n>Listenpreis, nicht gezahlt</div>
       </div>
       <div class="kpi usd">
         <div class="label" data-i18n>Verbrauchsrate</div>
@@ -1072,7 +1072,14 @@
       <div class="kpi usd">
         <div class="label" data-i18n>API-Gegenwert</div>
         <div class="value" id="s-kosten">–</div>
-        <div class="hint" data-i18n>so viel hätte die API gekostet</div>
+        <div class="hint" data-i18n>Listenpreis, nicht gezahlt</div>
+      </div>
+      <!-- Die echte Gegenzahl. Ohne sie liest sich der API-Gegenwert wie eine
+           Rechnung — genau so wurde er von Aussenstehenden gelesen. -->
+      <div class="kpi">
+        <div class="label" data-i18n>Abo-Anteil im Zeitraum</div>
+        <div class="value" id="s-abo">–</div>
+        <div class="hint" id="s-abo-hint"></div>
       </div>
       <div class="kpi">
         <div class="label" data-i18n>Aktive Stunden</div>
@@ -1195,6 +1202,8 @@
       <p class="w-bruch-text">
         <span class="w-marke" data-i18n>ändert keine Abrechnung</span>
         <span data-i18n>Andere Sicht auf Tokens, die bereits in den Projekt- und Vorgangszahlen stecken — dient nur der Frage, was wie intensiv genutzt wird.</span>
+        <!-- Bezugsgroesse: ohne sie lesen sich die Balken als zusaetzliche Kosten. -->
+        <span id="h-bezug"></span>
       </p>
     </div>
 
@@ -1568,6 +1577,9 @@ EN["Nach Werkzeug"] = "By tool";
 EN["Nach MCP-Server"] = "By MCP server";
 EN["Verteilung nach Modell"] = "Distribution by model";
 EN["Woher die Requests kamen"] = "Where the requests came from";
+EN["Listenpreis, nicht gezahlt"] = "list price, not paid";
+EN["Abo-Anteil im Zeitraum"] = "Subscription share in period";
+EN["Abo-Preis unter Einstellungen eintragen"] = "enter your plan price under Settings";
 EN["welches Werkzeug den Verbrauch erzeugt hat"] = "which tool caused the usage";
 EN["dieselbe Summe, aufgeteilt nach Modell"] = "the same total, split by model";
 EN["dieselbe Summe, aufgeteilt auf die begleiteten Projekte"] = "the same total, split across the projects it accompanied";
@@ -2611,8 +2623,8 @@ function zeichneLive() {
     setz('l-kosten', usd(t.cost_usd));
     setz('l-burn', usd(d.burn_usd_per_hour) + ' /h');
     setz('l-burn-hint', istDE()
-      ? 'aus den letzten ' + num(d.window_minutes) + ' Min hochgerechnet'
-      : 'extrapolated from the last ' + num(d.window_minutes) + ' min');
+      ? 'Listenpreis, aus den letzten ' + num(d.window_minutes) + ' Min hochgerechnet'
+      : 'list price, extrapolated from the last ' + num(d.window_minutes) + ' min');
     setz('l-requests', num(t.requests));
     const w = d.window || {};
     setz('l-window-hint', num(w.requests) + uebersetze(' im aktuellen Fenster'));
@@ -3056,6 +3068,10 @@ function zeichneHerkunft() {
   const erkl = document.getElementById('h-erklaerung');
   if (!h || !mcpZiel) return;
 
+  document.getElementById('h-bezug').textContent = istDE()
+    ? 'Alle Balken sind Anteile an ' + usd(h.gesamt.cost_usd) + ' API-Gegenwert, keine Kosten obendrauf.'
+    : 'Every bar is a share of ' + usd(h.gesamt.cost_usd) + ' API equivalent, not cost on top.';
+
   const anteil = (t) => h.gesamt.total_tokens
     ? nf1.format((t / h.gesamt.total_tokens) * 100) + ' %' : '–';
 
@@ -3310,6 +3326,19 @@ function zeichneUeberblick() {
   setzZahl('s-tokens', s.total_tokens, kurz);
   setz('s-tokens-hint', num(s.total_tokens) + ' Tokens');
   setzZahl('s-kosten', s.cost_usd, usd);
+
+  // Ohne Abopreis bleibt die Kachel leer statt 0 zu zeigen — eine Null saehe
+  // aus wie "kostet nichts".
+  const aboPreis = Number(d.config && d.config.aboPreisMonat) || 0;
+  if (aboPreis > 0) {
+    setzZahl('s-abo', d.abo_kosten, abo);
+    setz('s-abo-hint', istDE()
+      ? 'tatsächlich gezahlt, anteilig aus ' + abo(aboPreis) + ' je Monat'
+      : 'actually paid, share of ' + abo(aboPreis) + ' per month');
+  } else {
+    setz('s-abo', '–');
+    setz('s-abo-hint', uebersetze('Abo-Preis unter Einstellungen eintragen'));
+  }
 
   // Nur die Projektarbeit, nicht der Werkzeugbetrieb. Die Gesamtzeit aus
   // `summary` enthaelt auch die Hintergrundsitzungen der Werkzeuge — die

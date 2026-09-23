@@ -24,7 +24,13 @@ session logs → active working time → hourly value → margin → invoice PDF
 
 ## What it looks like
 
-![Overview: spend over time, split by model, and per project with active hours and billable value](docs/overview.png)
+Two cost figures sit side by side on purpose. **API equivalent** is what the
+same usage would have cost at API list prices — a reference, not a bill. **Subscription
+share** is what you actually paid: your plan price, spread over the period.
+The gap between them is usually large, and it is the reason the margin never
+uses the list price.
+
+![Overview: API equivalent at list price next to the subscription share actually paid, active hours, spend over time and split by model](docs/overview.png)
 
 Per job — the margin bar is scaled against your target margin, so "above or
 below what I aimed for" is readable at a glance:
@@ -32,13 +38,17 @@ below what I aimed for" is readable at a glance:
 ![Job detail: token split, work value, contribution margin and margin with a bar scaled against the target](docs/jobs.png)
 
 Where the tokens actually went — MCP servers and skills as ranked bars. Open a
-server to see its individual tools, drawn at the same scale as their parent:
+server to see its individual tools, drawn at the same scale as their parent.
+Every bar is a share of the same total, not cost on top of it; this view
+changes no billing figure:
 
 ![Tools tab: MCP servers as horizontal bars, one expanded to show its individual tools indented below](docs/tools.png)
 
-Live, while you work — sessions can be booked onto a job by hand:
+Live, while you work — sessions can be booked onto a job by hand. The burn
+rate is the list price of the last 60 minutes extrapolated to an hour: a
+snapshot of how intensive the current session is, not an hourly cost:
 
-![Live tab: running sessions with tokens, cost and a field to assign a job](docs/live.png)
+![Live tab: running sessions with tokens, API equivalent and a field to assign a job](docs/live.png)
 
 *Screenshots use anonymised project, job and tool names.*
 
@@ -49,10 +59,11 @@ opcode) answers *how many tokens did I burn and what would the API have cost*.
 None of them answer *what do I put on the invoice*. Between those two questions
 sit four steps:
 
-1. **Usage → working time.** Tokens are not hours. Timestamps in the log
-   reconstruct actual active time once you drop the gaps where the AI waited
-   for you. Measured on real data: a 9.1-hour span was 1.6 hours of work — 82%
-   was waiting.
+1. **Usage → working time.** Tokens are not hours. Only the gaps of up to 5
+   minutes between two requests count as working time. Longer gaps — thinking
+   it over, a meeting, another project, the end of the day — are dropped and
+   never reach the invoice. Measured on real data: of a 9.1-hour span, 1.6
+   hours were work. The other 82% is not billed.
 2. **Working time → revenue.** Hourly rate per client, discounts, and the work
    assigned to the right job.
 3. **Revenue → margin.** The API list price is not your cost. Your subscription

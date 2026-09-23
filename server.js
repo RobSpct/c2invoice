@@ -521,6 +521,9 @@ function handle(req, res) {
         // (Jira-Abgleich, Rechnung, Angebot) setzt einen voraus.
         ohne_ticket: metrics.ohneTicket(db, o),
         split: metrics.splitOverhead(db, o),
+        // Echte Kosten neben dem Listenpreis: ohne diese Zahl liest sich der
+        // API-Gegenwert im Ueberblick wie eine Rechnung von Anthropic.
+        abo_kosten: metrics.aboKosten(db, o),
         werkzeuge: metrics.werkzeuge(db, o),
         // Andere Sicht auf dieselben Tokens: woher die Requests der eigenen
         // Sitzungen kamen. Aendert keine Abrechnung, siehe metrics.herkunft().

@@ -612,6 +612,15 @@ function aboAnteil(db, costUsd, month) {
   return (costUsd / total) * config.aboPreisMonat;
 }
 
+// Was das Abo im gewaehlten Ausschnitt tatsaechlich gekostet hat — die echte
+// Gegenzahl zum API-Gegenwert, der nur ein Listenpreis ist. Je Monat der
+// Anteil des Ausschnitts am Monatsverbrauch, mal Abopreis: volle Monate ergeben
+// genau den Abopreis, angeschnittene anteilig. Dieselbe Formel wie je Vorgang,
+// deshalb ueber aboAnteil statt eigener Rechnung. Waehrung: aboWaehrung.
+function aboKosten(db, opts = {}) {
+  return byMonth(db, opts).reduce((s, r) => s + aboAnteil(db, r.cost_usd, r.day), 0);
+}
+
 // Der Anteil steht in der Waehrung des Abos, nicht zwangslaeufig in Dollar:
 // Anthropic stellt aus Irland in Euro. Wird ein Euro-Betrag trotzdem durch den
 // Dollarkurs gedreht, sind die Abokosten in der Marge um den Kursfaktor zu
@@ -1090,6 +1099,7 @@ module.exports = {
   mehrwert,
   live,
   aboAnteil,
+  aboKosten,
   filterClause,
   lokalZuordnung, lokalJeGruppe, lokalStundenJeGruppe, lokalBetrag,
 };

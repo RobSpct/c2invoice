@@ -398,6 +398,45 @@ function testAboWaehrung() {
   }
 }
 
+// Die Abo-Kachel im Ueberblick ist die echte Gegenzahl zum API-Gegenwert.
+// Zwei Fehler waeren still: volle Monate ergaeben nicht genau den Abopreis,
+// oder ein angeschnittener Monat zaehlte trotzdem voll.
+function testAboKostenZeitraum() {
+  const config = require('../config.json');
+  const merk = config.aboPreisMonat;
+  const db = dbmod.open(':memory:');
+  openDbs.push(db);
+  const ins = db.prepare(`
+    INSERT INTO events (request_id, ts, session_id, project, branch, ticket, model,
+      input_tokens, output_tokens, cache_w_5m, cache_w_1h, cache_read,
+      web_search, cost_usd, is_sidechain, day)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  `);
+  const ev = (id, tag, usd) => ins.run(id, tag + 'T10:00:00.000Z', 's1', 'Beispiel - App',
+    'main', null, 'claude-opus-5', 1, 1, 0, 0, 0, 0, usd, 0, tag);
+  ev('a1', '2026-07-05', 30);
+  ev('a2', '2026-07-20', 10);
+  ev('b1', '2026-08-03', 25);
+  ev('b2', '2026-08-25', 75);
+
+  try {
+    config.aboPreisMonat = 100;
+    const voll = metrics.aboKosten(db);
+    assert.ok(Math.abs(voll - 200) < 0.001,
+      'zwei volle Monate muessen genau zweimal den Abopreis ergeben: ' + voll);
+
+    // Ab 10.07.: Juli nur noch 10 von 40 USD = 25, August voll = 100.
+    const teil = metrics.aboKosten(db, { from: '2026-07-10' });
+    assert.ok(Math.abs(teil - 125) < 0.001,
+      'angeschnittener Monat muss anteilig zaehlen: ' + teil);
+
+    config.aboPreisMonat = 0;
+    assert.strictEqual(metrics.aboKosten(db), 0, 'ohne Abopreis keine Abokosten');
+  } finally {
+    config.aboPreisMonat = merk;
+  }
+}
+
 function testOverhead() {
   const config = require('../config.json');
   assert.ok(Array.isArray(config.overheadProjekte) && config.overheadProjekte.length > 0,
@@ -2627,6 +2666,7 @@ async function main() {
   test('Mehrwert rechnet Dollar in Euro um, bevor addiert wird', testMehrwert);
   test('Marge zieht die eigene Arbeitszeit ab, Zielmarge nur als Vergleich', testMargeZiehtEigeneZeitAb);
   test('Abo in Euro wird nicht durch den Dollarkurs gedreht', testAboWaehrung);
+  test('Abokosten im Zeitraum: volle Monate voll, angeschnittene anteilig', testAboKostenZeitraum);
   test('Werkzeug-Overhead wird von Kundenprojekten getrennt', testOverhead);
   test('Werkzeuge werden dem parallel bearbeiteten Projekt zugeordnet', testWerkzeugZuordnung);
   test('Ticket rechnet eigene Arbeit plus begleitende Werkzeuge ab', testTicketGesamtsumme);
