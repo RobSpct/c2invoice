@@ -787,6 +787,11 @@
   details.klapp > summary .note { font-weight: 400; }
   details.klapp .klapp-inhalt { padding-bottom: 18px; }
   @media (prefers-reduced-motion: reduce) { details.klapp > summary::before { transition: none; } }
+  /* Erklaerung unter einem Abschnittskopf: eingeklappt nur eine kleine Zeile. */
+  details.klapp.w-erklaerung { border-top: none; margin-top: 6px; }
+  details.klapp.w-erklaerung > summary { padding: 4px 0; font-size: var(--schrift-klein); }
+  details.klapp.w-erklaerung > summary .note { color: var(--text-faint); }
+  details.klapp.w-erklaerung .klapp-inhalt { max-width: 90ch; padding: 6px 0 4px; line-height: 1.55; }
 
   /* Eigene Gruppe, weil die Werkzeugleiste ihre Kinder sonst auseinanderzieht
      (justify-content: space-between) und der Waehler am Zeilenende landet. */
@@ -1077,7 +1082,7 @@
       <!-- Die echte Gegenzahl. Ohne sie liest sich der API-Gegenwert wie eine
            Rechnung — genau so wurde er von Aussenstehenden gelesen. -->
       <div class="kpi">
-        <div class="label" data-i18n>Abo-Anteil im Zeitraum</div>
+        <div class="label" data-i18n>Abo-Kosten</div>
         <div class="value" id="s-abo">–</div>
         <div class="hint" id="s-abo-hint"></div>
       </div>
@@ -1201,10 +1206,16 @@
       <h2 class="w-abschnitt" data-i18n>Woher die Requests kamen</h2>
       <p class="w-bruch-text">
         <span class="w-marke" data-i18n>ändert keine Abrechnung</span>
-        <span data-i18n>Andere Sicht auf Tokens, die bereits in den Projekt- und Vorgangszahlen stecken — dient nur der Frage, was wie intensiv genutzt wird.</span>
         <!-- Bezugsgroesse: ohne sie lesen sich die Balken als zusaetzliche Kosten. -->
         <span id="h-bezug"></span>
       </p>
+      <!-- Die Erklaerung ist beim ersten Lesen noetig und danach im Weg: sie
+           schob die Diagramme aus dem Blick. Eingeklappt bleibt eine Zeile,
+           der Zustand wird je Browser gemerkt (siehe merkeKlappzustand). -->
+      <details class="klapp w-erklaerung" id="h-erklaerung-klapp" open>
+        <summary><span data-i18n>So sind diese Zahlen zu lesen</span> <span class="note" data-i18n>MCP-Server, Skills, Bezugsgröße</span></summary>
+        <div class="klapp-inhalt note" id="h-erklaerung"></div>
+      </details>
     </div>
 
     <div class="card">
@@ -1214,11 +1225,9 @@
 
     <div class="card">
       <h2><span data-i18n>Requests im Kontext eines Skills</span>
-        <span class="note" data-i18n>nicht die Kosten des Skills — siehe Hinweis unten</span></h2>
+        <span class="note" data-i18n>nicht die Kosten des Skills — siehe Erklärung oben</span></h2>
       <div id="h-skill" aria-busy="true"><span class="skel skel-chart balken"></span></div>
     </div>
-
-    <div class="card note" id="h-erklaerung"></div>
   </section>
 
   <!-- ============ RECHNUNGEN ============ -->
@@ -1578,12 +1587,14 @@ EN["Nach MCP-Server"] = "By MCP server";
 EN["Verteilung nach Modell"] = "Distribution by model";
 EN["Woher die Requests kamen"] = "Where the requests came from";
 EN["Listenpreis, nicht gezahlt"] = "list price, not paid";
-EN["Abo-Anteil im Zeitraum"] = "Subscription share in period";
+EN["Abo-Kosten"] = "Subscription cost";
 EN["Abo-Preis unter Einstellungen eintragen"] = "enter your plan price under Settings";
 EN["welches Werkzeug den Verbrauch erzeugt hat"] = "which tool caused the usage";
 EN["dieselbe Summe, aufgeteilt nach Modell"] = "the same total, split by model";
 EN["dieselbe Summe, aufgeteilt auf die begleiteten Projekte"] = "the same total, split across the projects it accompanied";
-EN["nicht die Kosten des Skills — siehe Hinweis unten"] = "not the cost of the skill — see the note below";
+EN["nicht die Kosten des Skills — siehe Erklärung oben"] = "not the cost of the skill — see the explanation above";
+EN["So sind diese Zahlen zu lesen"] = "How to read these figures";
+EN["MCP-Server, Skills, Bezugsgröße"] = "MCP servers, skills, basis";
 EN["API-Gegenwert in USD — Modell anklicken, um die Projekte darunter zu filtern"] = "API equivalent in USD — click a model to filter the projects below";
 EN["Tag"] = "Day";
 EN["Monat"] = "Month";
@@ -3069,8 +3080,8 @@ function zeichneHerkunft() {
   if (!h || !mcpZiel) return;
 
   document.getElementById('h-bezug').textContent = istDE()
-    ? 'Alle Balken sind Anteile an ' + usd(h.gesamt.cost_usd) + ' API-Gegenwert, keine Kosten obendrauf.'
-    : 'Every bar is a share of ' + usd(h.gesamt.cost_usd) + ' API equivalent, not cost on top.';
+    ? 'Anteile an ' + usd(h.gesamt.cost_usd) + ' API-Gegenwert — keine Kosten obendrauf.'
+    : 'Shares of ' + usd(h.gesamt.cost_usd) + ' API equivalent — not cost on top.';
 
   const anteil = (t) => h.gesamt.total_tokens
     ? nf1.format((t / h.gesamt.total_tokens) * 100) + ' %' : '–';
@@ -3127,7 +3138,9 @@ function zeichneHerkunft() {
 
   if (erkl) {
     erkl.innerHTML = istDE()
-      ? '<b>Warum zwei getrennte Listen:</b> Ein <b>' + uebersetze('MCP-Server') + '</b> löst den Request aus — '
+      ? 'Andere Sicht auf Tokens, die bereits in den Projekt- und Vorgangszahlen stecken — '
+        + 'dient nur der Frage, was wie intensiv genutzt wird.<br><br>'
+        + '<b>Warum zwei getrennte Listen:</b> Ein <b>' + uebersetze('MCP-Server') + '</b> löst den Request aus — '
         + 'die Tokens gehören ihm ursächlich. Ein <b>' + uebersetze('Skill') + '</b> tut das nicht: er schiebt Text '
         + 'in einen ohnehin laufenden Request, statt einen eigenen zu starten. Seine Zeile sagt '
         + 'deshalb <i>so viel lief, während dieser Skill aktiv war</i> — nicht <i>so viel hat der '
@@ -3140,7 +3153,9 @@ function zeichneHerkunft() {
         + 'im gewählten Zeitraum. Davon ' + anteil(h.mcp_tokens) + ' über MCP-Server, '
         + anteil(h.skill_tokens) + ' im Kontext eines Skills. Die Erfassung beginnt mit dem ersten '
         + uebersetze('Einlesen nach der Umstellung — ältere Sitzungen tragen sie nicht, ihre Logdateien sind fort.')
-      : '<b>Why two separate lists:</b> An <b>MCP server</b> triggers the request — '
+      : 'A different view of tokens already contained in the project and job figures — '
+        + 'it only answers what is used how intensively.<br><br>'
+        + '<b>Why two separate lists:</b> An <b>MCP server</b> triggers the request — '
         + 'the tokens are causally its own. A <b>skill</b> does not: it pushes text into a '
         + 'request that is running anyway, instead of starting one of its own. Its row therefore '
         + 'says <i>this much ran while the skill was active</i> — not <i>this much is what the '
@@ -3155,6 +3170,20 @@ function zeichneHerkunft() {
         + 'ingest after the change — older sessions do not carry it, their log files are gone.';
   }
 }
+
+// Erklaerboxen: beim ersten Besuch offen, danach gilt, was der Nutzer zuletzt
+// gewaehlt hat. Nur eine Bequemlichkeit je Browser — faellt der Speicher weg,
+// steht die Box eben wieder offen.
+function merkeKlappzustand(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const schluessel = 'c2invoice.klapp.' + id;
+  try { if (localStorage.getItem(schluessel) === 'zu') el.open = false; } catch { /* privater Modus */ }
+  el.addEventListener('toggle', () => {
+    try { localStorage.setItem(schluessel, el.open ? 'auf' : 'zu'); } catch { /* privater Modus */ }
+  });
+}
+merkeKlappzustand('h-erklaerung-klapp');
 
 // Stundensaetze bearbeiten. Die Zeilen werden nur neu gebaut, wenn sich die
 // Projektliste aendert — sonst verlaeren die Felder beim Auto-Refresh den Fokus.
@@ -3332,9 +3361,11 @@ function zeichneUeberblick() {
   const aboPreis = Number(d.config && d.config.aboPreisMonat) || 0;
   if (aboPreis > 0) {
     setzZahl('s-abo', d.abo_kosten, abo);
+    // Der Zeitraum steht im Hinweis, weil "im Zeitraum" allein offen liess,
+    // welcher gemeint ist. Es ist derselbe wie im Seitenkopf und in "Requests".
     setz('s-abo-hint', istDE()
-      ? 'tatsächlich gezahlt, anteilig aus ' + abo(aboPreis) + ' je Monat'
-      : 'actually paid, share of ' + abo(aboPreis) + ' per month');
+      ? 'gezahlt für ' + datum(s.first_day) + ' – ' + datum(s.last_day) + ' · ' + abo(aboPreis) + ' je Monat'
+      : 'paid for ' + datum(s.first_day) + ' – ' + datum(s.last_day) + ' · ' + abo(aboPreis) + ' per month');
   } else {
     setz('s-abo', '–');
     setz('s-abo-hint', uebersetze('Abo-Preis unter Einstellungen eintragen'));

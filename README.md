@@ -26,11 +26,11 @@ session logs → active working time → hourly value → margin → invoice PDF
 
 Two cost figures sit side by side on purpose. **API equivalent** is what the
 same usage would have cost at API list prices — a reference, not a bill. **Subscription
-share** is what you actually paid: your plan price, spread over the period.
+cost** is what you actually paid for the period shown in the tile: your plan price, spread over the months it covers.
 The gap between them is usually large, and it is the reason the margin never
 uses the list price.
 
-![Overview: API equivalent at list price next to the subscription share actually paid, active hours, spend over time and split by model](docs/overview.png)
+![Overview: API equivalent at list price next to the subscription cost actually paid, active hours, spend over time and split by model](docs/overview.png)
 
 Per job — the margin bar is scaled against your target margin, so "above or
 below what I aimed for" is readable at a glance:
