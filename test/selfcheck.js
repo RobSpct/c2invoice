@@ -1197,6 +1197,31 @@ function testLiveHerkunft() {
     'von Hand gebuchte Sitzung ist in der Live-Ansicht nicht als solche erkennbar');
 }
 
+// Ein Subagent laeuft unter der session_id seiner Hauptsitzung, oft mit
+// demselben Modell. Ohne eigene Zeile verschwindet er in der Hauptsitzung,
+// mit eigener Zeile ohne Kennzeichen sieht er aus wie eine fremde Sitzung.
+function testLiveSubagent() {
+  const metrics = require('../metrics');
+  const { db } = backfillDb();
+  const jetzt = new Date().toISOString();
+  const ins = db.prepare(`
+    INSERT INTO events (request_id, ts, session_id, project, model,
+      input_tokens, output_tokens, cache_w_5m, cache_w_1h, cache_read,
+      web_search, cost_usd, is_sidechain, day)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  `);
+  ins.run('sa1', jetzt, 's-haupt', 'Projekt', 'claude-opus-5', 10, 10, 0, 0, 0, 0, 1.0, 0, jetzt.slice(0, 10));
+  ins.run('sa2', jetzt, 's-haupt', 'Projekt', 'claude-opus-5', 10, 10, 0, 0, 0, 0, 2.0, 1, jetzt.slice(0, 10));
+
+  const zeilen = metrics.live(db, { minutes: 60 }).sessions.filter((z) => z.session_id === 's-haupt');
+  assert.strictEqual(zeilen.length, 2, 'Subagent verschwindet in der Zeile seiner Hauptsitzung');
+  const haupt = zeilen.find((z) => !z.is_sidechain);
+  const sub = zeilen.find((z) => z.is_sidechain);
+  assert.ok(haupt && sub, 'Subagent-Zeile ist nicht als solche gekennzeichnet');
+  assert.strictEqual(haupt.cost_usd, 1.0);
+  assert.strictEqual(sub.cost_usd, 2.0);
+}
+
 // --- Jira: Tickets ohne Rohdaten -------------------------------------------
 // Ein Ticket faelschlich als "keine Daten" zu markieren, obwohl Zahlen
 // vorliegen, wuerde eine Rechnungsposition unsichtbar machen.
@@ -2682,6 +2707,7 @@ async function main() {
   test('Buchen: Umbuchen ersetzt statt zu haeufen', testBuchenUmbuchen);
   test('Buchen: Aufheben stellt die automatische Zuordnung wieder her', testBuchenAufheben);
   test('Live: erkannte und gebuchte Zuordnung sind unterscheidbar', testLiveHerkunft);
+  test('Live: Subagent steht als eigene, gekennzeichnete Zeile', testLiveSubagent);
   test('Jira: nur echte Schluessel gehen nach Jira', testIstJiraKey);
   test('Jira: Tickets ohne Daten korrekt bestimmt und markiert', testTicketsOhneDaten);
   test('Rechnung: Nummer laeuft fort, Pflichtangaben erzwungen', testRechnungNummernkreis);

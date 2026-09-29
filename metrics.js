@@ -1011,15 +1011,19 @@ function live(db, { minutes = 60 } = {}) {
   // ticket_quelle macht in der Ansicht den Unterschied zwischen "automatisch
   // erkannt" und "von Hand gebucht" sichtbar. Ohne sie sieht eine erkannte
   // Zuordnung aus wie eine offene Aufgabe.
+  //
+  // is_sidechain im GROUP BY: ein Subagent traegt die session_id seiner
+  // Hauptsitzung und oft dasselbe Modell. Ohne die Spalte ginge er in deren
+  // Zeile auf, und niemand saehe, was die Subagents gekostet haben.
   const recent = db.prepare(`
     SELECT session_id, project, branch, ticket, MIN(ticket_quelle) AS ticket_quelle, model,
-           MAX(ts) AS last_ts, ${SUM_COLS}
+           is_sidechain, MAX(ts) AS last_ts, ${SUM_COLS}
     FROM events WHERE ts >= ?${nichtWerkzeug}
-    GROUP BY session_id, model ORDER BY last_ts DESC LIMIT 20
+    GROUP BY session_id, model, is_sidechain ORDER BY last_ts DESC LIMIT 20
   `).all(since, ...werkzeugParams).map((r) => ({
     session_id: r.session_id, project: r.project, branch: r.branch,
     ticket: r.ticket, ticket_quelle: r.ticket_quelle, model: r.model,
-    last_ts: r.last_ts, ...withTotals(r),
+    is_sidechain: r.is_sidechain === 1, last_ts: r.last_ts, ...withTotals(r),
   }));
 
   // Werkzeugkosten des Zeitfensters, nach Projekt aufgeschluesselt.

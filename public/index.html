@@ -1822,6 +1822,8 @@ EN["Ticket"] = "Job";
 EN["Arbeit ohne Ticket-Branch trägt keinen Vorgang und bleibt damit unabrechenbar. Im Feld"] = "Work on a branch without a job key carries no job and stays unbillable. In the";
 EN["lässt sich eine Sitzung von Hand buchen — ein Jira-Schlüssel oder ein frei gewählter Name. Leeren stellt die automatische Zuordnung wieder her."] = "field a session can be booked by hand — a Jira key or any name you choose. Clearing it restores automatic attribution.";
 EN["ohne Vorgang"] = "no job";
+EN["Subagent"] = "subagent";
+EN["Subagents dieser Sitzung"] = "subagents of this session";
 EN["Letzter Abgleich "] = "Last sync ";
 EN["Dauer "] = "took ";
 EN[" Ereignisse"] = " events";
@@ -2708,13 +2710,15 @@ function zeichneLive() {
         const projektZelle = erste
           ? '<td class="trunc" title="' + esc(s.project) + '">' + esc(s.project || '–') + '</td>' +
             '<td class="trunc dim mono">' + esc(s.branch || '–') + '</td>'
-          : '<td class="folge-label" colspan="2">gleiche Sitzung, anderes Modell</td>';
+          : '<td class="folge-label" colspan="2">' + (s.is_sidechain
+              ? uebersetze('Subagents dieser Sitzung') : 'gleiche Sitzung, anderes Modell') + '</td>';
         h += '<tr data-session="' + esc(s.session_id || '') + '"' +
             ' data-modell="' + esc(s.model || '') + '"' +
             (mehrteilig ? ' class="sitzung' + (erste ? ' s-kopf' : ' s-folge') + '"' : '') + '>' +
           projektZelle +
           vorgangZelle +
-          '<td class="dim">' + esc(kurzModell(s.model)) + '</td>' +
+          '<td class="dim">' + esc(kurzModell(s.model)) +
+            (s.is_sidechain ? '<span class="tag">' + uebersetze('Subagent') + '</span>' : '') + '</td>' +
           '<td class="z-tokens" title="' + num(s.total_tokens) + ' Tokens">' + kurz(s.total_tokens) + '</td>' +
           '<td class="usd z-usd">' + usd(s.cost_usd) + '</td>' +
           '<td class="faint z-zeit">' + (istAktiv(s.last_ts)
