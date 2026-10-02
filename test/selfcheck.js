@@ -445,6 +445,42 @@ function testZeitAltbestand() {
   });
 }
 
+// Das Zeitmodell laesst sich in den Einstellungen umschalten. Der Schalter
+// entscheidet, welche Stunden auf einer Rechnung stehen — er muss sofort
+// wirken, in der Datei ankommen und einen Tippfehler abweisen.
+function testZeitmodellSchalter() {
+  const { setzeEinstellungen } = require('../server');
+  const cfg = require('../config.json');
+  const pfad = path.join(__dirname, '..', 'config.json');
+  const datei = fs.readFileSync(pfad, 'utf8');
+  const vorher = { zeitmodell: cfg.zeitmodell, gapMinutes: cfg.gapMinutes };
+  try {
+    cfg.gapMinutes = 5;
+    const { db, zeile } = zeitDb();
+    // Eingaben bei 0 und 20, dazwischen arbeitet der Agent im Minutentakt.
+    for (let min = 0; min <= 20; min++) zeile('s1', min, 'Projekt A', 'PROJ-1', [0, 20].includes(min) ? 1 : 0);
+    const stunden = () => metrics.summary(db, {}).active_seconds;
+
+    assert.deepStrictEqual(setzeEinstellungen({ zeitmodell: 'aktivitaet' }), { zeitmodell: 'aktivitaet' });
+    assert.strictEqual(stunden(), 20 * 60, 'nach dem Umschalten auf "aktivitaet" zaehlt nicht jede Logzeile');
+    assert.strictEqual(JSON.parse(fs.readFileSync(pfad, 'utf8')).zeitmodell, 'aktivitaet',
+      'der Schalter steht nicht in config.json — nach einem Neustart gaelte wieder das alte Modell');
+
+    setzeEinstellungen({ zeitmodell: 'eingaben' });
+    assert.strictEqual(stunden(), 10 * 60, 'nach dem Umschalten auf "eingaben" zaehlen nicht nur die Eingabefenster');
+
+    assert.throws(() => setzeEinstellungen({ zeitmodell: 'activity' }), /Zeitmodell/, 'unbekanntes Zeitmodell angenommen');
+    // Scheitert ein anderes Feld derselben Eingabe, bleibt das Modell stehen.
+    assert.throws(() => setzeEinstellungen({ zeitmodell: 'aktivitaet', gapMinutes: 0 }));
+    assert.strictEqual(cfg.zeitmodell, 'eingaben', 'abgelehnte Eingabe hat das Zeitmodell trotzdem umgestellt');
+    db.close();
+  } finally {
+    cfg.gapMinutes = vorher.gapMinutes;
+    if (vorher.zeitmodell === undefined) delete cfg.zeitmodell; else cfg.zeitmodell = vorher.zeitmodell;
+    fs.writeFileSync(pfad, datei, 'utf8');
+  }
+}
+
 // Dieselbe Zeit darf nicht davon abhaengen, wie man sie ansieht: alle Vorgaenge
 // plus die ticketlose Arbeit ergeben den Gesamtwert, und die Monate ergeben
 // zusammen den ganzen Zeitraum — auch wenn sich zwei Fenster ueber Mitternacht
@@ -3464,6 +3500,7 @@ async function main() {
   test('Zeit: abgerechnet wird das Fenster um eigene Eingaben, Agentenzeit getrennt', testZeitEingaben);
   test('Zeit: Altbestand und Modell aktivitaet rechnen ueber die vereinigte Aktivitaet', testZeitAltbestand);
   test('Zeit: Summe der Vorgaenge ergibt den Gesamtwert, auch ueber die Monatsgrenze', testZeitSummen);
+  test('Zeit: das Zeitmodell laesst sich in den Einstellungen umschalten', testZeitmodellSchalter);
   test('Preise: synthetisch = 0, Haiku < Opus, unbekannte Variante > 0', testPricing);
   test('Mehrwert rechnet Dollar in Euro um, bevor addiert wird', testMehrwert);
   test('Marge zieht die eigene Arbeitszeit ab, Zielmarge nur als Vergleich', testMargeZiehtEigeneZeitAb);

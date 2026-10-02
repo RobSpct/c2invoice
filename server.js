@@ -279,9 +279,21 @@ const EINSTELLUNGEN = {
   },
 };
 
+// Die einzige Einstellung mit festen Auswahlwerten statt einer Zahl. Sie
+// entscheidet, welche Zeit abgerechnet wird (siehe metrics.js).
+const ZEITMODELLE = ['eingaben', 'aktivitaet'];
+
 function setzeEinstellungen(daten) {
   if (!daten || typeof daten !== 'object') throw new Error('Keine Daten empfangen.');
   const geaendert = {};
+
+  // Vor allem anderen pruefen, erst nach den Zahlen uebernehmen: scheitert ein
+  // anderes Feld derselben Eingabe, darf das Zeitmodell nicht schon umgestellt sein.
+  const zeitmodell = daten.zeitmodell === undefined || daten.zeitmodell === null || daten.zeitmodell === ''
+    ? null : daten.zeitmodell;
+  if (zeitmodell !== null && !ZEITMODELLE.includes(zeitmodell)) {
+    throw new Error('Zeitmodell: nur ' + ZEITMODELLE.join(' oder ') + '.');
+  }
 
   for (const [feld, regel] of Object.entries(EINSTELLUNGEN)) {
     const wert = daten[feld];
@@ -308,6 +320,11 @@ function setzeEinstellungen(daten) {
       config[feld] = wert2;
     }
     geaendert[feld] = wert2;
+  }
+
+  if (zeitmodell !== null) {
+    config.zeitmodell = zeitmodell;
+    geaendert.zeitmodell = zeitmodell;
   }
 
   if (Object.keys(geaendert).length === 0) throw new Error('Kein bekanntes Feld uebergeben.');
@@ -509,6 +526,7 @@ function schreibeConfig() {
   roh.projektSaetze = config.projektSaetze;
   roh.stundensatz = config.stundensatz;
   for (const feld of Object.keys(EINSTELLUNGEN)) roh[feld] = config[feld];
+  if (config.zeitmodell !== undefined) roh.zeitmodell = config.zeitmodell;
   // Verschachtelter Block, der Schleife oben entgeht er deshalb.
   if (config.rechnung) roh.rechnung = config.rechnung;
   const tmp = pfad + '.tmp';
@@ -779,7 +797,13 @@ function handle(req, res) {
     }
 
     if (p === '/api/einstellungen') {
-      const werte = {};
+      // Das Zeitmodell zuerst: es bestimmt, was die Pausenschwelle darunter bedeutet.
+      const werte = {
+        zeitmodell: {
+          wert: config.zeitmodell === 'aktivitaet' ? 'aktivitaet' : 'eingaben',
+          wahl: ZEITMODELLE, label: 'Zeitmodell',
+        },
+      };
       for (const [feld, regel] of Object.entries(EINSTELLUNGEN)) {
         // Verschachtelte Felder stehen unter ihrer Gruppe, nicht oben.
         const wert = regel.pfad

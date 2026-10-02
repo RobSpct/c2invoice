@@ -178,8 +178,10 @@ machine time sits behind your own time and feeds no amount anywhere.
 
 On the author's own logs (eleven weeks, 614 sessions) this turned 154 logged
 hours into 64 billable ones. If you deliberately bill agent supervision as
-working time, set `"zeitmodell": "aktivitaet"` in `config.json`: then every log
-line counts until a gap exceeds the threshold. Rule 2 applies either way.
+working time, switch the **time model** to *Activity* under Settings (stored as
+`"zeitmodell": "aktivitaet"` in `config.json`): then every log line counts
+until a gap exceeds the threshold. Rule 2 applies either way, and the switch
+takes effect immediately — issued invoices never change.
 
 Rows read in before version 1.3 carry no input marker yet. As long as their
 log files still exist, the next run adds it once; anything older keeps the

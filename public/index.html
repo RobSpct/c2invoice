@@ -813,6 +813,7 @@
   .e-liste dt label { display: block; font-size: 13px; margin-bottom: 3px; }
   .e-liste dt small { color: var(--text-faint); font-size: 11px; line-height: 1.45; display: block; }
   .e-liste dd { margin: 0; display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+  .e-liste .zeitraum-schalter { margin: 0; }
   .e-liste input.feld { width: 110px; text-align: right; }
   .e-einheit { color: var(--text-faint); font-size: 11px; min-width: 62px; }
   .e-abschluss { display: flex; align-items: center; gap: 14px; margin-top: 18px;
@@ -1591,6 +1592,10 @@ EN["Aktive Stunden"] = "Active hours";
 EN["Aktive Sitzungen"] = "Active sessions";
 EN["Aktive Std."] = "Active hrs";
 EN["Agent Std."] = "Agent hrs";
+EN["Zeitmodell"] = "Time model";
+EN["Eigene Zeit"] = "Own time";
+EN["Aktivität"] = "Activity";
+EN["Welche Zeit abgerechnet wird. „Eigene Zeit“ (empfohlen) zählt nur das Fenster um deine Eingaben; die Laufzeit der KI steht als Agentenzeit daneben. „Aktivität“ zählt jede Logzeile, auch wenn die KI allein arbeitet. Eine Minute zählt in beiden höchstens einmal. Gestellte Rechnungen ändern sich nicht."] = "Which time is billed. “Own time” (recommended) counts only the window around your inputs; the AI's runtime is shown next to it as agent time. “Activity” counts every log line, even when the AI works alone. In both, a minute counts at most once. Issued invoices do not change.";
 EN["E-Rechnung"] = "E-invoice";
 EN["Die Rechnung als strukturierte Datei (XRechnung, EN 16931). Sie ist das Original für den Empfänger; Ansicht und PDF sind die Lesefassung."] = "The invoice as a structured file (XRechnung, EN 16931). It is the original for the recipient; the view and the PDF are the reading copy.";
 EN["E-Rechnung gespeichert: "] = "E-invoice saved: ";
@@ -1784,7 +1789,7 @@ EN["Auswertung"] = "Reporting";
 EN["Live-Daten"] = "Live data";
 EN["Der Server wurde seit dem Öffnen dieser Seite erneuert. "] = "The server has been updated since this page was opened. ";
 EN["Bitte neu laden (Strg+R), sonst passen Oberfläche und Server nicht zusammen."] = "Please reload (Ctrl+R), otherwise the interface and the server disagree.";
-EN["Abgerechnet wird die Zeit um deine eigenen Eingaben: je eine halbe Pausenschwelle davor und danach. Liegen zwei Eingaben höchstens so weit auseinander, zählt die Zeit dazwischen ganz; arbeitet die KI länger allein, zählt genau eine Pausenschwelle. Im Zeitmodell „aktivitaet“ (config.json) trennt der Wert stattdessen Arbeit von offenen Fenstern."] = "Billed time is the time around your own inputs: half the idle threshold before and after each one. If two inputs are at most one threshold apart, the time between them counts in full; if the AI works alone for longer, exactly one threshold counts. In the time model “aktivitaet” (config.json) the value separates work from idle windows instead.";
+EN["Abgerechnet wird die Zeit um deine eigenen Eingaben: je eine halbe Pausenschwelle davor und danach. Liegen zwei Eingaben höchstens so weit auseinander, zählt die Zeit dazwischen ganz; arbeitet die KI länger allein, zählt genau eine Pausenschwelle. Im Zeitmodell „Aktivität“ trennt der Wert stattdessen Arbeit von offenen Fenstern."] = "Billed time is the time around your own inputs: half the idle threshold before and after each one. If two inputs are at most one threshold apart, the time between them counts in full; if the AI works alone for longer, exactly one threshold counts. In the time model “Activity” the value separates work from idle windows instead.";
 EN["Fester Umrechnungskurs. Gestellte Rechnungen behalten den Kurs, der beim Erstellen galt."] = "Fixed exchange rate. Issued invoices keep the rate that applied when they were created.";
 EN["Monatspreis des Claude-Abos. Wird anteilig auf die Vorgänge verteilt."] = "Monthly price of your Claude subscription. Distributed proportionally across jobs.";
 EN["Angestrebter Gewinnanteil am Erlös. Reiner Soll-Ist-Vergleich, verändert keine Rechnung. 0 blendet den Vergleich aus."] = "Target profit share of revenue. A pure target-versus-actual comparison; it changes no invoice. 0 hides the comparison.";
@@ -4120,13 +4125,20 @@ function vergleichZeile(t, w) {
    /api/einstellungen; der Server prueft die Grenzen noch einmal selbst,
    die Angaben hier sind nur die Bedienhilfe.
    ========================================================= */
+// Beschriftung der Auswahlwerte. Der Wert selbst steht so in config.json.
+const E_WAHL = {
+  eingaben: 'Eigene Zeit',
+  aktivitaet: 'Aktivität',
+};
+
 const E_HILFE = {
+  zeitmodell: 'Welche Zeit abgerechnet wird. „Eigene Zeit“ (empfohlen) zählt nur das Fenster um deine Eingaben; die Laufzeit der KI steht als Agentenzeit daneben. „Aktivität“ zählt jede Logzeile, auch wenn die KI allein arbeitet. Eine Minute zählt in beiden höchstens einmal. Gestellte Rechnungen ändern sich nicht.',
   stundensatz: 'Gilt für Projekte ohne eigenen Satz.',
   selbstkostenStunde: 'Was eine Arbeitsstunde kostet, bevor Gewinn entsteht — eigene Zeit zu Marktwert plus anteilige Sachkosten. Basis der Marge; steht hier 0, wird nur der Deckungsbeitrag ausgewiesen. Herleitung siehe Kommentar in config.json.',
   zielmargeProzent: 'Angestrebter Gewinnanteil am Erlös. Reiner Soll-Ist-Vergleich, verändert keine Rechnung. 0 blendet den Vergleich aus.',
   aboPreisMonat: 'Monatspreis des Claude-Abos. Wird anteilig auf die Vorgänge verteilt.',
   usdToEur: 'Fester Umrechnungskurs. Gestellte Rechnungen behalten den Kurs, der beim Erstellen galt.',
-  gapMinutes: 'Abgerechnet wird die Zeit um deine eigenen Eingaben: je eine halbe Pausenschwelle davor und danach. Liegen zwei Eingaben höchstens so weit auseinander, zählt die Zeit dazwischen ganz; arbeitet die KI länger allein, zählt genau eine Pausenschwelle. Im Zeitmodell „aktivitaet“ (config.json) trennt der Wert stattdessen Arbeit von offenen Fenstern.',
+  gapMinutes: 'Abgerechnet wird die Zeit um deine eigenen Eingaben: je eine halbe Pausenschwelle davor und danach. Liegen zwei Eingaben höchstens so weit auseinander, zählt die Zeit dazwischen ganz; arbeitet die KI länger allein, zählt genau eine Pausenschwelle. Im Zeitmodell „Aktivität“ trennt der Wert stattdessen Arbeit von offenen Fenstern.',
   lokalEurProMioTokens: 'Pauschale je Million Tokens für lokal laufende Modelle. Erscheint als eigene Rechnungsposition und folgt dem Projektrabatt. 0 schaltet die Position ab — die Nutzung bleibt dann nur informativ sichtbar.',
   lokalSelbstkostenStunde: 'Was eine Stunde lokaler Rechenzeit tatsächlich kostet (Strom plus anteilige Abschreibung der Grafikkarte). Geht nur in die Marge ein, nie auf eine Rechnung.',
   lokalZuordnungsfenster: 'Lokale Anfragen tragen kein Projekt. Sie werden dem Vorgang zugeschlagen, an dem in diesem Zeitfenster ringsum gearbeitet wurde. Größer als das Fenster für Werkzeuge, weil Vorarbeit der eigentlichen Sitzung oft vorausgeht.',
@@ -4142,6 +4154,20 @@ async function ladeEinstellungen() {
     const d = await hole('/api/einstellungen');
     let h = '<dl class="e-liste">';
     for (const [feld, info] of Object.entries(d.werte || {})) {
+      // Auswahl statt Zahl: bisher nur das Zeitmodell.
+      if (Array.isArray(info.wahl)) {
+        h += '<dt><label for="e-' + feld + '">' + esc(uebersetze(info.label)) + '</label>' +
+               '<small>' + esc(uebersetze(E_HILFE[feld] || '')) + '</small></dt>' +
+             // Derselbe Umschalter wie bei Sprache und Zeitraum. Eine native
+             // Auswahlliste faellt aus dem Farbschema und versteckt die zweite
+             // Moeglichkeit hinter einem Klick — bei zwei Werten ohne Not.
+             '<dd><div class="zeitraum-schalter" id="e-' + feld + '" role="group" ' +
+               'aria-label="' + esc(uebersetze(info.label)) + '" data-feld="' + feld + '" data-wert="' + esc(info.wert) + '">' +
+               info.wahl.map((w) => '<button type="button" data-wahl="' + esc(w) + '" aria-pressed="' + (w === info.wert) + '">' +
+                 esc(uebersetze(E_WAHL[w] || w)) + '</button>').join('') +
+             '</div></dd>';
+        continue;
+      }
       const ganzzahlig = feld === 'gapMinutes' || feld === 'lokalZuordnungsfenster';
       const schritt = ganzzahlig ? '1' : '0.01';
       // Felder mit Aus-Wert lassen auch diesen zu; das HTML-Minimum muss dann
@@ -4156,6 +4182,13 @@ async function ladeEinstellungen() {
              '<span class="e-einheit">' + esc(einheitFuer(feld, d.waehrung)) + '</span></dd>';
     }
     ziel.innerHTML = h + '</dl>';
+    ziel.querySelectorAll('.zeitraum-schalter[data-feld] button').forEach((b) => {
+      b.addEventListener('click', () => {
+        const gruppe = b.parentElement;
+        gruppe.dataset.wert = b.dataset.wahl;
+        gruppe.querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+      });
+    });
     eGeladen = true;
   } catch (err) {
     ziel.innerHTML = '<div class="empty">' + uebersetze('Einstellungen nicht geladen') + ': ' + esc(err.message) + '</div>';
@@ -4176,11 +4209,11 @@ function einheitFuer(feld, waehrung) {
 async function speichereEinstellungen() {
   const status = document.getElementById('e-status');
   const knopf = document.getElementById('e-speichern');
-  const felder = document.querySelectorAll('#e-felder input[data-feld]');
+  const felder = document.querySelectorAll('#e-felder [data-feld]');
   if (!felder.length) return;
 
   const nutzlast = {};
-  for (const f of felder) nutzlast[f.dataset.feld] = f.value;
+  for (const f of felder) nutzlast[f.dataset.feld] = f.dataset.wert !== undefined ? f.dataset.wert : f.value;
 
   knopf.disabled = true;
   status.textContent = uebersetze('wird gespeichert…');
