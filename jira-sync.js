@@ -91,6 +91,7 @@ function buildComment(t, models) {
     ['davon Arbeitssitzung', fmtInt(t.total_tokens)],
     ['davon Werkzeuge', `${fmtInt(t.werkzeug_tokens)} (${fmtInt(t.werkzeug_requests)} Aufrufe)`],
     ['Aktive Arbeitszeit', fmtHours(t.active_seconds)],
+    ['Agentenzeit (nicht berechnet)', fmtHours(t.agent_seconds)],
     ['Stundensatz', fmtMoney(t.stundensatz, config.waehrung) +
       (t.rabatt_prozent > 0
         ? ` (${t.rabatt_prozent.toLocaleString('de-DE', { maximumFractionDigits: 1 })} % Rabatt auf ${fmtMoney(t.stundensatz_standard, config.waehrung)})`
@@ -135,7 +136,10 @@ function buildComment(t, models) {
       type: 'text',
       text:
         `Automatisch erstellt (${MARKER}). ` +
-        `Aktivzeit ohne Pausen ueber ${config.gapMinutes} Minuten. ` +
+        (config.zeitmodell === 'aktivitaet'
+          ? `Aktivzeit ohne Pausen ueber ${config.gapMinutes} Minuten. `
+          : `Arbeitszeit ist die Zeit um die eigenen Eingaben (je ${config.gapMinutes / 2} Minuten davor und danach); ` +
+            'die Agentenzeit ist die Laufzeit der KI und wird nicht berechnet. ') +
         'Werkzeuge sind Hintergrunddienste (z. B. claude-mem), die waehrend der ' +
         'Arbeit an diesem Ticket mitliefen und ueber ein Zeitfenster zugeordnet werden. ' +
         `Stand: ${new Date().toLocaleString('de-DE')}`,

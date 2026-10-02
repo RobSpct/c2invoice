@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const readline = require('node:readline');
 const pricing = require('./pricing');
+const dbmod = require('./db');
 
 const config = require('./config.json');
 const TICKET_RE = new RegExp(config.ticketRegex);
@@ -153,15 +154,53 @@ const UPSERT_EVENT = `
     skill = COALESCE(excluded.skill, events.skill)
 `;
 
+// Bei einer schon vorhandenen Zeile wird nur die Eingabe-Kennung nachgezogen:
+// die Zuordnung zum Vorgang kann inzwischen von Hand gebucht sein und darf
+// beim erneuten Einlesen nicht zurueckfallen. MAX, weil zwei Logzeilen
+// denselben Zeitstempel tragen koennen — ist eine davon eine Eingabe, zaehlt sie.
 const UPSERT_ACTIVITY = `
-  INSERT INTO activity (session_id, ts, project, branch, ticket, day, ticket_quelle)
-  VALUES (?,?,?,?,?,?,?)
-  ON CONFLICT(session_id, ts) DO NOTHING
+  INSERT INTO activity (session_id, ts, project, branch, ticket, day, ticket_quelle, eingabe)
+  VALUES (?,?,?,?,?,?,?,?)
+  ON CONFLICT(session_id, ts) DO UPDATE SET
+    eingabe = MAX(COALESCE(activity.eingabe, 0), excluded.eingabe)
 `;
+
+// Was Claude Code selbst als Nutzerzeile schreibt, ohne dass jemand tippt.
+const KEINE_EINGABE_RE = /^\s*<(local-command-stdout|task-notification|bash-stdout|bash-stderr)\b/;
+
+// Stammt die Logzeile von einer eigenen Eingabe des Nutzers? Davon haengt die
+// abgerechnete Zeit ab. Im Log steht fast alles als "user": Werkzeugergebnisse,
+// Unteragenten, Systemhinweise, Befehlsausgaben. Eigene Eingaben sind nur der
+// getippte Prompt, der Slash- oder Shell-Befehl, der Abbruch und die Antwort
+// auf eine Rueckfrage (Auswahl, Plan-Freigabe, abgelehnter Werkzeugaufruf).
+//
+// Programmatische Aufrufe (claude -p, Beobachter-Sitzungen) schreiben ihren
+// Prompt ebenfalls als "user". Dort sitzt niemand — deshalb der Blick auf den
+// Einstiegspunkt.
+function istEingabe(o) {
+  if (!o || o.type !== 'user' || o.isSidechain || o.isMeta || o.isCompactSummary) return false;
+  if (typeof o.entrypoint === 'string' && o.entrypoint.startsWith('sdk')) return false;
+  if (o.promptSource === 'system') return false;
+
+  const inhalt = o.message && o.message.content;
+  const teile = Array.isArray(inhalt) ? inhalt : [];
+  if (teile.some((b) => b && b.type === 'tool_result')) {
+    const r = o.toolUseResult;
+    if (typeof r === 'string') return r.startsWith("Error: The user doesn't want to proceed");
+    return Boolean(r && typeof r === 'object' && (r.answers || 'plan' in r));
+  }
+  const text = typeof inhalt === 'string'
+    ? inhalt
+    : (teile.find((b) => b && b.type === 'text') || {}).text || '';
+  return !KEINE_EINGABE_RE.test(text);
+}
 
 // Liest eine Datei ab der gemerkten Byte-Position zeilenweise ein.
 // Streaming, damit auch 200-MB-Dateien nicht in den Speicher geladen werden.
-async function ingestFile(db, filePath, fromOffset, stmts) {
+// nurAktivitaet: schreibt nur die Aktivitaetszeilen, keine Requests. Fuer den
+// einmaligen Nachtrag der Eingabe-Kennung — der soll weder Kosten neu
+// bepreisen noch eine gebuchte Zuordnung zuruecksetzen.
+async function ingestFile(db, filePath, fromOffset, stmts, { nurAktivitaet = false } = {}) {
   const stat = fs.statSync(filePath);
   if (stat.size <= fromOffset) return { lines: 0, events: 0, offset: stat.size };
 
@@ -208,9 +247,12 @@ async function ingestFile(db, filePath, fromOffset, stmts) {
     const ticketQuelle = ausBranch ? null : (ticket ? 'cwd' : null);
     const day = dayOf(ts);
 
-    // Jede Zeile ist ein Aktivitaetssignal, unabhaengig vom Typ.
-    stmts.activity.run(sessionId, ts, project, branch, ticket, day, ticketQuelle);
+    // Jede Zeile ist ein Aktivitaetssignal, unabhaengig vom Typ. Ob sie eine
+    // eigene Eingabe ist, entscheidet spaeter ueber die abgerechnete Zeit.
+    stmts.activity.run(sessionId, ts, project, branch, ticket, day, ticketQuelle,
+      istEingabe(o) ? 1 : 0);
 
+    if (nurAktivitaet) continue;
     if (o.type !== 'assistant' || !o.message || !o.message.usage) continue;
     const requestId = o.requestId || o.message.id;
     if (!requestId) continue;
@@ -289,7 +331,9 @@ async function ingestLokalFile(db, filePath, fromOffset, stmts) {
     const ein = Number(o.prompt_tokens) || 0;
     const aus = Number(o.completion_tokens) || 0;
 
-    stmts.activity.run(sessionId, ts, LOKAL_PROJEKT, null, null, day, null);
+    // Jede Anfrage an ein lokales Modell gilt als eigene Eingabe: der Proxy
+    // sieht nur, was jemand abgeschickt hat, keine selbstlaufenden Agenten.
+    stmts.activity.run(sessionId, ts, LOKAL_PROJEKT, null, null, day, null, 1);
 
     stmts.event.run(
       requestId, ts, sessionId, LOKAL_PROJEKT, null, null, null,
@@ -303,6 +347,40 @@ async function ingestLokalFile(db, filePath, fromOffset, stmts) {
   }
 
   return { lines, events, offset: lastComplete };
+}
+
+// Einmaliger Nachtrag: Zeilen aus der Zeit vor der Eingabe-Kennung tragen
+// NULL. Solange ihre Logdatei noch liegt, laesst sich die Kennung nachholen —
+// dafuer wird jede Datei einmal von vorn gelesen. Was danach noch NULL ist,
+// stammt aus geloeschten Logs und bleibt beim alten Zeitmass (siehe metrics.js).
+// Der Merker verhindert, dass dieser Rest jeden Lauf erneut alles liest.
+const NACHTRAG_MERKER = 'eingabe_nachgetragen';
+
+async function trageEingabenNach(db, files, stmts, verbose) {
+  if (dbmod.getMeta(db, NACHTRAG_MERKER)) return;
+  const offen = db.prepare('SELECT 1 FROM activity WHERE eingabe IS NULL LIMIT 1').get();
+  if (offen) {
+    db.exec('BEGIN');
+    try {
+      for (const { pfad, quelle } of files) {
+        if (quelle !== 'claude') continue;
+        try {
+          await ingestFile(db, pfad, 0, stmts, { nurAktivitaet: true });
+        } catch (err) {
+          // Eine unlesbare Datei darf den Nachtrag der uebrigen nicht aufhalten.
+          if (verbose) console.error('Nachtrag: Fehler bei', pfad, err.message);
+        }
+      }
+      // Der Proxy der lokalen Modelle schreibt nur abgeschickte Anfragen.
+      db.prepare("UPDATE activity SET eingabe = 1 WHERE eingabe IS NULL AND session_id LIKE 'lokal:%'").run();
+      db.exec('COMMIT');
+    } catch (err) {
+      db.exec('ROLLBACK');
+      throw err;
+    }
+    if (verbose) console.log('Nachtrag: Eingabe-Kennung fuer vorhandene Logs ergaenzt');
+  }
+  dbmod.setMeta(db, NACHTRAG_MERKER, new Date().toISOString());
 }
 
 async function run({ db, verbose = false } = {}) {
@@ -328,6 +406,8 @@ async function run({ db, verbose = false } = {}) {
     event: db.prepare(UPSERT_EVENT),
     activity: db.prepare(UPSERT_ACTIVITY),
   };
+
+  await trageEingabenNach(db, files, stmts, verbose);
 
   let totalLines = 0;
   let totalEvents = 0;
@@ -376,11 +456,10 @@ async function run({ db, verbose = false } = {}) {
 
 module.exports = {
   run, projectOf, ticketOf, extractUsage, listJsonlFiles, PROJECT_ROOTS,
-  lokalDir, jsonlDir, LOKAL_PROJEKT,
+  lokalDir, jsonlDir, LOKAL_PROJEKT, istEingabe,
 };
 
 if (require.main === module) {
-  const dbmod = require('./db');
   const db = dbmod.open();
   run({ db, verbose: true }).then(() => db.close());
 }

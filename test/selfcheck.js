@@ -153,14 +153,19 @@ function zeitDb(basis = Date.UTC(2026, 7, 18, 10, 0, 0)) {
   );
   let n = 0;
   const t = (min) => new Date(basis + min * 60000).toISOString();
+  // Nur das Aktivitaetssignal, ohne Request — so sehen Logzeilen aus, die
+  // keine Antwort des Modells sind.
+  const aktiv = (session, min, projekt, ticket, eingabe = null) => {
+    const ts = t(min);
+    insA.run(session, ts, projekt, 'main', ticket, ts.slice(0, 10), eingabe);
+  };
   const zeile = (session, min, projekt, ticket, eingabe = null) => {
     const ts = t(min);
-    const tag = ts.slice(0, 10);
     insE.run('z' + (n++), ts, session, projekt, 'main', ticket, 'claude-opus-5',
-      10, 10, 0, 0, 0, 0, 0.1, 0, tag);
-    insA.run(session, ts, projekt, 'main', ticket, tag, eingabe);
+      10, 10, 0, 0, 0, 0, 0.1, 0, ts.slice(0, 10));
+    aktiv(session, min, projekt, ticket, eingabe);
   };
-  return { db, zeile, t };
+  return { db, zeile, aktiv, t };
 }
 
 // Setzt Pausenschwelle und Zeitmodell fuer die Dauer eines Tests. Kein Test
@@ -213,8 +218,248 @@ function testZeitParallel() {
 
     // Gegenprobe: die Laufzeit je Sitzung zaehlt beide voll. Das ist die Zahl,
     // die bisher auf der Rechnung stand.
-    const agent = summe(metrics.agentSecondsByGroup(db, { groupBy: 'ticket' }));
+    const agent = summe(metrics.agentSecondsByGroup(db, {}, { groupBy: 'ticket' }));
     assert.strictEqual(agent, 150 * 60, 'Laufzeit je Sitzung ' + agent + 's statt 9000s');
+    db.close();
+  });
+}
+
+// Was beim Einlesen als eigene Eingabe gilt. Davon haengt die abgerechnete Zeit
+// ab: zaehlt ein Werkzeugergebnis als Eingabe, ist jeder Agentenlauf wieder
+// Arbeitszeit — genau der Fehler, den das Zeitmodell beheben soll.
+function testIstEingabe() {
+  const zeile = (extra) => ({
+    type: 'user', timestamp: '2026-08-18T10:00:00.000Z', sessionId: 's1',
+    entrypoint: 'cli', message: { role: 'user', content: 'Bau das um' }, ...extra,
+  });
+  const werkzeug = (toolUseResult) => zeile({
+    message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: 'x' }] },
+    toolUseResult,
+  });
+  const ja = (o, was) => assert.strictEqual(ingest.istEingabe(o), true, was + ' gilt nicht als Eingabe');
+  const nein = (o, was) => assert.strictEqual(ingest.istEingabe(o), false, was + ' gilt als Eingabe');
+
+  ja(zeile(), 'getippter Prompt');
+  ja(zeile({ message: { content: [{ type: 'text', text: 'mit Bild' }, { type: 'image' }] } }), 'Prompt als Liste');
+  ja(zeile({ message: { content: [{ type: 'image' }] } }), 'Prompt nur aus einem Bild');
+  ja(zeile({ message: { content: '<command-name>/plan</command-name>' } }), 'Slash-Befehl');
+  ja(zeile({ message: { content: '<bash-input>git status</bash-input>' } }), 'eigener Shell-Befehl');
+  ja(zeile({ message: { content: [{ type: 'text', text: '[Request interrupted by user]' }] } }), 'Abbruch');
+  ja(werkzeug({ questions: [], answers: { 'Welche?': 'A' } }), 'Antwort auf eine Rueckfrage');
+  ja(werkzeug({ plan: '# Plan', isAgent: false }), 'Plan-Freigabe');
+  ja(werkzeug("Error: The user doesn't want to proceed with this tool use. The tool use was rejected"),
+    'abgelehnter Werkzeugaufruf');
+
+  nein(werkzeug({ stdout: 'ok', stderr: '' }), 'Werkzeugergebnis');
+  nein(werkzeug('Error: Exit code 1'), 'Werkzeugfehler');
+  nein(werkzeug(undefined), 'Werkzeugergebnis ohne Zusatz');
+  nein(zeile({ isSidechain: true }), 'Subagent');
+  nein(zeile({ isMeta: true }), 'Meta-Zeile');
+  nein(zeile({ isCompactSummary: true }), 'Zusammenfassung nach dem Verdichten');
+  nein(zeile({ entrypoint: 'sdk-cli' }), 'programmatischer Aufruf (claude -p)');
+  nein(zeile({ message: { content: '<task-notification>fertig</task-notification>' } }), 'Task-Benachrichtigung');
+  nein(zeile({ message: { content: '<local-command-stdout>Set model</local-command-stdout>' } }), 'Befehlsausgabe');
+  nein(zeile({ message: { content: '<bash-stdout>x</bash-stdout>' } }), 'Shell-Ausgabe');
+  nein(zeile({ promptSource: 'system' }), 'vom System eingespielte Zeile');
+  nein({ type: 'assistant', message: { content: [{ type: 'text', text: 'Antwort' }] } }, 'Antwort des Modells');
+  nein(null, 'leere Zeile');
+}
+
+// Bestandsnutzer haben Aktivitaetszeilen aus der Zeit vor der Eingabe-Kennung.
+// Solange die Logs noch liegen, muss der naechste Lauf sie nachtragen — ohne
+// dabei Kosten neu zu bepreisen oder eine gebuchte Zuordnung zurueckzusetzen.
+function testEingabeNachtrag() {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tl-'));
+  const projDir = path.join(tmp, 'C--Users-Test-Dev-Demo');
+  fs.mkdirSync(projDir, { recursive: true });
+  const kopf = (ts) => ({
+    timestamp: ts, sessionId: 'sess-n', cwd: 'C:\\Users\\Test\\Dev\\Demo',
+    gitBranch: 'main', entrypoint: 'cli',
+  });
+  const antwort = (reqId, ts) => JSON.stringify({
+    ...kopf(ts), type: 'assistant', requestId: reqId,
+    message: { id: 'msg_' + reqId, model: 'claude-opus-5', usage: { input_tokens: 10, output_tokens: 20 } },
+  });
+  fs.writeFileSync(path.join(projDir, 'sess.jsonl'), [
+    JSON.stringify({ ...kopf('2026-08-18T10:00:00.000Z'), type: 'user', message: { content: 'Bau das um' } }),
+    antwort('n1', '2026-08-18T10:00:05.000Z'),
+    JSON.stringify({
+      ...kopf('2026-08-18T10:00:10.000Z'), type: 'user', toolUseResult: { stdout: 'ok' },
+      message: { content: [{ type: 'tool_result', tool_use_id: 't', content: 'ok' }] },
+    }),
+    antwort('n2', '2026-08-18T10:00:15.000Z'),
+  ].join('\n') + '\n');
+
+  const cfg = require('../config.json');
+  const origDir = cfg.jsonlDir;
+  cfg.jsonlDir = tmp;
+  if (!cfg.lokaleModelle) cfg.lokaleModelle = {};
+  const origLokal = cfg.lokaleModelle.protokollDir;
+  cfg.lokaleModelle.protokollDir = path.join(tmp, 'lokal-leer');
+
+  const db = dbmod.open(':memory:');
+  openDbs.push(db);
+  const stand = () => db.prepare(
+    'SELECT COUNT(*) AS c, SUM(eingabe) AS e, SUM(eingabe IS NULL) AS offen FROM activity'
+  ).get();
+
+  return ingest.run({ db }).then(() => {
+    const s = stand();
+    assert.strictEqual(s.c, 4, 'erwartet 4 Aktivitaetszeilen, bekam ' + s.c);
+    assert.strictEqual(s.e, 1, 'frisch eingelesen: ' + s.e + ' Eingaben statt 1');
+    assert.strictEqual(s.offen, 0, 'frisch eingelesen blieben Zeilen ohne Kennung');
+
+    // Altbestand nachstellen: Kennung weg, Merker weg. Dazu ein Betrag und
+    // eine Zuordnung, die der Nachtrag nicht anfassen darf.
+    db.exec(`
+      UPDATE activity SET eingabe = NULL, ticket = 'PROJ-7';
+      UPDATE events SET cost_usd = 99, ticket = 'PROJ-7';
+      DELETE FROM meta WHERE key = 'eingabe_nachgetragen';
+    `);
+    return ingest.run({ db });
+  }).then(() => {
+    const s = stand();
+    assert.strictEqual(s.offen, 0, 'Nachtrag liess ' + s.offen + ' Zeilen ohne Kennung');
+    assert.strictEqual(s.e, 1, 'Nachtrag ergab ' + s.e + ' Eingaben statt 1');
+    const e = db.prepare('SELECT SUM(cost_usd) AS usd, COUNT(DISTINCT ticket) AS t, MIN(ticket) AS ticket FROM events').get();
+    assert.strictEqual(e.usd, 198, 'Nachtrag hat Kosten neu bepreist: ' + e.usd);
+    assert.strictEqual(e.ticket, 'PROJ-7', 'Nachtrag hat die Zuordnung der Requests zurueckgesetzt');
+    const a = db.prepare('SELECT COUNT(DISTINCT ticket) AS t, MIN(ticket) AS ticket FROM activity').get();
+    assert.ok(a.t === 1 && a.ticket === 'PROJ-7', 'Nachtrag hat die Zuordnung der Aktivitaet zurueckgesetzt');
+    assert.ok(dbmod.getMeta(db, 'eingabe_nachgetragen'), 'Merker fehlt — der Nachtrag liefe bei jedem Start erneut');
+  }).finally(() => {
+    try { db.close(); } catch { /* bereits geschlossen */ }
+    cfg.jsonlDir = origDir;
+    cfg.lokaleModelle.protokollDir = origLokal;
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+}
+
+// Abgerechnet wird die eigene Zeit: das Fenster um die eigenen Eingaben. Ein
+// Agent, der zwanzig Minuten allein arbeitet, ist Maschinenzeit — sie wird
+// ausgewiesen, steht aber nicht im Arbeitswert.
+function testZeitEingaben() {
+  mitZeitmodell(5, 'eingaben', () => {
+    const { db, zeile } = zeitDb();
+    // Eingaben bei 0, 2 und 20; dazwischen arbeitet der Agent im Minutentakt.
+    for (let min = 0; min <= 20; min++) {
+      zeile('s1', min, 'Projekt A', 'PROJ-1', [0, 2, 20].includes(min) ? 1 : 0);
+    }
+    const p1 = metrics.byTicket(db, {})[0];
+    // Fenster je +-2,5 Min: [-2,5..4,5] sind 7 Minuten, [17,5..22,5] sind 5.
+    assert.strictEqual(p1.active_seconds, 12 * 60,
+      'eigene Zeit ' + p1.active_seconds + 's statt 720s');
+    assert.strictEqual(p1.agent_seconds, 20 * 60,
+      'Agentenzeit ' + p1.agent_seconds + 's statt 1200s');
+    assert.ok(Math.abs(p1.agent_hours - 20 / 60) < 1e-9, 'agent_hours passt nicht zu agent_seconds');
+    // Der Arbeitswert folgt der eigenen Zeit, nicht der Laufzeit.
+    const erwartet = (12 / 60) * p1.stundensatz;
+    assert.ok(Math.abs(p1.arbeitswert - erwartet) < 1e-9,
+      'Arbeitswert ' + p1.arbeitswert + ' statt ' + erwartet + ' — er rechnet mit der Agentenzeit');
+    const s = metrics.summary(db, {});
+    assert.strictEqual(s.active_seconds, 12 * 60, 'summary: eigene Zeit ' + s.active_seconds + 's');
+    assert.strictEqual(s.agent_seconds, 20 * 60, 'summary: Agentenzeit ' + s.agent_seconds + 's');
+    db.close();
+
+    // Zwei Sitzungen, abwechselnd bedient: 0, 4, 8 hier und 2, 6, 10 dort.
+    // Auf der Uhr sind das 10 Minuten plus ein halbes Fenster an jedem Rand.
+    const zwei = zeitDb();
+    [0, 4, 8].forEach((min) => zwei.zeile('sA', min, 'Projekt A', 'PROJ-1', 1));
+    [2, 6, 10].forEach((min) => zwei.zeile('sB', min, 'Projekt B', 'PROJ-2', 1));
+    const gesamt = metrics.summary(zwei.db, {}).active_seconds;
+    assert.strictEqual(gesamt, 15 * 60, 'abwechselnd bedient: ' + gesamt + 's statt 900s');
+    const je = Object.fromEntries(metrics.byTicket(zwei.db, {}).map((x) => [x.ticket, x.active_seconds]));
+    assert.strictEqual(je['PROJ-1'], 450, 'PROJ-1 traegt ' + je['PROJ-1'] + 's statt 450s');
+    assert.strictEqual(je['PROJ-2'], 450, 'PROJ-2 traegt ' + je['PROJ-2'] + 's statt 450s');
+    zwei.db.close();
+  });
+}
+
+// Zwei Faelle, in denen NICHT ueber die Eingaben gerechnet wird: Zeilen aus der
+// Zeit vor der Eingabe-Kennung (die Logs dazu sind laengst geloescht) und das
+// bewusst gewaehlte Modell "aktivitaet". Beide duerfen weder 0 ergeben noch
+// doppelt zaehlen.
+function testZeitAltbestand() {
+  const fuellen = (mitKennung) => {
+    const z = zeitDb();
+    for (let min = 0; min <= 20; min++) {
+      z.zeile('s1', min, 'Projekt A', 'PROJ-1', mitKennung ? ([0, 20].includes(min) ? 1 : 0) : null);
+    }
+    return z.db;
+  };
+  mitZeitmodell(5, 'eingaben', () => {
+    const alt = fuellen(false);
+    assert.strictEqual(metrics.summary(alt, {}).active_seconds, 20 * 60,
+      'Altbestand ohne Kennung ergibt nicht die vereinigte Aktivitaet');
+    alt.close();
+
+    const neu = fuellen(true);
+    assert.strictEqual(metrics.summary(neu, {}).active_seconds, 10 * 60,
+      'zwei Eingaben ergeben nicht zwei Fenster von je 5 Minuten');
+    neu.close();
+
+    // Eine Sitzung ganz ohne eigene Eingabe (claude -p) ist keine Arbeitszeit.
+    const z = zeitDb();
+    for (let min = 0; min <= 10; min++) z.zeile('sdk', min, 'Projekt A', 'PROJ-1', 0);
+    assert.strictEqual(metrics.summary(z.db, {}).active_seconds, 0,
+      'Sitzung ohne eigene Eingabe traegt abrechenbare Zeit');
+    z.db.close();
+  });
+  mitZeitmodell(5, 'aktivitaet', () => {
+    const neu = fuellen(true);
+    assert.strictEqual(metrics.summary(neu, {}).active_seconds, 20 * 60,
+      'Modell "aktivitaet" rechnet trotzdem ueber die Eingaben');
+    neu.close();
+
+    // Claude Code schreibt mitten in eine Sitzung Zeilen ohne Arbeits-
+    // verzeichnis. Sie tragen das Projekt "(unbekannt)" und keinen Vorgang.
+    // Bekaemen sie die Zeit selbst, verschwaende sie: zu "(unbekannt)" gibt es
+    // keine Requests und damit nirgends eine Zeile, die sie ausweist.
+    const z = zeitDb();
+    z.zeile('s1', 0, 'Projekt A', 'PROJ-1');
+    z.aktiv('s1', 1, '(unbekannt)', null);
+    z.aktiv('s1', 2, '(unbekannt)', null);
+    z.zeile('s1', 3, 'Projekt A', 'PROJ-1');
+    const p1 = metrics.byTicket(z.db, {})[0];
+    assert.strictEqual(p1.active_seconds, 3 * 60,
+      'PROJ-1 traegt ' + p1.active_seconds + 's statt 180s — Zeilen ohne Verzeichnis nehmen Zeit mit');
+    assert.strictEqual(p1.agent_seconds, 3 * 60,
+      'Agentenzeit ' + p1.agent_seconds + 's statt 180s');
+    assert.strictEqual(metrics.byProject(z.db, {})[0].active_seconds, 3 * 60,
+      'Projekt A verliert Zeit an Zeilen ohne Verzeichnis');
+    z.db.close();
+  });
+}
+
+// Dieselbe Zeit darf nicht davon abhaengen, wie man sie ansieht: alle Vorgaenge
+// plus die ticketlose Arbeit ergeben den Gesamtwert, und die Monate ergeben
+// zusammen den ganzen Zeitraum — auch wenn sich zwei Fenster ueber Mitternacht
+// am Monatsende ueberlappen.
+function testZeitSummen() {
+  mitZeitmodell(5, 'eingaben', () => {
+    const { db, zeile } = zeitDb(Date.UTC(2026, 7, 31, 23, 50, 0));
+    zeile('sA', 8, 'Projekt A', 'PROJ-1', 1);   // 31.08. 23:58
+    zeile('sB', 11, 'Projekt B', null, 1);      // 01.09. 00:01
+    zeile('sA', 40, 'Projekt A', 'PROJ-1', 1);  // 01.09. 00:30, steht fuer sich
+
+    const gesamt = metrics.summary(db, {}).active_seconds;
+    // Zwei Fenster von 5 Min, die sich 2 Min ueberlappen, plus ein freies.
+    assert.strictEqual(gesamt, 13 * 60, 'Gesamtzeit ' + gesamt + 's statt 780s');
+
+    const mitTicket = metrics.byTicket(db, {}).reduce((a, x) => a + x.active_seconds, 0);
+    const ohne = metrics.ohneTicket(db, {}).reduce((a, x) => a + x.active_seconds, 0);
+    assert.strictEqual(mitTicket + ohne, gesamt,
+      'Vorgaenge (' + mitTicket + 's) plus ticketlos (' + ohne + 's) ergeben nicht ' + gesamt + 's');
+
+    const august = metrics.summary(db, { month: '2026-08' }).active_seconds;
+    const september = metrics.summary(db, { month: '2026-09' }).active_seconds;
+    assert.strictEqual(august, 4 * 60, 'August traegt ' + august + 's statt 240s');
+    assert.strictEqual(august + september, gesamt,
+      'August (' + august + 's) plus September (' + september + 's) ergeben nicht ' + gesamt + 's');
+
+    // Dasselbe ueber from/to, so wie eine Rechnung ihren Zeitraum waehlt.
+    const bisEnde = metrics.byTicket(db, { from: '2026-08-01', to: '2026-08-31' })[0].active_seconds;
+    assert.strictEqual(bisEnde, 4 * 60, 'Rechnungszeitraum August traegt ' + bisEnde + 's statt 240s');
     db.close();
   });
 }
@@ -2776,6 +3021,10 @@ async function main() {
   test('Projekt wird aus dem Arbeitsverzeichnis abgeleitet', testProject);
   test('Aktivzeit ignoriert Pausen ueber der Schwelle', testActiveTime);
   test('Zeit: parallele Sitzungen zaehlen jede Minute nur einmal', testZeitParallel);
+  test('Eingaben: nur eigene Eingaben zaehlen, keine Werkzeugergebnisse', testIstEingabe);
+  test('Zeit: abgerechnet wird das Fenster um eigene Eingaben, Agentenzeit getrennt', testZeitEingaben);
+  test('Zeit: Altbestand und Modell aktivitaet rechnen ueber die vereinigte Aktivitaet', testZeitAltbestand);
+  test('Zeit: Summe der Vorgaenge ergibt den Gesamtwert, auch ueber die Monatsgrenze', testZeitSummen);
   test('Preise: synthetisch = 0, Haiku < Opus, unbekannte Variante > 0', testPricing);
   test('Mehrwert rechnet Dollar in Euro um, bevor addiert wird', testMehrwert);
   test('Marge zieht die eigene Arbeitszeit ab, Zielmarge nur als Vergleich', testMargeZiehtEigeneZeitAb);
@@ -2784,7 +3033,8 @@ async function main() {
   test('Werkzeug-Overhead wird von Kundenprojekten getrennt', testOverhead);
   test('Werkzeuge werden dem parallel bearbeiteten Projekt zugeordnet', testWerkzeugZuordnung);
   test('Ticket rechnet eigene Arbeit plus begleitende Werkzeuge ab', testTicketGesamtsumme);
-  test('Vorgaenge ohne Ticket: abrechenbar, ohne Werkzeuge doppelt und ohne byTicket zu aendern', testOhneTicket);
+  test('Vorgaenge ohne Ticket: abrechenbar, ohne Werkzeuge doppelt und ohne byTicket zu aendern',
+    () => mitZeitmodell(5, 'eingaben', testOhneTicket));
   test('Stundensatz je Projekt: eigener Satz, Rabatt, Grenzwerte', testStundensaetze);
   test('Backfill: Ticket aus dem Worktree-Pfad, sonst ticketlos', testBackfillCwd);
   test('Backfill: Sitzungs-Konsens erbt, uneindeutige Sitzung bleibt offen', testBackfillSessionKonsens);
@@ -2835,6 +3085,14 @@ async function main() {
   } catch (err) {
     failed++;
     console.log('  FAIL Ingest: echte Datei, Dedup und Wiederholungslauf\n       ' + err.message);
+  }
+
+  try {
+    await testEingabeNachtrag();
+    console.log('  ok   Eingaben: Altbestand wird einmal nachgetragen, Kosten und Zuordnung bleiben');
+  } catch (err) {
+    failed++;
+    console.log('  FAIL Eingaben: Altbestand wird einmal nachgetragen, Kosten und Zuordnung bleiben\n       ' + err.message);
   }
 
   try {

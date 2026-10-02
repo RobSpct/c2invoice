@@ -542,6 +542,9 @@ function handle(req, res) {
           aboWaehrung: config.aboWaehrung,
           usdToEur: config.usdToEur,
           gapMinutes: config.gapMinutes,
+          // Bestimmt, wie die Oberflaeche die Zeitkachel beschriftet. Alles
+          // ausser "aktivitaet" ist die Vorgabe, genau wie in metrics.js.
+          zeitmodell: config.zeitmodell === 'aktivitaet' ? 'aktivitaet' : 'eingaben',
           // Nur die Basis-Adresse und die Vorgangskuerzel, damit die
           // Oberflaeche einen Absprunglink bauen kann. Zugangsdaten bleiben
           // hier draussen. Ist Jira aus, bleibt das Feld leer und der Link
@@ -575,7 +578,8 @@ function handle(req, res) {
         'Ticket', 'Kunde', 'Requests', 'Sessions', 'Von', 'Bis',
         'Tokens gesamt', 'Tokens Arbeit', 'Tokens Werkzeuge',
         'Input', 'Output', 'Cache geschrieben', 'Cache gelesen',
-        'Aktive Stunden', 'Stundensatz ' + config.waehrung, 'Rabatt %',
+        'Aktive Stunden', 'Agentenstunden (nicht berechnet)',
+        'Stundensatz ' + config.waehrung, 'Rabatt %',
         'Arbeitswert ' + config.waehrung,
         'API-Gegenwert USD', 'davon Werkzeuge USD', 'Abo-Anteil USD',
       ];
@@ -585,7 +589,8 @@ function handle(req, res) {
           t.ticket, t.kunde || '', t.requests, t.sessions, t.first_day, t.last_day,
           t.gesamt_tokens, t.total_tokens, t.werkzeug_tokens,
           t.input_tokens, t.output_tokens, t.cache_write_tokens, t.cache_read_tokens,
-          komma(t.active_hours), komma(t.stundensatz), komma(t.rabatt_prozent),
+          komma(t.active_hours), komma(t.agent_hours),
+          komma(t.stundensatz), komma(t.rabatt_prozent),
           komma(t.arbeitswert),
           komma(t.api_gegenwert_usd), komma(t.werkzeug_cost_usd), komma(t.abo_anteil_usd),
         ].map(csvEscape).join(';'));

@@ -37,7 +37,9 @@
     "//zuordnungsfensterMinuten": "Lokale Anfragen tragen weder Projekt noch Vorgang. Sie werden dem Vorgang zugeschlagen, der im Zeitfenster ringsum in Claude Code bearbeitet wurde. Groesser als das Fenster fuer Werkzeuge, weil Vorarbeit mit lokalen Modellen der eigentlichen Sitzung oft vorausgeht.",
     "zuordnungsfensterMinuten": 30
   },
-  "//gapMinutes": "Ab dieser Pause zaehlt die Aktivzeit nicht weiter — trennt echte Arbeit von offenen Fenstern.",
+  "//zeitmodell": "Welche Zeit abgerechnet wird. 'eingaben' (Vorgabe): die eigene Zeit — ein Fenster um jede eigene Eingabe. Was die KI dazwischen allein arbeitet, steht als Agentenzeit daneben und wird nicht berechnet. 'aktivitaet': jede Logzeile zaehlt, also auch die Laufzeit der KI; fuer alle, die das Beaufsichtigen eines Agenten bewusst als Arbeitszeit abrechnen. In beiden Modellen zaehlt eine Minute hoechstens einmal, gleich wie viele Sitzungen parallel laufen.",
+  "zeitmodell": "eingaben",
+  "//gapMinutes": "Pausenschwelle in Minuten. Im Modell 'eingaben' zaehlt je eine halbe Schwelle vor und nach jeder eigenen Eingabe: liegen zwei Eingaben hoechstens so weit auseinander, zaehlt die Zeit dazwischen ganz; arbeitet die KI laenger allein, zaehlt genau eine Schwelle. Im Modell 'aktivitaet' endet die Aktivzeit ab dieser Pause.",
   "gapMinutes": 5,
   "//projectRoots": "Wo deine Projekte liegen. Der erste Ordner unterhalb eines dieser Pfade gilt als Projektname — aus '~/Dev/Kundenprojekt/src/lib' wird also 'Kundenprojekt'. '~' steht fuer dein Benutzerverzeichnis. Reihenfolge zaehlt: der spezifischere Pfad gehoert nach vorne. Ohne Eintrag gilt ['~/Dev', '~'].",
   "projectRoots": [

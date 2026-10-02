@@ -1569,6 +1569,10 @@ EN["Requests heute"] = "Requests today";
 EN["Aktive Stunden"] = "Active hours";
 EN["Aktive Sitzungen"] = "Active sessions";
 EN["Aktive Std."] = "Active hrs";
+EN["Agent Std."] = "Agent hrs";
+EN[" aktiv"] = " active";
+EN[" Agent"] = " agent";
+EN["Laufzeit der KI je Sitzung, auch wenn sie allein arbeitet. Wird ausgewiesen, nicht abgerechnet."] = "Runtime of the AI per session, including when it works on its own. Shown, never billed.";
 EN["Arbeitswert EUR"] = "Billable value EUR";
 EN["Arbeitswert, noch nicht abgerechnet"] = "Billable value, not yet invoiced";
 EN["Cache-Read-Tokens"] = "cache read tokens";
@@ -1736,7 +1740,7 @@ EN["Auswertung"] = "Reporting";
 EN["Live-Daten"] = "Live data";
 EN["Der Server wurde seit dem Öffnen dieser Seite erneuert. "] = "The server has been updated since this page was opened. ";
 EN["Bitte neu laden (Strg+R), sonst passen Oberfläche und Server nicht zusammen."] = "Please reload (Ctrl+R), otherwise the interface and the server disagree.";
-EN["Ab dieser Pause zählt die Aktivzeit nicht weiter — trennt echte Arbeit von offenen Fenstern."] = "Gaps longer than this stop counting as active time — this separates real work from an idle window.";
+EN["Abgerechnet wird die Zeit um deine eigenen Eingaben: je eine halbe Pausenschwelle davor und danach. Liegen zwei Eingaben höchstens so weit auseinander, zählt die Zeit dazwischen ganz; arbeitet die KI länger allein, zählt genau eine Pausenschwelle. Im Zeitmodell „aktivitaet“ (config.json) trennt der Wert stattdessen Arbeit von offenen Fenstern."] = "Billed time is the time around your own inputs: half the idle threshold before and after each one. If two inputs are at most one threshold apart, the time between them counts in full; if the AI works alone for longer, exactly one threshold counts. In the time model “aktivitaet” (config.json) the value separates work from idle windows instead.";
 EN["Fester Umrechnungskurs. Gestellte Rechnungen behalten den Kurs, der beim Erstellen galt."] = "Fixed exchange rate. Issued invoices keep the rate that applied when they were created.";
 EN["Monatspreis des Claude-Abos. Wird anteilig auf die Vorgänge verteilt."] = "Monthly price of your Claude subscription. Distributed proportionally across jobs.";
 EN["Angestrebter Gewinnanteil am Erlös. Reiner Soll-Ist-Vergleich, verändert keine Rechnung. 0 blendet den Vergleich aus."] = "Target profit share of revenue. A pure target-versus-actual comparison; it changes no invoice. 0 hides the comparison.";
@@ -3384,10 +3388,22 @@ function zeichneUeberblick() {
   const stunden = sp ? sp.arbeit.active_seconds / 3600 : (s.active_seconds || 0) / 3600;
   const wzStunden = sp ? sp.overhead.active_seconds / 3600 : 0;
   setzZahl('s-stunden', stunden, hrs);
+  // Welches Zeitmass hier steht, haengt an der Einstellung: die eigene Zeit um
+  // die Eingaben herum (Vorgabe) oder jede Aktivitaet im Log. Die Laufzeit der
+  // KI steht daneben, damit sichtbar bleibt, was nicht abgerechnet wird.
+  const pause = Number(d.config && d.config.gapMinutes) || 0;
+  const halb = (pause / 2).toLocaleString(istDE() ? 'de-DE' : 'en-US');
+  const zeitmass = d.config && d.config.zeitmodell === 'aktivitaet'
+    ? (istDE() ? 'Pausen ab ' + num(pause) + ' Min zählen nicht'
+               : 'gaps from ' + num(pause) + ' min do not count')
+    : (istDE() ? 'Zeit um eigene Eingaben, je ±' + halb + ' Min'
+               : 'time around your own inputs, ±' + halb + ' min each');
+  const agentStunden = sp ? (sp.arbeit.agent_seconds || 0) / 3600 : (s.agent_seconds || 0) / 3600;
   setz('s-stunden-hint',
     (wzStunden > 0.05 ? uebersetze('ohne ') + hrs(wzStunden) + uebersetze(' Werkzeugbetrieb · ') : '') +
-    (istDE() ? 'Pausen ab ' + num(d.config && d.config.gapMinutes) + ' Min zählen nicht'
-             : 'gaps from ' + num(d.config && d.config.gapMinutes) + ' min do not count'));
+    zeitmass +
+    (istDE() ? ' · Agentenzeit ' + hrs(agentStunden) + ', nicht abgerechnet'
+             : ' · agent time ' + hrs(agentStunden) + ', not billed'));
   setzZahl('s-requests', s.requests, num);
   setz('s-zeitraum', datum(s.first_day) + ' – ' + datum(s.last_day));
   setz('zeitraum', datum(s.first_day) + ' – ' + datum(s.last_day));
@@ -3582,7 +3598,9 @@ function zeichneProjekte() {
 
   let h = '<div class="tablewrap"><table><thead><tr>' +
     '<th>' + uebersetze('Projekt') + '</th><th>' + uebersetze('Kunde') + '</th><th>' + uebersetze('Requests') + '</th><th>' + uebersetze('Tokens') + '</th><th>' + uebersetze('API-Gegenwert USD') + '</th>' +
-    '<th>' + uebersetze('Aktive Std.') + '</th><th>' + uebersetze('Arbeitswert EUR') + '</th>' +
+    '<th>' + uebersetze('Aktive Std.') + '</th>' +
+    '<th title="' + esc(uebersetze(AGENT_TITEL)) + '">' + uebersetze('Agent Std.') + '</th>' +
+    '<th>' + uebersetze('Arbeitswert EUR') + '</th>' +
     '</tr></thead><tbody>';
   for (const p of projects) {
     // Aktivzeit und Arbeitswert kennen kein Modell: sie sind Zeitspannen
@@ -3595,8 +3613,10 @@ function zeichneProjekte() {
       : '';
     const zeitSpalten = gefiltert
       ? '<td class="dimlabel"' + zeitTitel + '>' + hrs((p.active_seconds || 0) / 3600) + '</td>' +
+        '<td class="dimlabel"' + zeitTitel + '>' + hrs((p.agent_seconds || 0) / 3600) + '</td>' +
         '<td class="dimlabel"' + zeitTitel + '>' + eur(p.arbeitswert) + '</td>'
       : '<td>' + hrs((p.active_seconds || 0) / 3600) + '</td>' +
+        '<td class="faint">' + hrs((p.agent_seconds || 0) / 3600) + '</td>' +
         '<td class="eur">' + eur(p.arbeitswert) + '</td>';
     // Ohne Kunde bleibt die Zelle nicht einfach leer: eine Leerstelle liest sich
     // wie ein Anzeigefehler, der Hinweis nennt den Grund und den Weg dahin.
@@ -3627,6 +3647,7 @@ function zeichneProjekte() {
       '<td>' + kurz(sp.arbeit.total_tokens) + '</td>' +
       '<td class="usd">' + usd(sp.arbeit.cost_usd) + '</td>' +
       '<td>' + hrs(sp.arbeit.active_seconds / 3600) + '</td>' +
+      '<td class="faint">' + hrs((sp.arbeit.agent_seconds || 0) / 3600) + '</td>' +
       '<td class="eur">' + eur(sp.arbeit.arbeitswert) + '</td>' +
     '</tr>' +
     '<tr class="summe">' +
@@ -3637,6 +3658,7 @@ function zeichneProjekte() {
       '<td class="dimlabel">' + kurz(sp.overhead.total_tokens) + '</td>' +
       '<td class="dimlabel">' + usd(sp.overhead.cost_usd) + '</td>' +
       '<td class="dimlabel">' + hrs(sp.overhead.active_seconds / 3600) + '</td>' +
+      '<td class="dimlabel">' + hrs((sp.overhead.agent_seconds || 0) / 3600) + '</td>' +
       '<td class="dimlabel">' + uebersetze('nicht abrechenbar') + '</td>' +
     '</tr>';
   }
@@ -3661,6 +3683,10 @@ async function setzeModellFilter(modell) {
 /* =========================================================
    Ansicht TICKETS
    ========================================================= */
+// Erklaert die Spalte Agentenzeit dort, wo sie steht. Ohne den Hinweis liest
+// sich eine zweite Stundenspalte wie ein zweiter abrechenbarer Betrag.
+const AGENT_TITEL = 'Laufzeit der KI je Sitzung, auch wenn sie allein arbeitet. Wird ausgewiesen, nicht abgerechnet.';
+
 const SPALTEN = [
   { key: 'ticket',            label: 'Ticket',       txt: true },
   { key: 'requests',          label: 'Requests' },
@@ -3668,6 +3694,7 @@ const SPALTEN = [
   { key: 'api_gegenwert_usd', label: 'API-Gegenwert USD' },
   { key: 'abo_anteil_usd',    label: 'Abo-Anteil' },
   { key: 'active_hours',      label: 'Aktive Std.' },
+  { key: 'agent_hours',       label: 'Agent Std.',   titel: AGENT_TITEL },
   { key: 'lokal_tokens',      label: 'Tokens lokal' },
   { key: 'arbeitswert',       label: 'Arbeitswert EUR' },
   { key: 'first_day',         label: 'Zeitraum',     txt: true, nosort: false },
@@ -3702,7 +3729,8 @@ function zeichneTickets() {
   let h = '<div class="tablewrap"><table><thead><tr>';
   for (const c of SPALTEN) {
     const aktiv = c.key === key;
-    h += '<th class="sortable" data-key="' + c.key + '">' + esc(uebersetze(c.label)) +
+    h += '<th class="sortable" data-key="' + c.key + '"' +
+         (c.titel ? ' title="' + esc(uebersetze(c.titel)) + '"' : '') + '>' + esc(uebersetze(c.label)) +
          '<span class="arrow">' + (aktiv ? (dir === 1 ? '▲' : '▼') : '') + '</span></th>';
   }
   h += '</tr></thead><tbody>';
@@ -3721,6 +3749,7 @@ function zeichneTickets() {
       '<td class="usd">' + usd(t.api_gegenwert_usd) + '</td>' +
       '<td class="usd-neben">' + abo(t.abo_anteil_usd) + '</td>' +
       '<td>' + hrs(t.active_hours) + '</td>' +
+      '<td class="faint">' + hrs(t.agent_hours || 0) + '</td>' +
       '<td title="' + (t.lokal_tokens
         ? num(t.lokal_tokens) + ' Tokens · ' + esc((t.lokal_modelle || []).join(', '))
         : uebersetze('keine lokalen Modelle')) + '">' +
@@ -3780,7 +3809,8 @@ function zeichneDetail() {
       '<h2 class="mono">' + esc(t.ticket) + '</h2>' +
       '<span class="meta">' + datum(t.first_day) + ' – ' + datum(t.last_day) + ' · ' +
         num(t.sessions) + ' Sitzungen · ' + num(t.requests) + ' Requests · ' +
-        hrs(t.active_hours) + ' aktiv</span>' +
+        hrs(t.active_hours) + uebersetze(' aktiv') + ' · ' +
+        hrs(t.agent_hours || 0) + uebersetze(' Agent') + '</span>' +
       '<span style="margin-left:auto">' + jiraLink(t.ticket) +
         '<button class="btn" id="d-close">Schließen</button></span>' +
     '</div>' +
@@ -4033,7 +4063,7 @@ const E_HILFE = {
   zielmargeProzent: 'Angestrebter Gewinnanteil am Erlös. Reiner Soll-Ist-Vergleich, verändert keine Rechnung. 0 blendet den Vergleich aus.',
   aboPreisMonat: 'Monatspreis des Claude-Abos. Wird anteilig auf die Vorgänge verteilt.',
   usdToEur: 'Fester Umrechnungskurs. Gestellte Rechnungen behalten den Kurs, der beim Erstellen galt.',
-  gapMinutes: 'Ab dieser Pause zählt die Aktivzeit nicht weiter — trennt echte Arbeit von offenen Fenstern.',
+  gapMinutes: 'Abgerechnet wird die Zeit um deine eigenen Eingaben: je eine halbe Pausenschwelle davor und danach. Liegen zwei Eingaben höchstens so weit auseinander, zählt die Zeit dazwischen ganz; arbeitet die KI länger allein, zählt genau eine Pausenschwelle. Im Zeitmodell „aktivitaet“ (config.json) trennt der Wert stattdessen Arbeit von offenen Fenstern.',
   lokalEurProMioTokens: 'Pauschale je Million Tokens für lokal laufende Modelle. Erscheint als eigene Rechnungsposition und folgt dem Projektrabatt. 0 schaltet die Position ab — die Nutzung bleibt dann nur informativ sichtbar.',
   lokalSelbstkostenStunde: 'Was eine Stunde lokaler Rechenzeit tatsächlich kostet (Strom plus anteilige Abschreibung der Grafikkarte). Geht nur in die Marge ein, nie auf eine Rechnung.',
   lokalZuordnungsfenster: 'Lokale Anfragen tragen kein Projekt. Sie werden dem Vorgang zugeschlagen, an dem in diesem Zeitfenster ringsum gearbeitet wurde. Größer als das Fenster für Werkzeuge, weil Vorarbeit der eigentlichen Sitzung oft vorausgeht.',

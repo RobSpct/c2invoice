@@ -48,36 +48,108 @@ function activeSecondsFromTimestamps(timestamps, gapMinutes = config.gapMinutes)
   return Math.round(total / 1000);
 }
 
-// Zusammenhaengende Aktivitaet je Sitzung als Zeitabschnitte. Ein Abschnitt
-// gehoert Projekt, Vorgang und Tag der Zeile, mit der er beginnt — so bleibt
-// die Zeit richtig aufgeteilt, wenn in einer Sitzung der Branch wechselt.
-// Gefiltert wird hier nur nach Zeit: Vorgang und Projekt waehlt der Aufrufer
-// erst nach dem Verteilen aus, sonst saehe ein gefilterter Aufruf die
-// parallele Sitzung des anderen Vorgangs nicht.
-function aktivitaetsAbschnitte(db, opts) {
-  const zeit = filterClause({ from: opts.from, to: opts.to, month: opts.month });
+// Welches Zeitmass abgerechnet wird.
+// "eingaben" (Vorgabe): die eigene Zeit — ein Fenster um jede eigene Eingabe.
+//   Was die KI dazwischen allein arbeitet, ist Agentenzeit und wird nicht
+//   berechnet.
+// "aktivitaet": jede Logzeile zaehlt, also auch die Laufzeit der KI. Fuer alle,
+//   die das Beaufsichtigen eines Agenten bewusst als Arbeitszeit abrechnen.
+function zaehltEingaben() {
+  return config.zeitmodell !== 'aktivitaet';
+}
+
+// Claude Code schreibt mitten in eine Sitzung Zeilen ohne Arbeitsverzeichnis.
+// ingest.js fuehrt sie unter diesem Projektnamen, ohne Vorgang. Bekaemen sie
+// ihre Zeit selbst, verschwaende sie: zu "(unbekannt)" gibt es keine Requests
+// und damit nirgends eine Zeile, die sie ausweist. Sie gehoeren zu der Arbeit,
+// in der sie stehen — also zur Zeile davor in derselben Sitzung.
+const UNBEKANNT = '(unbekannt)';
+
+function erbeProjekt(r, davor) {
+  if (r.project !== UNBEKANNT || !davor || davor.session_id !== r.session_id) return;
+  r.project = davor.project;
+  if (!r.ticket) r.ticket = davor.ticket;
+}
+
+// Tagesgrenzen eines Zeitfilters. `month` und from/to duerfen zusammen stehen.
+function zeitRahmen({ from, to, month }) {
+  let von = from || null;
+  let bis = to || null;
+  if (month) {
+    if (!von || von < month + '-01') von = month + '-01';
+    if (!bis || bis > month + '-31') bis = month + '-31';
+  }
+  return { von, bis };
+}
+
+// Die abrechenbare Zeit als Abschnitte, noch unverteilt. Ein Abschnitt gehoert
+// Projekt, Vorgang und Tag der Zeile, aus der er entsteht — so bleibt die Zeit
+// richtig aufgeteilt, wenn in einer Sitzung der Branch wechselt.
+//
+// Zwei Arten von Abschnitten:
+// - Eingabefenster: eine halbe Pausenschwelle vor und nach jeder eigenen
+//   Eingabe. Liegen zwei Eingaben hoechstens `gapMinutes` auseinander, zaehlt
+//   die Zeit dazwischen voll; laeuft der Agent laenger allein, zaehlt genau
+//   eine Pausenschwelle.
+// - Aktivitaet: Abstaende zwischen aufeinanderfolgenden Zeilen bis zur
+//   Pausenschwelle. Gilt im Modell "aktivitaet" und fuer Zeilen ohne
+//   Eingabe-Kennung, deren Logs laengst geloescht sind.
+//
+// Gefiltert wird hier nur nach Zeit, und zwar einen Tag weiter als verlangt:
+// Vorgang, Projekt und der genaue Zeitraum werden erst nach dem Verteilen
+// ausgewaehlt. Sonst saehe ein gefilterter Aufruf die parallele Sitzung des
+// anderen Vorgangs oder das Fenster jenseits der Monatsgrenze nicht, und
+// dieselbe Arbeit truege je nach Ansicht verschiedene Zeiten.
+function zeitAbschnitte(db, rahmen) {
+  const eingaben = zaehltEingaben();
   const rows = db.prepare(`
-    SELECT session_id, ts, project, ticket, day FROM activity
-    ${zeit.where ? 'WHERE ' + zeit.where : ''}
+    SELECT session_id, ts, project, ticket, day, eingabe FROM activity
+    WHERE (? IS NULL OR day >= date(?, '-1 day'))
+      AND (? IS NULL OR day <= date(?, '+1 day'))
+      ${eingaben ? 'AND (eingabe IS NULL OR eingabe = 1)' : ''}
     ORDER BY session_id, ts
-  `).all(...zeit.params);
+  `).all(rahmen.von, rahmen.von, rahmen.bis, rahmen.bis);
 
   const limit = config.gapMinutes * 60 * 1000;
+  const halb = limit / 2;
+  const gleich = (a, r) => a.session === r.session_id && a.project === r.project
+    && a.ticket === r.ticket && a.day === r.day;
+  const neu = (von, bis, r) => ({
+    von, bis, session: r.session_id, project: r.project, ticket: r.ticket, day: r.day,
+  });
+
   const out = [];
   let prev = null;
   let prevMs = 0;
   let lauf = null;
+  let fenster = null;
+  let davor = null;
   for (const r of rows) {
     const ms = Date.parse(r.ts);
     if (!Number.isFinite(ms)) continue;
+    erbeProjekt(r, davor);
+    davor = r;
+
+    if (eingaben && r.eingabe === 1) {
+      // Fenster derselben Sitzung wachsen zusammen, damit eine Sitzung beim
+      // Verteilen als ein Teilnehmer zaehlt und nicht als mehrere.
+      if (fenster && gleich(fenster, r) && ms - halb <= fenster.bis) {
+        fenster.bis = ms + halb;
+      } else {
+        fenster = neu(ms - halb, ms + halb, r);
+        out.push(fenster);
+      }
+      prev = null;
+      lauf = null;
+      continue;
+    }
+
     const gap = prev && r.session_id === prev.session_id ? ms - prevMs : Infinity;
     if (gap > 0 && gap <= limit) {
-      const schliesstAn = lauf && lauf.bis === prevMs && lauf.project === prev.project
-        && lauf.ticket === prev.ticket && lauf.day === prev.day;
-      if (schliesstAn) {
+      if (lauf && lauf.bis === prevMs && gleich(lauf, prev)) {
         lauf.bis = ms;
       } else {
-        lauf = { von: prevMs, bis: ms, project: prev.project, ticket: prev.ticket, day: prev.day };
+        lauf = neu(prevMs, ms, prev);
         out.push(lauf);
       }
     } else {
@@ -132,8 +204,11 @@ function verteile(abschnitte) {
 // Modellfilter wird bewusst nicht gelesen — eine Zeitspanne gehoert keinem
 // einzelnen Request. `ticketlos` beschraenkt auf Arbeit ohne Vorgangsnummer.
 function activeSecondsByGroup(db, opts = {}, { groupBy = 'ticket', ticketlos = false } = {}) {
+  const rahmen = zeitRahmen(opts);
   const out = new Map();
-  for (const a of verteile(aktivitaetsAbschnitte(db, opts))) {
+  for (const a of verteile(zeitAbschnitte(db, rahmen))) {
+    if (rahmen.von && a.day < rahmen.von) continue;
+    if (rahmen.bis && a.day > rahmen.bis) continue;
     if (opts.ticket && a.ticket !== opts.ticket) continue;
     if (opts.project && a.project !== opts.project) continue;
     if (ticketlos && a.ticket) continue;
@@ -146,36 +221,41 @@ function activeSecondsByGroup(db, opts = {}, { groupBy = 'ticket', ticketlos = f
 }
 
 // Laufzeit je Gruppe (Ticket oder Projekt): jede Sitzung fuer sich, parallele
-// Sitzungen zaehlen einzeln. Das ist Maschinenzeit — sie wird ausgewiesen,
-// aber nicht abgerechnet. Die Ereignisse einer Sitzung werden nach Zeit
-// sortiert; eine Luecke zaehlt der Gruppe, in der sie beginnt.
-function agentSecondsByGroup(db, { groupBy = 'ticket', where = '', params = [] } = {}) {
-  const col = groupBy === 'project' ? 'project' : 'ticket';
+// Sitzungen zaehlen einzeln, und jede Logzeile zaehlt — auch die, die der Agent
+// allein schreibt. Das ist Maschinenzeit: sie wird ausgewiesen, aber nicht
+// abgerechnet. Eine Luecke zaehlt der Gruppe, in der sie beginnt.
+//
+// Dieselben Optionen wie activeSecondsByGroup. Vorgang und Projekt werden auch
+// hier erst nach dem Lesen ausgewaehlt, damit Zeilen ohne Arbeitsverzeichnis
+// ihr Projekt erben koennen.
+function agentSecondsByGroup(db, opts = {}, { groupBy = 'ticket', ticketlos = false } = {}) {
+  const zeit = filterClause({ from: opts.from, to: opts.to, month: opts.month });
   const rows = db.prepare(`
-    SELECT session_id, ts, ${col} AS grp FROM activity
-    ${where ? 'WHERE ' + where : ''}
+    SELECT session_id, ts, project, ticket FROM activity
+    ${zeit.where ? 'WHERE ' + zeit.where : ''}
     ORDER BY session_id, ts
-  `).all(...params);
+  `).all(...zeit.params);
 
   const limit = config.gapMinutes * 60 * 1000;
   const out = new Map();
-  let prevSession = null;
+  let prev = null;
   let prevMs = 0;
-  let prevGrp = null;
 
   for (const r of rows) {
     const ms = Date.parse(r.ts);
     if (!Number.isFinite(ms)) continue;
-    const grp = r.grp || '(ohne)';
-    if (r.session_id === prevSession) {
-      const gap = ms - prevMs;
-      if (gap > 0 && gap <= limit) {
-        out.set(prevGrp, (out.get(prevGrp) || 0) + gap);
-      }
+    erbeProjekt(r, prev);
+    const gap = prev && r.session_id === prev.session_id ? ms - prevMs : Infinity;
+    const gewaehlt = prev
+      && (!opts.ticket || prev.ticket === opts.ticket)
+      && (!opts.project || prev.project === opts.project)
+      && !(ticketlos && prev.ticket);
+    if (gap > 0 && gap <= limit && gewaehlt) {
+      const grp = (groupBy === 'project' ? prev.project : prev.ticket) || '(ohne)';
+      out.set(grp, (out.get(grp) || 0) + gap);
     }
-    prevSession = r.session_id;
+    prev = r;
     prevMs = ms;
-    prevGrp = grp;
   }
 
   const result = {};
@@ -746,8 +826,9 @@ function summary(db, opts = {}) {
   const row = db.prepare(`SELECT ${SUM_COLS} FROM events ${where ? 'WHERE ' + where : ''}`).get(...params);
   const totals = withTotals(row);
   // Die Zeit folgt dem Modellfilter nicht, siehe byProject.
-  const act = activeSecondsByGroup(db, opts, { groupBy: 'ticket' });
-  totals.active_seconds = Object.values(act).reduce((a, b) => a + b, 0);
+  const summe = (obj) => Object.values(obj).reduce((a, b) => a + b, 0);
+  totals.active_seconds = summe(activeSecondsByGroup(db, opts, { groupBy: 'ticket' }));
+  totals.agent_seconds = summe(agentSecondsByGroup(db, opts, { groupBy: 'ticket' }));
   const range = db.prepare(
     `SELECT MIN(day) AS first_day, MAX(day) AS last_day FROM events ${where ? 'WHERE ' + where : ''}`
   ).get(...params);
@@ -802,6 +883,7 @@ function byProject(db, opts = {}) {
   // anteiliger Arbeitswert, der nie so abgerechnet wird. Der Zeitfilter gilt
   // weiterhin, nur die Modellbedingung faellt fuer diese Abfrage heraus.
   const act = activeSecondsByGroup(db, opts, { groupBy: 'project' });
+  const agent = agentSecondsByGroup(db, opts, { groupBy: 'project' });
   return rows.map((r) => {
     const t = withTotals(r);
     const seconds = act[r.project] || 0;
@@ -810,6 +892,8 @@ function byProject(db, opts = {}) {
       project: r.project,
       ...t,
       active_seconds: seconds,
+      // Laufzeit der KI je Sitzung. Wird ausgewiesen, nicht abgerechnet.
+      agent_seconds: agent[r.project] || 0,
       arbeitswert: (seconds / 3600) * satzInfo.satz,
       stundensatz: satzInfo.satz,
       stundensatz_standard: satzInfo.standard,
@@ -836,6 +920,7 @@ function byTicket(db, opts = {}) {
 
   // Ohne Modellbedingung, siehe byProject.
   const act = activeSecondsByGroup(db, opts, { groupBy: 'ticket' });
+  const agent = agentSecondsByGroup(db, opts, { groupBy: 'ticket' });
   // Werkzeuge, die waehrend der Arbeit am Ticket mitgelaufen sind.
   const werkzeugTicket = werkzeugeJeTicket(db, opts);
   // Lokale Modelle, die im selben Zeitraum fuer diesen Vorgang liefen.
@@ -866,6 +951,9 @@ function byTicket(db, opts = {}) {
       last_day: r.last_day,
       active_seconds: seconds,
       active_hours: stunden,
+      // Laufzeit der KI je Sitzung. Wird ausgewiesen, nicht abgerechnet.
+      agent_seconds: agent[r.ticket] || 0,
+      agent_hours: (agent[r.ticket] || 0) / 3600,
       arbeitswert,                            // Zeit x Stundensatz, in Euro
       stundensatz: satzInfo.satz,
       stundensatz_standard: satzInfo.standard,
@@ -924,6 +1012,7 @@ function ohneTicket(db, opts = {}) {
 
   // Ohne Modellbedingung, siehe byProject.
   const act = activeSecondsByGroup(db, opts, { groupBy: 'project', ticketlos: true });
+  const agent = agentSecondsByGroup(db, opts, { groupBy: 'project', ticketlos: true });
   const lokalProjekt = lokalJeGruppe(db, opts, 'project');
   const lokalStunden = lokalStundenJeGruppe(db, opts, 'project');
 
@@ -954,6 +1043,8 @@ function ohneTicket(db, opts = {}) {
         last_day: r.last_day,
         active_seconds: seconds,
         active_hours: stunden,
+        agent_seconds: agent[r.project] || 0,
+        agent_hours: (agent[r.project] || 0) / 3600,
         arbeitswert,
         stundensatz: satzInfo.satz,
         stundensatz_standard: satzInfo.standard,
@@ -1140,12 +1231,13 @@ function live(db, { minutes = 60 } = {}) {
 // Hintergrundsitzungen entfaellt.
 function splitOverhead(db, opts = {}) {
   const projects = byProject(db, opts);
-  const leer = { requests: 0, total_tokens: 0, cost_usd: 0, active_seconds: 0, arbeitswert: 0 };
+  const leer = { requests: 0, total_tokens: 0, cost_usd: 0, active_seconds: 0, agent_seconds: 0, arbeitswert: 0 };
   const add = (acc, p) => ({
     requests: acc.requests + p.requests,
     total_tokens: acc.total_tokens + p.total_tokens,
     cost_usd: acc.cost_usd + p.cost_usd,
     active_seconds: acc.active_seconds + p.active_seconds,
+    agent_seconds: acc.agent_seconds + p.agent_seconds,
     arbeitswert: acc.arbeitswert + p.arbeitswert,
   });
   const arbeit = projects.filter((p) => !p.overhead).reduce(add, { ...leer });
