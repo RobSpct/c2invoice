@@ -839,10 +839,26 @@ function summary(db, opts = {}) {
 
 function byModel(db, opts = {}) {
   const { where, params } = filterClause(opts);
+  // MAX statt eigener Gruppe: traegt auch nur ein Request des Modells eine
+  // Kennzeichnung, ist die Summe des Modells nicht mehr exakt. 'ohne' sortiert
+  // hinter 'geschaetzt' und gewinnt damit — die Luecke ist der schwerere Fall.
   return db.prepare(`
-    SELECT model, ${SUM_COLS} FROM events ${where ? 'WHERE ' + where : ''}
+    SELECT model, MAX(preis_art) AS preis_art, ${SUM_COLS}
+    FROM events ${where ? 'WHERE ' + where : ''}
     GROUP BY model ORDER BY cost_usd DESC
-  `).all(...params).map((r) => ({ model: r.model, ...withTotals(r) }));
+  `).all(...params).map((r) => ({ model: r.model, preis_art: r.preis_art, ...withTotals(r) }));
+}
+
+// Modelle, deren Kosten nicht belastbar sind: geschaetzt ueber ein aehnlich
+// benanntes Modell, oder ganz ohne Preis und damit mit 0 in jeder Summe.
+// Leer, solange die Preisliste alle genutzten Modelle kennt.
+function preisLuecken(db, opts = {}) {
+  const { where, params } = filterClause(opts);
+  return db.prepare(`
+    SELECT model, preis_art, ${SUM_COLS}
+    FROM events WHERE ${where ? where + ' AND ' : ''}preis_art IS NOT NULL
+    GROUP BY model, preis_art ORDER BY requests DESC
+  `).all(...params).map((r) => ({ model: r.model, preis_art: r.preis_art, ...withTotals(r) }));
 }
 
 // Zeitreihe in drei Koernungen. `day` ist ein ISO-Datum, deshalb genuegt der
@@ -1272,6 +1288,7 @@ module.exports = {
   agentSecondsByGroup,
   summary,
   byModel,
+  preisLuecken,
   byDay,
   byMonth,
   byYear,

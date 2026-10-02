@@ -113,11 +113,18 @@ async function refresh({ force = false } = {}) {
   }
 }
 
-function priceFor(model) {
-  if (!model || SYNTHETIC.has(model) || istLokal(model)) return null;
+// Preis eines Modells samt der Auskunft, wie belastbar er ist:
+//   frei       kein API-Aufruf (synthetisch, lokal) — 0 ist hier richtig
+//   exakt      das Modell steht in der Preisliste
+//   geschaetzt nur ein aehnlich benanntes Modell steht dort; dessen Preis gilt
+//   ohne       nichts passt — das Modell kostet 0, obwohl es etwas gekostet hat
+// Die letzten beiden muessen sichtbar sein: eine Schaetzung und eine Luecke
+// sehen in einer Summe genauso aus wie ein echter Preis.
+function preisAuskunft(model) {
+  if (!model || SYNTHETIC.has(model) || istLokal(model)) return { preis: null, art: 'frei' };
   const key = stripPrefix(model);
-  if (table && table[key]) return table[key];
-  if (FALLBACK[key]) return FALLBACK[key];
+  if (table && table[key]) return { preis: table[key], art: 'exakt' };
+  if (FALLBACK[key]) return { preis: FALLBACK[key], art: 'exakt' };
   // Unbekannte Variante: laengster passender Praefix aus den bekannten Tabellen.
   const pools = [table, FALLBACK].filter(Boolean);
   let best = null;
@@ -129,9 +136,17 @@ function priceFor(model) {
         bestLen = name.length;
       }
     }
-    if (best) return best;
+    if (best) return { preis: best, art: 'geschaetzt' };
   }
-  return null;
+  return { preis: null, art: 'ohne' };
+}
+
+function priceFor(model) {
+  return preisAuskunft(model).preis;
+}
+
+function preisArt(model) {
+  return preisAuskunft(model).art;
 }
 
 // usage: { input_tokens, output_tokens, cache_w_5m, cache_w_1h, cache_read }
@@ -155,4 +170,4 @@ function info() {
   return { source, models: table ? Object.keys(table).length : Object.keys(FALLBACK).length };
 }
 
-module.exports = { refresh, priceFor, costOf, isSynthetic, istLokal, info, FALLBACK };
+module.exports = { refresh, priceFor, preisArt, costOf, isSynthetic, istLokal, info, FALLBACK };

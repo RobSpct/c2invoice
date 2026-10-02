@@ -484,6 +484,93 @@ function testPricing() {
   assert.ok(unknown > 0, 'unbekannte Opus-Variante ergab 0 Kosten');
 }
 
+// Ein Modell, das die Preisliste nicht kennt, kostete bisher still 0 — oder
+// bekam ueber den Namensanfang den Preis eines aehnlichen Modells, ohne dass
+// es jemand sah. Beides muss sichtbar sein, und sobald der echte Preis da ist,
+// muss der Betrag nachgezogen werden.
+function testPreisLuecken() {
+  assert.strictEqual(pricing.preisArt('claude-opus-5'), 'exakt');
+  assert.strictEqual(pricing.preisArt('claude-opus-5-preview-99'), 'geschaetzt',
+    'Treffer ueber den Namensanfang gilt als exakter Preis');
+  assert.strictEqual(pricing.preisArt('gpt-9-turbo'), 'ohne', 'unbekanntes Modell gilt als bepreist');
+  assert.strictEqual(pricing.preisArt('<synthetic>'), 'frei');
+  assert.strictEqual(pricing.preisArt('ollama/qwen3:8b'), 'frei', 'lokales Modell erscheint als Preisluecke');
+
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tl-'));
+  const projDir = path.join(tmp, 'C--Users-Test-Dev-Demo');
+  fs.mkdirSync(projDir, { recursive: true });
+  const mk = (reqId, model, sek) => JSON.stringify({
+    type: 'assistant', timestamp: '2026-08-18T10:00:0' + sek + '.000Z', sessionId: 'sess-p',
+    cwd: 'C:\\Users\\Test\\Dev\\Demo', gitBranch: 'main', requestId: reqId,
+    message: { id: 'msg_' + reqId, model, usage: { input_tokens: 1_000_000, output_tokens: 0 } },
+  });
+  fs.writeFileSync(path.join(projDir, 'sess.jsonl'), [
+    mk('p1', 'claude-opus-5', 1),
+    mk('p2', 'claude-opus-5-preview-99', 2),
+    mk('p3', 'gpt-9-turbo', 3),
+    mk('p4', '<synthetic>', 4),
+  ].join('\n') + '\n');
+
+  const cfg = require('../config.json');
+  const origDir = cfg.jsonlDir;
+  cfg.jsonlDir = tmp;
+  if (!cfg.lokaleModelle) cfg.lokaleModelle = {};
+  const origLokal = cfg.lokaleModelle.protokollDir;
+  cfg.lokaleModelle.protokollDir = path.join(tmp, 'lokal-leer');
+
+  const db = dbmod.open(':memory:');
+  openDbs.push(db);
+  const zeile = (id) => db.prepare('SELECT cost_usd, preis_art FROM events WHERE request_id = ?').get(id);
+
+  return ingest.run({ db }).then(() => {
+    assert.strictEqual(zeile('p1').preis_art, null, 'exakt bepreistes Modell ist markiert');
+    assert.strictEqual(zeile('p2').preis_art, 'geschaetzt');
+    assert.ok(zeile('p2').cost_usd > 0, 'geschaetztes Modell kostet 0');
+    assert.strictEqual(zeile('p3').preis_art, 'ohne');
+    assert.strictEqual(zeile('p3').cost_usd, 0, 'Modell ohne Preis traegt einen erfundenen Betrag');
+    assert.strictEqual(zeile('p4').preis_art, null, 'synthetisches Modell erscheint als Preisluecke');
+
+    const luecken = metrics.preisLuecken(db, {});
+    assert.deepStrictEqual(luecken.map((l) => l.model + ':' + l.preis_art).sort(),
+      ['claude-opus-5-preview-99:geschaetzt', 'gpt-9-turbo:ohne'], 'Liste der Preisluecken stimmt nicht');
+    assert.strictEqual(luecken.find((l) => l.model === 'gpt-9-turbo').total_tokens, 1_000_000);
+    const jeModell = Object.fromEntries(metrics.byModel(db, {}).map((m) => [m.model, m.preis_art]));
+    assert.strictEqual(jeModell['gpt-9-turbo'], 'ohne', 'byModel traegt die Kennzeichnung nicht');
+    assert.strictEqual(jeModell['claude-opus-5'], null);
+    // Der Zeitraumfilter gilt auch hier.
+    assert.strictEqual(metrics.preisLuecken(db, { from: '2026-09-01' }).length, 0);
+
+    // Der Preis wird bekannt. Der naechste Lauf muss den Betrag aus den
+    // gespeicherten Tokens nachziehen und die Markierung loeschen.
+    pricing.FALLBACK['gpt-9-turbo'] = { in: 2e-6, out: 8e-6, cw5m: 2.5e-6, cw1h: 4e-6, cr: 0.2e-6 };
+    return ingest.run({ db });
+  }).then(() => {
+    assert.strictEqual(zeile('p3').preis_art, null, 'Markierung bleibt, obwohl der Preis jetzt bekannt ist');
+    assert.ok(Math.abs(zeile('p3').cost_usd - 2.0) < 1e-9,
+      'nachbepreist mit ' + zeile('p3').cost_usd + ' statt 2,00 USD');
+    assert.strictEqual(metrics.preisLuecken(db, {}).length, 1, 'nur die Schaetzung darf uebrig bleiben');
+
+    // Bestandszeilen aus der Zeit vor der Kennzeichnung werden markiert, ohne
+    // ihren Betrag anzufassen.
+    db.exec("UPDATE events SET preis_art = NULL, cost_usd = 7 WHERE request_id = 'p2'");
+    return ingest.run({ db });
+  }).then(() => {
+    assert.strictEqual(zeile('p2').cost_usd, 7, 'Markieren hat den Betrag der Bestandszeile veraendert');
+    // Nachtraeglich markiert wird nur mit geladener Preisliste. Ohne Netz und
+    // ohne Zwischenspeicher kennt die eingebaute Tabelle zu wenige Modelle,
+    // um eine Luecke von einem bekannten Modell zu unterscheiden.
+    if (pricing.info().source !== 'fallback') {
+      assert.strictEqual(zeile('p2').preis_art, 'geschaetzt', 'Bestandszeile wurde nicht markiert');
+    }
+  }).finally(() => {
+    delete pricing.FALLBACK['gpt-9-turbo'];
+    try { db.close(); } catch { /* bereits geschlossen */ }
+    cfg.jsonlDir = origDir;
+    cfg.lokaleModelle.protokollDir = origLokal;
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+}
+
 // --- Ingest gegen echte Datei ---------------------------------------------
 // Baut eine kleine Logdatei mit bekannten Werten und prueft das Ergebnis.
 function testIngestRoundtrip() {
@@ -3085,6 +3172,14 @@ async function main() {
   } catch (err) {
     failed++;
     console.log('  FAIL Ingest: echte Datei, Dedup und Wiederholungslauf\n       ' + err.message);
+  }
+
+  try {
+    await testPreisLuecken();
+    console.log('  ok   Preise: Modelle ohne exakten Preis werden gekennzeichnet und nachbepreist');
+  } catch (err) {
+    failed++;
+    console.log('  FAIL Preise: Modelle ohne exakten Preis werden gekennzeichnet und nachbepreist\n       ' + err.message);
   }
 
   try {

@@ -1114,6 +1114,10 @@
     <div class="card">
       <h2><span data-i18n>Verteilung nach Modell</span> <span class="note" data-i18n>API-Gegenwert in USD — Modell anklicken, um die Projekte darunter zu filtern</span></h2>
       <div id="c-models" aria-busy="true"><span class="skel skel-chart balken"></span></div>
+      <!-- Erscheint nur, wenn ein genutztes Modell keinen exakten Preis hat.
+           Ohne den Hinweis saehe eine geschaetzte oder fehlende Summe aus wie
+           jede andere. -->
+      <p class="hinweis" id="preis-luecken" hidden></p>
     </div>
 
     <div class="card">
@@ -1570,6 +1574,11 @@ EN["Aktive Stunden"] = "Active hours";
 EN["Aktive Sitzungen"] = "Active sessions";
 EN["Aktive Std."] = "Active hrs";
 EN["Agent Std."] = "Agent hrs";
+EN["Ohne Preis:"] = "No price:";
+EN["Preis geschätzt:"] = "Price estimated:";
+EN["Diese Requests stehen mit 0 USD im API-Gegenwert — die Summe ist zu niedrig."] = "These requests count as 0 USD in the API equivalent — the total is too low.";
+EN["Die Preisliste kennt das Modell nicht; gerechnet wird mit dem Preis des ähnlichsten Modells."] = "The price list does not know this model; the price of the most similar model is used.";
+EN["Sobald die Preisliste das Modell führt, wird der Betrag automatisch nachgezogen."] = "As soon as the price list carries the model, the amount is corrected automatically.";
 EN[" aktiv"] = " active";
 EN[" Agent"] = " agent";
 EN["Laufzeit der KI je Sitzung, auch wenn sie allein arbeitet. Wird ausgewiesen, nicht abgerechnet."] = "Runtime of the AI per session, including when it works on its own. Shown, never billed.";
@@ -3430,6 +3439,25 @@ function zeichneUeberblick() {
     // ein zweiter hebt es wieder auf.
     klick: (p) => setzeModellFilter(state.modellFilter === p.modell ? null : p.modell),
   });
+
+  // Modelle ohne exakten Preis beim Namen nennen. Zwei Faelle, zwei Saetze:
+  // eine Schaetzung steht in der Summe, eine Luecke fehlt darin.
+  const luecken = Array.isArray(d.preis_luecken) ? d.preis_luecken : [];
+  const hinweis = document.getElementById('preis-luecken');
+  if (hinweis) {
+    const liste = (art) => luecken.filter((l) => l.preis_art === art)
+      .map((l) => '<code>' + esc(l.model) + '</code> (' + num(l.requests) + ' Requests, ' + kurz(l.total_tokens) + ' Tokens)')
+      .join(', ');
+    const ohne = liste('ohne');
+    const geschaetzt = liste('geschaetzt');
+    hinweis.hidden = !luecken.length;
+    hinweis.innerHTML =
+      (ohne ? '<b>' + uebersetze('Ohne Preis:') + '</b> ' + ohne + '. ' +
+        uebersetze('Diese Requests stehen mit 0 USD im API-Gegenwert — die Summe ist zu niedrig.') + ' ' : '') +
+      (geschaetzt ? '<b>' + uebersetze('Preis geschätzt:') + '</b> ' + geschaetzt + '. ' +
+        uebersetze('Die Preisliste kennt das Modell nicht; gerechnet wird mit dem Preis des ähnlichsten Modells.') + ' ' : '') +
+      (luecken.length ? uebersetze('Sobald die Preisliste das Modell führt, wird der Betrag automatisch nachgezogen.') : '');
+  }
 
   // Bei aktivem Filter die eingeschraenkten Zeilen mitziehen, sonst zeigt die
   // Tabelle nach dem naechsten Abruf noch den Stand von vorhin.

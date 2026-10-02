@@ -232,6 +232,13 @@ function migrate(db) {
   db.exec('CREATE INDEX IF NOT EXISTS idx_events_mcp ON events(mcp_server, day)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_events_skill ON events(skill, day)');
 
+  // Wie belastbar der Preis war, als der Request bepreist wurde. NULL = exakt
+  // oder kostenfrei, 'geschaetzt' = Preis eines aehnlich benannten Modells,
+  // 'ohne' = kein Preis gefunden, der Request steht mit 0 in der Summe.
+  // Festgehalten beim Einlesen: lernt die Preisliste das Modell spaeter,
+  // bliebe der alte Betrag sonst unbemerkt stehen.
+  addColumn(db, 'events', 'preis_art', 'TEXT');
+
   // Stammt die Zeile von einer eigenen Eingabe des Nutzers? Abgerechnet wird
   // die eigene Zeit, nicht die Laufzeit der KI — und die beiden lassen sich
   // nur trennen, wenn beim Einlesen festgehalten wird, wer geschrieben hat.

@@ -134,9 +134,10 @@ const UPSERT_EVENT = `
     request_id, ts, session_id, project, cwd, branch, ticket, model,
     input_tokens, output_tokens, cache_w_5m, cache_w_1h, cache_read,
     web_search, cost_usd, is_sidechain, day, ticket_quelle, source,
-    mcp_server, mcp_tool, skill
-  ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    mcp_server, mcp_tool, skill, preis_art
+  ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   ON CONFLICT(request_id) DO UPDATE SET
+    preis_art = excluded.preis_art,
     ts = excluded.ts, session_id = excluded.session_id, project = excluded.project,
     cwd = excluded.cwd, branch = excluded.branch, ticket = excluded.ticket,
     model = excluded.model, input_tokens = excluded.input_tokens,
@@ -273,7 +274,7 @@ async function ingestFile(db, filePath, fromOffset, stmts, { nurAktivitaet = fal
       model || '<unknown>', u.input_tokens, u.output_tokens, u.cache_w_5m,
       u.cache_w_1h, u.cache_read, u.web_search, cost,
       o.isSidechain ? 1 : 0, day, ticketQuelle, 'claude',
-      mcpServer, mcpTool, skill
+      mcpServer, mcpTool, skill, preisLuecke(model)
     );
     events++;
   }
@@ -340,13 +341,58 @@ async function ingestLokalFile(db, filePath, fromOffset, stmts) {
       String(o.model || 'lokal/unbekannt'), ein, aus, 0, 0, 0, 0,
       0, 0, day, null, 'lokal',
       // Ein lokales Modell laeuft ausserhalb von Claude Code: es kennt weder
-      // MCP-Server noch Skills.
-      null, null, null
+      // MCP-Server noch Skills. Und es hat keinen Preis, der fehlen koennte.
+      null, null, null, null
     );
     events++;
   }
 
   return { lines, events, offset: lastComplete };
+}
+
+// Was in der Spalte preis_art steht: nur die beiden Faelle, die jemand sehen
+// muss. Ein exakter Preis und ein kostenfreies Modell sind der Normalfall.
+function preisLuecke(model) {
+  const art = pricing.preisArt(model);
+  return art === 'geschaetzt' || art === 'ohne' ? art : null;
+}
+
+// Gleicht die Preis-Kennzeichnung mit der aktuellen Preisliste ab.
+// - Ein markierter Request, dessen Modell die Liste inzwischen besser kennt,
+//   wird aus den gespeicherten Tokens neu bepreist. Sonst bliebe der
+//   Schaetzwert oder die 0 fuer immer stehen.
+// - Ein unmarkierter Request, dessen Modell die Liste nicht exakt kennt,
+//   stammt aus der Zeit vor der Kennzeichnung. Er wird nur markiert; sein
+//   Betrag bleibt, wie er eingelesen wurde.
+// Ohne geladene Preisliste (kein Netz, kein Zwischenspeicher) wird nichts
+// nachtraeglich markiert: die eingebaute Tabelle ist zu schmal, sie wuerde
+// bekannte Modelle als Schaetzung ausweisen.
+function gleichePreiseAb(db) {
+  const listeGeladen = pricing.info().source !== 'fallback';
+  const modelle = db.prepare(
+    "SELECT model, preis_art FROM events WHERE source = 'claude' GROUP BY model, preis_art"
+  ).all();
+  const markiere = db.prepare('UPDATE events SET preis_art = ? WHERE model = ? AND preis_art IS NULL');
+  const lese = db.prepare(`
+    SELECT request_id, input_tokens, output_tokens, cache_w_5m, cache_w_1h, cache_read
+    FROM events WHERE model = ? AND preis_art = ?
+  `);
+  const schreibe = db.prepare('UPDATE events SET cost_usd = ?, preis_art = ? WHERE request_id = ?');
+
+  let geaendert = 0;
+  for (const { model, preis_art: alt } of modelle) {
+    const jetzt = preisLuecke(model);
+    if (jetzt === alt) continue;
+    if (alt === null) {
+      if (listeGeladen) geaendert += markiere.run(jetzt, model).changes;
+      continue;
+    }
+    for (const r of lese.all(model, alt)) {
+      schreibe.run(pricing.costOf(model, r), jetzt, r.request_id);
+      geaendert++;
+    }
+  }
+  return geaendert;
 }
 
 // Einmaliger Nachtrag: Zeilen aus der Zeit vor der Eingabe-Kennung tragen
@@ -443,6 +489,10 @@ async function run({ db, verbose = false } = {}) {
     totalEvents += res.events;
     touched++;
   }
+
+  // Nach dem Einlesen, damit auch die eben gelesenen Requests dabei sind.
+  const nachbepreist = gleichePreiseAb(db);
+  if (verbose && nachbepreist) console.log(`Preise: ${nachbepreist} Requests neu gekennzeichnet oder bepreist`);
 
   const ms = Date.now() - started;
   if (verbose) {

@@ -508,6 +508,9 @@ function handle(req, res) {
       return sendJson(res, {
         summary: metrics.summary(db, o),
         models: metrics.byModel(db, o),
+        // Modelle ohne exakten Preis. Ohne diese Liste sieht eine geschaetzte
+        // oder fehlende Summe aus wie jede andere.
+        preis_luecken: metrics.preisLuecken(db, o),
         days: metrics.byDay(db, o),
         // Dieselbe Reihe in groeberer Koernung. Der Umschalter am Diagramm
         // wechselt nur die Quelle, statt im Frontend nachzusummieren — sonst
