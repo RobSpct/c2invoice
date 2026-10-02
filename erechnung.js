@@ -32,11 +32,14 @@ const BEFREIUNG_KLEINUNTERNEHMER =
 // Pruefziffer. Adressiert Rechnungsempfaenger der oeffentlichen Verwaltung.
 const LEITWEG_RE = /^\d{2,12}(-[A-Za-z0-9]{1,30})?-\d{2}$/;
 
-// Maskiert Text fuer XML und entfernt Steuerzeichen, die XML 1.0 nicht kennt.
+// Maskiert Text fuer XML und entfernt Zeichen, die XML 1.0 nicht kennt:
+// Steuerzeichen, U+FFFE/U+FFFF und einzelne Haelften eines Surrogatpaars.
+// Ein einziges davon macht die ganze Datei unlesbar.
+const KEIN_XML = /[\u0000-\u0008\u000B\u000C\u000E-\u001F￾￿]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
 function x(s) {
   return String(s == null ? '' : s)
-    // eslint-disable-next-line no-control-regex
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '')
+    .replace(KEIN_XML, '')
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 }
@@ -63,12 +66,29 @@ function datumElement(name, wert) {
 // getrennt: sie stehen in der letzten Zeile ("50667 Koeln"), alles davor sind
 // Adresszeilen. Laesst sich die letzte Zeile nicht so lesen, gilt die Anschrift
 // als unvollstaendig — geraten wird nicht.
-function anschriftTeile(zeilen) {
+//
+// Fuer Deutschland wird die Form geprueft (fuenf Ziffern): "D-50667 Koeln"
+// ginge sonst mit "D-50667" als Postleitzahl hinaus. Fuer andere Laender gilt
+// die einfache Regel "erstes Wort mit Ziffer, dann der Ort" — sie passt auf
+// Oesterreich und die Schweiz, bei Formen wie "1012 AB Amsterdam" nicht.
+function anschriftTeile(zeilen, landKuerzel) {
   const liste = (Array.isArray(zeilen) ? zeilen : []).map((z) => String(z).trim()).filter(Boolean);
   if (liste.length === 0) return null;
   const m = liste[liste.length - 1].match(/^(\S*\d\S*)\s+(\S.*)$/);
   if (!m) return null;
+  if (landKuerzel === 'DE' && !/^\d{5}$/.test(m[1])) return null;
   return { plz: m[1], ort: m[2], zeilen: liste.slice(0, -1) };
+}
+
+// Gehen die Summen der Abschrift auf? Gerechnet wird in Cent, damit kein
+// Rundungsrest eine stimmige Rechnung verwirft.
+function summenStimmen(inv) {
+  const zahl = (n) => typeof n === 'number' && Number.isFinite(n);
+  const cent = (n) => Math.round(n * 100);
+  const betraege = [inv.netto_eur, inv.ust_eur, inv.brutto_eur, ...inv.positionen.map((p) => p.betrag_eur)];
+  if (!betraege.every(zahl)) return false;
+  const positionen = inv.positionen.reduce((s, p) => s + cent(p.betrag_eur), 0);
+  return positionen === cent(inv.netto_eur) && cent(inv.netto_eur) + cent(inv.ust_eur) === cent(inv.brutto_eur);
 }
 
 function land(wert) {
@@ -87,7 +107,8 @@ function adresseEmpfaenger(e) {
 // Steuerkategorie der Rechnung. Eine je Rechnung — so rechnet auch rechnung.js.
 function steuerkategorie(inv) {
   if (inv.kleinunternehmer) return { code: 'E', satz: 0, grund: BEFREIUNG_KLEINUNTERNEHMER };
-  if (Number(inv.ust_prozent) > 0) return { code: 'S', satz: Number(inv.ust_prozent), grund: null };
+  const satz = Number(inv.ust_prozent);
+  if (Number.isFinite(satz) && satz > 0) return { code: 'S', satz, grund: null };
   return null;
 }
 
@@ -100,7 +121,7 @@ function pruefe(inv) {
   const e = inv.empfaenger || {};
 
   if (!a.name) fehlt.push('Aussteller: Name');
-  if (!anschriftTeile(a.anschrift)) fehlt.push('Aussteller: Anschrift mit Postleitzahl und Ort in der letzten Zeile');
+  if (!anschriftTeile(a.anschrift, land(a.land))) fehlt.push('Aussteller: Anschrift mit Postleitzahl und Ort in der letzten Zeile');
   if (!a.steuernummer && !a.ustIdNr) fehlt.push('Aussteller: Steuernummer oder USt-IdNr.');
   if (a.ustIdNr && !/^[A-Za-z]{2}/.test(String(a.ustIdNr).trim())) fehlt.push('Aussteller: USt-IdNr. mit Länderkürzel');
   if (!a.email || !String(a.email).includes('@')) fehlt.push('Aussteller: E-Mail');
@@ -109,12 +130,20 @@ function pruefe(inv) {
   if (!land(a.land)) fehlt.push('Aussteller: Land als zweistelliges Kürzel');
 
   if (!e.name) fehlt.push('Empfänger: Name');
-  if (!anschriftTeile(e.anschrift)) fehlt.push('Empfänger: Anschrift mit Postleitzahl und Ort in der letzten Zeile');
+  if (!anschriftTeile(e.anschrift, land(e.land))) fehlt.push('Empfänger: Anschrift mit Postleitzahl und Ort in der letzten Zeile');
+  if (e.ust_id_nr && !/^[A-Za-z]{2}/.test(String(e.ust_id_nr).trim())) fehlt.push('Empfänger: USt-IdNr. mit Länderkürzel');
   if (!e.kaeufer_referenz) fehlt.push('Empfänger: Käuferreferenz');
   if (!adresseEmpfaenger(e)) fehlt.push('Empfänger: E-Mail oder Leitweg-ID');
   if (!land(e.land)) fehlt.push('Empfänger: Land als zweistelliges Kürzel');
 
+  // Aeltere Abschriften wurden ohne Formpruefung gespeichert. Ein Zeitraum, der
+  // kein Datum ist, ergaebe ein erfundenes Datum in der Datei.
+  const tag = /^\d{4}-\d{2}-\d{2}$/;
+  if (!tag.test(String(inv.leistung_von)) || !tag.test(String(inv.leistung_bis))) fehlt.push('Leistungszeitraum als Datum');
+  if (Number.isNaN(new Date(inv.erstellt_am).getTime())) fehlt.push('Rechnungsdatum');
+
   if (!Array.isArray(inv.positionen) || inv.positionen.length === 0) fehlt.push('Positionen');
+  else if (!summenStimmen(inv)) fehlt.push('Summen der Rechnung');
   if (!steuerkategorie(inv)) fehlt.push('Steuersatz über 0 oder Kleinunternehmerregelung');
   return fehlt;
 }
@@ -136,13 +165,17 @@ function mengeUndPreis(p) {
   if (pauschal) {
     return { menge: netto < 0 ? '-1' : '1', einheit: 'C62', preis: betrag(Math.abs(netto)) };
   }
-  let stellen = 4;
-  let menge = Number((netto / satz).toFixed(stellen));
-  if (Math.abs(Math.round(menge * satz * 100) / 100 - netto) >= 0.005) {
-    stellen = 8;
-    menge = Number((netto / satz).toFixed(stellen));
-  }
-  return { menge: String(menge), einheit: 'HUR', preis: betrag(satz) };
+  // Vier Nachkommastellen genuegen fast immer; reichen sie nicht, um den Betrag
+  // zu treffen, werden es acht. Ausgegeben wird ueber toFixed und ohne
+  // angehaengte Nullen — String(1e-7) ergaebe "1e-7", und das ist keine
+  // gueltige Dezimalzahl in XML.
+  const dezimal = (stellen) => {
+    const text = (netto / satz).toFixed(stellen).replace(/\.?0+$/, '');
+    return text === '-0' || text === '' ? '0' : text;
+  };
+  let menge = dezimal(4);
+  if (Math.abs(Math.round(Number(menge) * satz * 100) / 100 - netto) >= 0.005) menge = dezimal(8);
+  return { menge, einheit: 'HUR', preis: betrag(satz) };
 }
 
 function position(p, nr, steuer) {
@@ -295,4 +328,4 @@ function alsXml(inv) {
 `.replace(/^\s*\n/gm, '');
 }
 
-module.exports = { alsXml, pruefe, SPEZIFIKATION };
+module.exports = { alsXml, pruefe, mengeUndPreis, SPEZIFIKATION };

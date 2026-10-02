@@ -364,11 +364,14 @@ function preisLuecke(model) {
 // - Ein unmarkierter Request, dessen Modell die Liste nicht exakt kennt,
 //   stammt aus der Zeit vor der Kennzeichnung. Er wird nur markiert; sein
 //   Betrag bleibt, wie er eingelesen wurde.
-// Ohne geladene Preisliste (kein Netz, kein Zwischenspeicher) wird nichts
-// nachtraeglich markiert: die eingebaute Tabelle ist zu schmal, sie wuerde
-// bekannte Modelle als Schaetzung ausweisen.
+// Zwei Sicherungen:
+// - Ohne geladene Preisliste (kein Netz, kein Zwischenspeicher) geschieht
+//   nichts. Die eingebaute Tabelle ist zu schmal: sie wuerde bekannte Modelle
+//   als Schaetzung ausweisen und geschaetzte Requests auf 0 setzen.
+// - Ein Betrag wird nur besser, nie schlechter. Streicht die Preisliste ein
+//   Modell, bleibt der einmal gerechnete Betrag stehen, statt auf 0 zu fallen.
 function gleichePreiseAb(db) {
-  const listeGeladen = pricing.info().source !== 'fallback';
+  if (pricing.info().source === 'fallback') return 0;
   const modelle = db.prepare(
     "SELECT model, preis_art FROM events WHERE source = 'claude' GROUP BY model, preis_art"
   ).all();
@@ -380,17 +383,25 @@ function gleichePreiseAb(db) {
   const schreibe = db.prepare('UPDATE events SET cost_usd = ?, preis_art = ? WHERE request_id = ?');
 
   let geaendert = 0;
-  for (const { model, preis_art: alt } of modelle) {
-    const jetzt = preisLuecke(model);
-    if (jetzt === alt) continue;
-    if (alt === null) {
-      if (listeGeladen) geaendert += markiere.run(jetzt, model).changes;
-      continue;
+  db.exec('BEGIN');
+  try {
+    for (const { model, preis_art: alt } of modelle) {
+      const jetzt = preisLuecke(model);
+      if (jetzt === alt) continue;
+      if (alt === null) {
+        geaendert += markiere.run(jetzt, model).changes;
+        continue;
+      }
+      if (jetzt === 'ohne') continue;
+      for (const r of lese.all(model, alt)) {
+        schreibe.run(pricing.costOf(model, r), jetzt, r.request_id);
+        geaendert++;
+      }
     }
-    for (const r of lese.all(model, alt)) {
-      schreibe.run(pricing.costOf(model, r), jetzt, r.request_id);
-      geaendert++;
-    }
+    db.exec('COMMIT');
+  } catch (err) {
+    try { db.exec('ROLLBACK'); } catch { /* Transaktion bereits beendet */ }
+    throw err;
   }
   return geaendert;
 }
@@ -402,31 +413,60 @@ function gleichePreiseAb(db) {
 // Der Merker verhindert, dass dieser Rest jeden Lauf erneut alles liest.
 const NACHTRAG_MERKER = 'eingabe_nachgetragen';
 
+// Wie oft ein unvollstaendiger Nachtrag wiederholt wird, bevor er als erledigt
+// gilt. Ohne Grenze laese ein dauerhaft unlesbares Log jeden Lauf alles neu.
+const NACHTRAG_VERSUCHE = 3;
+
 async function trageEingabenNach(db, files, stmts, verbose) {
   if (dbmod.getMeta(db, NACHTRAG_MERKER)) return;
+  const fertig = () => dbmod.setMeta(db, NACHTRAG_MERKER, new Date().toISOString());
   const offen = db.prepare('SELECT 1 FROM activity WHERE eingabe IS NULL LIMIT 1').get();
-  if (offen) {
+  if (!offen) { fertig(); return; }
+
+  // Ohne lesbare Logs ist nichts nachgetragen — also auch nichts vermerken.
+  // Ein falscher Pfad oder ein nicht eingehaengtes Laufwerk beim ersten Lauf
+  // nach dem Update liesse den Altbestand sonst fuer immer ohne Kennung, und
+  // die Stunden blieben beim alten, hoeheren Zeitmass.
+  const logs = files.filter((f) => f.quelle === 'claude');
+  if (logs.length === 0) {
+    console.warn('Nachtrag der Eingabe-Kennung verschoben: keine Logdateien unter jsonlDir gefunden.');
+    return;
+  }
+
+  let fehler = 0;
+  for (const { pfad } of logs) {
+    // Je Datei eine eigene kurze Transaktion, wie im normalen Lauf. Eine
+    // einzige Transaktion ueber alle Dateien bliebe Minuten offen: der Server
+    // bedient waehrenddessen Anfragen ueber dieselbe Verbindung, und eine in
+    // dieser Zeit gestellte Rechnung haenge an einem spaeteren ROLLBACK.
     db.exec('BEGIN');
     try {
-      for (const { pfad, quelle } of files) {
-        if (quelle !== 'claude') continue;
-        try {
-          await ingestFile(db, pfad, 0, stmts, { nurAktivitaet: true });
-        } catch (err) {
-          // Eine unlesbare Datei darf den Nachtrag der uebrigen nicht aufhalten.
-          if (verbose) console.error('Nachtrag: Fehler bei', pfad, err.message);
-        }
-      }
-      // Der Proxy der lokalen Modelle schreibt nur abgeschickte Anfragen.
-      db.prepare("UPDATE activity SET eingabe = 1 WHERE eingabe IS NULL AND session_id LIKE 'lokal:%'").run();
+      await ingestFile(db, pfad, 0, stmts, { nurAktivitaet: true });
       db.exec('COMMIT');
     } catch (err) {
-      db.exec('ROLLBACK');
-      throw err;
+      try { db.exec('ROLLBACK'); } catch { /* Transaktion bereits beendet */ }
+      // Eine unlesbare Datei haelt die uebrigen nicht auf, bleibt aber nicht
+      // unbemerkt: sie entscheidet, ob der Nachtrag als erledigt gilt.
+      fehler++;
+      console.error('Nachtrag: Fehler bei', pfad, err.message);
     }
-    if (verbose) console.log('Nachtrag: Eingabe-Kennung fuer vorhandene Logs ergaenzt');
   }
-  dbmod.setMeta(db, NACHTRAG_MERKER, new Date().toISOString());
+  // Der Proxy der lokalen Modelle schreibt nur abgeschickte Anfragen.
+  db.prepare("UPDATE activity SET eingabe = 1 WHERE eingabe IS NULL AND session_id LIKE 'lokal:%'").run();
+  if (verbose) console.log('Nachtrag: Eingabe-Kennung fuer vorhandene Logs ergaenzt');
+
+  if (fehler > 0) {
+    const schluessel = NACHTRAG_MERKER + '_versuche';
+    const versuche = (Number(dbmod.getMeta(db, schluessel)) || 0) + 1;
+    dbmod.setMeta(db, schluessel, versuche);
+    if (versuche < NACHTRAG_VERSUCHE) {
+      console.warn('Nachtrag unvollstaendig: ' + fehler + ' Logdatei(en) nicht lesbar. Wird beim naechsten Lauf wiederholt.');
+      return;
+    }
+    console.warn('Nachtrag nach ' + versuche + ' Versuchen beendet: ' + fehler +
+      ' Logdatei(en) blieben unlesbar. Ihre Zeilen behalten das Zeitmass "aktivitaet".');
+  }
+  fertig();
 }
 
 async function run({ db, verbose = false } = {}) {

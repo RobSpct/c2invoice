@@ -5622,7 +5622,7 @@ async function ladeERechnung(knopf, nr) {
       const r = await fetch('/rechnung-xml/' + encodeURIComponent(nr));
       if (!r.ok) {
         const a = await r.json().catch(() => ({}));
-        throw new Error(a.error || uebersetze('Abruf fehlgeschlagen'));
+        throw new Error(a.error || (uebersetze('Abruf fehlgeschlagen') + ' (HTTP ' + r.status + ')'));
       }
       const datei = 'Rechnung-' + nr + '.xml';
       const url = URL.createObjectURL(await r.blob());
@@ -5632,7 +5632,8 @@ async function ladeERechnung(knopf, nr) {
       document.body.appendChild(a);
       a.click();
       a.remove();
-      URL.revokeObjectURL(url);
+      // Nicht sofort freigeben: manche Browser brechen den Download sonst ab.
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
       rStatus(uebersetze('E-Rechnung gespeichert: ') + datei, 'ok');
     } catch (err) {
       rStatus(uebersetze('E-Rechnung nicht erstellt: ') + err.message, 'err');

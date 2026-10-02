@@ -355,15 +355,21 @@ function stammZiel(regel) {
 function setzeStammdaten(daten) {
   if (!daten || typeof daten !== 'object') throw new Error('Keine Daten empfangen.');
   const geaendert = {};
+  // Erst alles pruefen, dann uebernehmen. Wuerde jedes Feld sofort gesetzt,
+  // stuende nach einer abgelehnten Eingabe die Haelfte schon im Speicher —
+  // und ginge von dort in die naechste Rechnung, obwohl die Oberflaeche
+  // "nicht gespeichert" gemeldet hat.
+  const vorgemerkt = [];
 
   for (const [feld, regel] of Object.entries(STAMMDATEN)) {
     if (!(feld in daten)) continue;
     const roh = daten[feld];
     if (roh === undefined || roh === null) continue;
     const ziel = stammZiel(regel);
+    let wert;
 
     if (regel.typ === 'schalter') {
-      ziel[feld] = !!roh;
+      wert = !!roh;
     } else if (regel.typ === 'zahl') {
       if (roh === '') continue;
       const n = Number(roh);
@@ -371,7 +377,7 @@ function setzeStammdaten(daten) {
       if (n < regel.min || n > regel.max) {
         throw new Error(`${regel.label}: muss zwischen ${regel.min} und ${regel.max} liegen.`);
       }
-      ziel[feld] = Math.round(n * 100) / 100;
+      wert = Math.round(n * 100) / 100;
     } else if (regel.typ === 'zeilen') {
       // Aus dem Textfeld kommt ein Block, gespeichert wird eine Zeilenliste —
       // die Rechnung setzt daraus die Adresszeilen.
@@ -384,28 +390,32 @@ function setzeStammdaten(daten) {
       for (const z of zeilen) {
         if (z.length > regel.max) throw new Error(`${regel.label}: hoechstens ${regel.max} Zeichen je Zeile.`);
       }
-      ziel[feld] = zeilen;
+      wert = zeilen;
     } else {
       let s = String(roh).trim();
       if (regel.typ === 'iban') s = s.replace(/\s+/g, '').toUpperCase();
-      if (s.length > regel.max) throw new Error(`${regel.label}: hoechstens ${regel.max} Zeichen.`);
-      if (regel.typ === 'iban' && s && !IBAN_RE.test(s)) throw new Error(regel.label + ': Form nicht plausibel.');
-      if (regel.typ === 'email' && s && !s.includes('@')) {
-        throw new Error(regel.label + ': Adresse sieht nicht wie eine E-Mail aus.');
-      }
       if (regel.typ === 'land') {
-        // Ein ausgeschriebener Laendername ginge woertlich in die E-Rechnung.
+        // Vor der Laengenpruefung: wer "Deutschland" eintippt, soll lesen, was
+        // erwartet wird, statt nur "hoechstens 2 Zeichen". Ein ausgeschriebener
+        // Laendername ginge sonst woertlich in die E-Rechnung.
         s = s.toUpperCase();
         if (s && !/^[A-Z]{2}$/.test(s)) {
           throw new Error(regel.label + ': zweistelliges Kuerzel erwartet, zum Beispiel DE oder AT.');
         }
       }
-      ziel[feld] = s;
+      if (s.length > regel.max) throw new Error(`${regel.label}: hoechstens ${regel.max} Zeichen.`);
+      if (regel.typ === 'iban' && s && !IBAN_RE.test(s)) throw new Error(regel.label + ': Form nicht plausibel.');
+      if (regel.typ === 'email' && s && !s.includes('@')) {
+        throw new Error(regel.label + ': Adresse sieht nicht wie eine E-Mail aus.');
+      }
+      wert = s;
     }
-    geaendert[feld] = ziel[feld];
+    vorgemerkt.push([ziel, feld, wert]);
+    geaendert[feld] = wert;
   }
 
   if (Object.keys(geaendert).length === 0) throw new Error('Kein bekanntes Feld uebergeben.');
+  for (const [ziel, feld, wert] of vorgemerkt) ziel[feld] = wert;
   schreibeConfig();
   // Bewusst kein Abbruch bei fehlenden Pflichtangaben: Stammdaten entstehen
   // schrittweise. Wer eine Rechnung erstellt, laeuft ohnehin in die harte

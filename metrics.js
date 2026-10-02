@@ -175,6 +175,9 @@ function verteile(abschnitte) {
   abschnitte.forEach((a, i) => {
     a.ms = 0;
     a.werkzeug = isOverhead(a.project);
+    // Ein Abschnitt ohne Dauer traegt keine Zeit. Im Durchlauf stuende sein
+    // Ende vor seinem Anfang, und er bliebe fuer immer als offen stehen.
+    if (!(a.bis > a.von)) return;
     punkte.push([a.von, 1, i], [a.bis, -1, i]);
   });
   // Bei gleicher Zeit erst schliessen, dann oeffnen: aneinanderstossende
@@ -385,6 +388,21 @@ if (typeof config.usdToEur !== 'number' || !Number.isFinite(config.usdToEur) || 
   throw new Error(
     'config.json: usdToEur fehlt oder ist ungueltig. Ohne Kurs waeren alle ' +
     'Euro-Betraege falsch. Bitte einen Wert wie 0.92 eintragen.'
+  );
+}
+
+// Von beiden Werten haengt jede abgerechnete Stunde ab. Fehlt die
+// Pausenschwelle oder ist sie 0, ergaebe jede Auswertung still 0 Stunden; ein
+// vertipptes Zeitmodell schaltete unbemerkt auf das andere Mass um.
+if (!Number.isFinite(config.gapMinutes) || config.gapMinutes <= 0) {
+  throw new Error(
+    'config.json: gapMinutes fehlt oder ist ungueltig. Ohne Pausenschwelle ' +
+    'waeren alle Stunden 0. Bitte einen Wert wie 5 eintragen.'
+  );
+}
+if (config.zeitmodell !== undefined && !['eingaben', 'aktivitaet'].includes(config.zeitmodell)) {
+  throw new Error(
+    'config.json: zeitmodell kennt nur "eingaben" oder "aktivitaet", nicht "' + config.zeitmodell + '".'
   );
 }
 

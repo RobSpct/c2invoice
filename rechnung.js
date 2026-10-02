@@ -61,14 +61,29 @@ function rund2(n) {
 // ist die Abschrift eingefroren — ein spaeter geaenderter Kontakt aendert keine
 // gestellte Rechnung.
 const EMPFAENGER_ZUSATZ = {
-  email: { max: 120, kontakt: 'email' },
-  ust_id_nr: { max: 40, kontakt: 'ustIdNr' },
-  kaeufer_referenz: { max: 80, kontakt: 'kaeuferReferenz' },
-  land: { max: 2, kontakt: 'land' },
-  lieferantennummer: { max: 60, kontakt: 'lieferantennummer' },
+  email: { max: 120, kontakt: 'email', label: 'E-Mail', form: /@/ },
+  ust_id_nr: { max: 40, kontakt: 'ustIdNr', label: 'USt-IdNr.' },
+  kaeufer_referenz: { max: 80, kontakt: 'kaeuferReferenz', label: 'Käuferreferenz' },
+  land: { max: 2, kontakt: 'land', label: 'Land', form: /^[A-Za-z]{2}$/, gross: true },
+  lieferantennummer: { max: 60, kontakt: 'lieferantennummer', label: 'Lieferantennummer' },
   // Je Rechnung, nicht je Kunde: steht deshalb an keinem Kontakt.
-  bestellnummer: { max: 60, kontakt: null },
+  bestellnummer: { max: 60, kontakt: null, label: 'Bestellnummer' },
 };
+
+// Eine Angabe fuer die E-Rechnung, geprueft statt zurechtgeschnitten. Diese
+// Werte gehen maschinenlesbar an den Empfaenger: aus "Niederlande" wuerde beim
+// Abschneiden still "NI", und das stuende unwiderruflich in der Rechnung.
+function zusatzWert(roh, regel) {
+  if (typeof roh !== 'string') return '';
+  const s = roh.trim();
+  if (!s) return '';
+  if (regel.form && !regel.form.test(s)) {
+    throw new Error(`${regel.label}: Angabe hat nicht die erwartete Form.`);
+  }
+  if (s.length > regel.max) throw new Error(`${regel.label}: hoechstens ${regel.max} Zeichen.`);
+  kontakte.ohneErsatzzeichen(s, regel.label);
+  return regel.gross ? s.toUpperCase() : s;
+}
 
 function empfaengerAbschrift(db, empfaenger, kontaktId) {
   const text = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
@@ -85,8 +100,14 @@ function empfaengerAbschrift(db, empfaenger, kontaktId) {
       .map((z) => z.slice(0, 120)),
   };
   for (const [feld, regel] of Object.entries(EMPFAENGER_ZUSATZ)) {
-    const wert = text(empfaenger[feld], regel.max)
-      || (kontakt && regel.kontakt ? text(kontakt[regel.kontakt], regel.max) : '');
+    // Streng ist die Pruefung nur fuer das, was die Anfrage mitbringt. Eine
+    // Angabe aus dem Kontakt, die die Form nicht haelt (alte Eintraege wurden
+    // nie geprueft), bleibt weg, statt das Stellen der Rechnung zu verhindern —
+    // die E-Rechnung meldet sie dann als fehlend.
+    let wert = zusatzWert(empfaenger[feld], regel);
+    if (!wert && kontakt && regel.kontakt) {
+      try { wert = zusatzWert(kontakt[regel.kontakt], regel); } catch { wert = ''; }
+    }
     if (wert) aus[feld] = wert;
   }
   aus.anschrift.forEach((z) => kontakte.ohneErsatzzeichen(z, 'Empfaenger-Anschrift'));
@@ -212,6 +233,16 @@ function erstelle(db, { from, to, tickets, projekte, empfaenger, kontaktId } = {
 // aus fertigen Positionen), damit Nummer, Steuer, Faelligkeit und die Abschrift
 // des Empfaengers nicht zweimal gebaut werden.
 function schreibe(db, { von, bis, empfaenger, positionen, kontaktId }) {
+  // Vor der Nummernvergabe pruefen: eine abgelehnte Anfrage darf keine Nummer
+  // aus dem fortlaufenden Kreis verbrauchen. Der Zeitraum geht als Datum in
+  // die E-Rechnung und muss deshalb eines sein.
+  const TAG = /^\d{4}-\d{2}-\d{2}$/;
+  if (!TAG.test(String(von)) || !TAG.test(String(bis))) {
+    throw new Error('Leistungszeitraum: Datum in der Form JJJJ-MM-TT erwartet.');
+  }
+  const kid = Number.isInteger(kontaktId) && kontaktId > 0 ? kontaktId : null;
+  const abschrift = empfaengerAbschrift(db, empfaenger, kid);
+
   // Summiert wird ueber die gerundeten Positionen, nicht ueber die
   // ungerundeten Ausgangswerte: sonst weicht die ausgewiesene Summe um Cents
   // von den addierten Zeilen ab, und genau das faellt beim Pruefen auf.
@@ -220,7 +251,6 @@ function schreibe(db, { von, bis, empfaenger, positionen, kontaktId }) {
   const jahr = new Date().getFullYear();
   const { nr, laufnr } = naechsteNummer(db, jahr);
   const jetzt = new Date().toISOString();
-  const kid = Number.isInteger(kontaktId) && kontaktId > 0 ? kontaktId : null;
 
   db.prepare(`
     INSERT INTO invoices (nr, jahr, laufnr, erstellt_am, leistung_von, leistung_bis,
@@ -230,7 +260,7 @@ function schreibe(db, { von, bis, empfaenger, positionen, kontaktId }) {
   `).run(
     nr, jahr, laufnr, jetzt, von, bis,
     // Der Empfaenger ist die massgebliche Abschrift; kontakt_id nur der Verweis.
-    JSON.stringify(empfaengerAbschrift(db, empfaenger, kid)), JSON.stringify(stammdaten()),
+    JSON.stringify(abschrift), JSON.stringify(stammdaten()),
     JSON.stringify(positionen), netto, satz, ust, brutto, klein ? 1 : 0,
     kid, tagNach(jetzt, zahlungsziel())
   );

@@ -316,6 +316,20 @@ function testEingabeNachtrag() {
       UPDATE events SET cost_usd = 99, ticket = 'PROJ-7';
       DELETE FROM meta WHERE key = 'eingabe_nachgetragen';
     `);
+    // Erst ein Lauf, bei dem das Logverzeichnis nicht erreichbar ist (falscher
+    // Pfad, Laufwerk nicht eingehaengt). Er darf den Nachtrag nicht als
+    // erledigt vermerken — sonst bleibt der Altbestand fuer immer ohne Kennung.
+    cfg.jsonlDir = path.join(tmp, 'gibt-es-nicht');
+    // Der Lauf meldet das zu Recht als Warnung; in der Ausgabe der
+    // Selbstpruefung saehe sie wie ein Fehler aus.
+    const warn = console.warn;
+    console.warn = () => {};
+    return ingest.run({ db }).finally(() => { console.warn = warn; });
+  }).then(() => {
+    assert.strictEqual(stand().offen, 4, 'Testaufbau: Nachtrag lief trotz fehlendem Verzeichnis');
+    assert.ok(!dbmod.getMeta(db, 'eingabe_nachgetragen'),
+      'Nachtrag ohne lesbare Logs als erledigt vermerkt — er wird nie wiederholt');
+    cfg.jsonlDir = tmp;
     return ingest.run({ db });
   }).then(() => {
     const s = stand();
@@ -545,6 +559,10 @@ function testPreisLuecken() {
     pricing.FALLBACK['gpt-9-turbo'] = { in: 2e-6, out: 8e-6, cw5m: 2.5e-6, cw1h: 4e-6, cr: 0.2e-6 };
     return ingest.run({ db });
   }).then(() => {
+    // Abgeglichen wird nur mit geladener Preisliste. Ohne Netz und ohne
+    // Zwischenspeicher kennt die eingebaute Tabelle zu wenige Modelle — der
+    // Rest dieser Pruefung braucht deshalb die Liste.
+    if (pricing.info().source === 'fallback') return null;
     assert.strictEqual(zeile('p3').preis_art, null, 'Markierung bleibt, obwohl der Preis jetzt bekannt ist');
     assert.ok(Math.abs(zeile('p3').cost_usd - 2.0) < 1e-9,
       'nachbepreist mit ' + zeile('p3').cost_usd + ' statt 2,00 USD');
@@ -1977,6 +1995,63 @@ function testERechnung() {
     // 8. Die Abschrift nimmt nur bekannte Felder an.
     const fremd = rechnung.erstelle(db, { ...zeitraum, empfaenger: { ...kunde, boese: '<script>', anschrift: ['A 1', '50667 Köln'] } });
     assert.strictEqual(fremd.empfaenger.boese, undefined, 'fremdes Feld ging in die Abschrift');
+
+    // 8a. Angaben in falscher Form werden abgelehnt, nicht zurechtgeschnitten.
+    //     Aus "Niederlande" wuerde sonst still "NI" — Nicaragua, unwiderruflich
+    //     in einer gestellten Rechnung.
+    const vorher = db.prepare('SELECT COUNT(*) AS n FROM invoices').get().n;
+    assert.throws(() => rechnung.erstelle(db, { ...zeitraum, empfaenger: { ...kunde, land: 'Niederlande' } }),
+      /Land/, 'ausgeschriebener Laendername wurde angenommen');
+    assert.throws(() => rechnung.erstelle(db, { ...zeitraum, empfaenger: { ...kunde, email: 'keine-adresse' } }),
+      /E-Mail/, 'E-Mail ohne @ wurde angenommen');
+    assert.throws(() => rechnung.erstelle(db, { ...zeitraum, empfaenger: { ...kunde, kaeufer_referenz: 'x'.repeat(81) } }),
+      /Käuferreferenz/, 'ueberlange Kaeuferreferenz wurde abgeschnitten statt abgelehnt');
+    // Der Leistungszeitraum geht als Datum in die E-Rechnung.
+    assert.throws(() => rechnung.erstelle(db, { ...zeitraum, from: '1', to: '3', empfaenger: kunde }),
+      /Leistungszeitraum/, 'Zeitraum ohne Datumsform wurde angenommen');
+    assert.strictEqual(db.prepare('SELECT COUNT(*) AS n FROM invoices').get().n, vorher,
+      'eine abgelehnte Anfrage hat eine Rechnungsnummer verbraucht');
+    assert.strictEqual(rechnung.erstelle(db, { ...zeitraum, empfaenger: { ...kunde, land: 'nl' } }).empfaenger.land, 'NL');
+
+    // 8b. Zeichen, die XML 1.0 nicht kennt, duerfen die Datei nicht zerstoeren.
+    const schmutz = rechnung.erstelle(db, { ...zeitraum, empfaenger: { ...kunde, bestellnummer: 'PO￿-\uD800x' } });
+    xml = erechnung.alsXml(schmutz);
+    assert.ok(!/[￾￿]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(xml), 'ungueltiges XML-Zeichen in der Datei');
+    assert.ok(xml.includes('<ram:IssuerAssignedID>PO-x</ram:IssuerAssignedID>'), 'bereinigte Bestellnummer fehlt');
+
+    // 8c. Mengen stehen immer als Dezimalzahl in der Datei, nie in
+    //     Exponentialschreibweise (das ist kein gueltiger XML-Dezimalwert).
+    const winzig = erechnung.mengeUndPreis({ stunden: 1, satz: 500000, betrag_eur: 0.05 });
+    assert.ok(/^-?\d+(\.\d+)?$/.test(winzig.menge), 'Menge "' + winzig.menge + '" ist keine Dezimalzahl');
+    assert.strictEqual(erechnung.mengeUndPreis({ stunden: 2, satz: 85, betrag_eur: 170 }).menge, '2');
+    assert.strictEqual(erechnung.mengeUndPreis({ stunden: 2, satz: 85, betrag_eur: -170 }).menge, '-2');
+    assert.strictEqual(erechnung.mengeUndPreis({ stunden: 0, satz: 85, betrag_eur: 0 }).menge, '0');
+
+    // 8d. Alte Abschrift mit unbrauchbarem Zeitraum oder Steuersatz: abgelehnt.
+    assert.ok(erechnung.pruefe({ ...klein, leistung_von: '1' }).includes('Leistungszeitraum als Datum'),
+      'unbrauchbarer Leistungszeitraum faellt bei der Pruefung nicht auf');
+    assert.ok(erechnung.pruefe({ ...regel, ust_prozent: Infinity }).length > 0,
+      'unendlicher Steuersatz faellt bei der Pruefung nicht auf');
+    // Summen, die nicht aufgehen, duerfen nicht als Datei hinausgehen.
+    assert.ok(erechnung.pruefe({ ...regel, brutto_eur: regel.brutto_eur + 1 }).includes('Summen der Rechnung'),
+      'Brutto ungleich Netto plus Steuer faellt nicht auf');
+    assert.ok(erechnung.pruefe({ ...regel, netto_eur: regel.netto_eur + 1, brutto_eur: regel.brutto_eur + 1 })
+      .includes('Summen der Rechnung'), 'Netto ungleich Summe der Positionen faellt nicht auf');
+    // Deutsche Postleitzahl hat fuenf Ziffern; "D-50667" ginge so in die Datei.
+    const mitD = { ...klein, empfaenger: { ...klein.empfaenger, anschrift: ['Weg 1', 'D-50667 Köln'] } };
+    assert.ok(erechnung.pruefe(mitD).some((f) => f.startsWith('Empfänger: Anschrift')),
+      'Postleitzahl mit Laenderkennung wird als gueltig angenommen');
+    assert.ok(erechnung.pruefe({ ...klein, empfaenger: { ...klein.empfaenger, ust_id_nr: '123456789' } })
+      .includes('Empfänger: USt-IdNr. mit Länderkürzel'), 'USt-IdNr. des Empfaengers ohne Laenderkuerzel faellt nicht auf');
+
+    // 8e. Eine abgelehnte Stammdaten-Eingabe darf nichts veraendern — auch nicht
+    //     die Felder, die vor dem fehlerhaften Feld geprueft wurden. Sie stuenden
+    //     sonst im Speicher und gingen in die naechste Rechnung.
+    const { setzeStammdaten } = require('../server');
+    const bankVorher = config.rechnung.aussteller.bank;
+    assert.throws(() => setzeStammdaten({ bank: 'Halb gespeichert', land: 'Deutschland' }), /Land/);
+    assert.strictEqual(config.rechnung.aussteller.bank, bankVorher,
+      'abgelehnte Eingabe hat ein anderes Feld bereits veraendert');
 
     // 9. Angaben fuer die E-Rechnung kommen aus dem Kontakt, wenn die Anfrage
     //    sie nicht mitbringt. Aendert sich der Kontakt spaeter, bleibt die
