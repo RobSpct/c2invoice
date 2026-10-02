@@ -435,10 +435,14 @@ async function trageEingabenNach(db, files, stmts, verbose) {
 
   let fehler = 0;
   for (const { pfad } of logs) {
-    // Je Datei eine eigene kurze Transaktion, wie im normalen Lauf. Eine
-    // einzige Transaktion ueber alle Dateien bliebe Minuten offen: der Server
-    // bedient waehrenddessen Anfragen ueber dieselbe Verbindung, und eine in
-    // dieser Zeit gestellte Rechnung haenge an einem spaeteren ROLLBACK.
+    // Je Datei eine eigene Transaktion, wie im normalen Lauf. Eine einzige
+    // ueber alle Dateien bliebe Minuten offen: der Server bedient
+    // waehrenddessen Anfragen ueber dieselbe Verbindung, und eine in dieser
+    // Zeit gestellte Rechnung haenge an einem spaeteren ROLLBACK.
+    // ponytail: das Fenster ist damit klein, aber nicht weg — die Datei wird
+    // bei offener Transaktion gelesen (await). Ganz zu schliessen waere es,
+    // indem Zeilen erst gepuffert und dann ohne await geschrieben werden;
+    // das gilt genauso fuer den normalen Lauf in run().
     db.exec('BEGIN');
     try {
       await ingestFile(db, pfad, 0, stmts, { nurAktivitaet: true });

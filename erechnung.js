@@ -35,7 +35,7 @@ const LEITWEG_RE = /^\d{2,12}(-[A-Za-z0-9]{1,30})?-\d{2}$/;
 // Maskiert Text fuer XML und entfernt Zeichen, die XML 1.0 nicht kennt:
 // Steuerzeichen, U+FFFE/U+FFFF und einzelne Haelften eines Surrogatpaars.
 // Ein einziges davon macht die ganze Datei unlesbar.
-const KEIN_XML = /[\u0000-\u0008\u000B\u000C\u000E-\u001F￾￿]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+const KEIN_XML = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
 
 function x(s) {
   return String(s == null ? '' : s)

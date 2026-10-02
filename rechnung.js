@@ -74,7 +74,10 @@ const EMPFAENGER_ZUSATZ = {
 // Werte gehen maschinenlesbar an den Empfaenger: aus "Niederlande" wuerde beim
 // Abschneiden still "NI", und das stuende unwiderruflich in der Rechnung.
 function zusatzWert(roh, regel) {
-  if (typeof roh !== 'string') return '';
+  if (roh === undefined || roh === null) return '';
+  // Eine Zahl oder Liste an dieser Stelle ist ein Fehler des Aufrufers. Still
+  // uebergangen, traete der Wert aus dem Kontakt an ihre Stelle.
+  if (typeof roh !== 'string') throw new Error(`${regel.label}: Text erwartet.`);
   const s = roh.trim();
   if (!s) return '';
   if (regel.form && !regel.form.test(s)) {
@@ -106,12 +109,29 @@ function empfaengerAbschrift(db, empfaenger, kontaktId) {
     // die E-Rechnung meldet sie dann als fehlend.
     let wert = zusatzWert(empfaenger[feld], regel);
     if (!wert && kontakt && regel.kontakt) {
-      try { wert = zusatzWert(kontakt[regel.kontakt], regel); } catch { wert = ''; }
+      try {
+        wert = zusatzWert(kontakt[regel.kontakt], regel);
+      } catch {
+        // Ausnahme Land: fiele es weg, gaelte Deutschland, und ein falsches
+        // Land stuende unwiderruflich in der Rechnung. Dann lieber anhalten
+        // und sagen, wo der Fehler liegt.
+        if (feld === 'land') {
+          throw new Error('Land im Kontakt: zweistelliges Kuerzel erwartet (zum Beispiel DE oder NL). ' +
+            'Bitte am Kontakt korrigieren.');
+        }
+        wert = '';
+      }
     }
     if (wert) aus[feld] = wert;
   }
   aus.anschrift.forEach((z) => kontakte.ohneErsatzzeichen(z, 'Empfaenger-Anschrift'));
   return aus;
+}
+
+// new Date() wirft bei einem Tag, den es nicht gibt (toISOString auf einem
+// ungueltigen Datum). Das zaehlt als "kein Tag", nicht als Absturz.
+function istTagSicher(pruefung, wert) {
+  try { return pruefung(wert); } catch { return false; }
 }
 
 // --- Faelligkeit ---------------------------------------------------------------
@@ -236,8 +256,10 @@ function schreibe(db, { von, bis, empfaenger, positionen, kontaktId }) {
   // Vor der Nummernvergabe pruefen: eine abgelehnte Anfrage darf keine Nummer
   // aus dem fortlaufenden Kreis verbrauchen. Der Zeitraum geht als Datum in
   // die E-Rechnung und muss deshalb eines sein.
-  const TAG = /^\d{4}-\d{2}-\d{2}$/;
-  if (!TAG.test(String(von)) || !TAG.test(String(bis))) {
+  // Form und Kalender: "2026-13-45" hat die Form, ist aber kein Tag.
+  const istTag = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s))
+    && new Date(s + 'T00:00:00Z').toISOString().slice(0, 10) === s;
+  if (!istTagSicher(istTag, von) || !istTagSicher(istTag, bis)) {
     throw new Error('Leistungszeitraum: Datum in der Form JJJJ-MM-TT erwartet.');
   }
   const kid = Number.isInteger(kontaktId) && kontaktId > 0 ? kontaktId : null;

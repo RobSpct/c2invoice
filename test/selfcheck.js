@@ -2012,11 +2012,37 @@ function testERechnung() {
     assert.strictEqual(db.prepare('SELECT COUNT(*) AS n FROM invoices').get().n, vorher,
       'eine abgelehnte Anfrage hat eine Rechnungsnummer verbraucht');
     assert.strictEqual(rechnung.erstelle(db, { ...zeitraum, empfaenger: { ...kunde, land: 'nl' } }).empfaenger.land, 'NL');
+    // Eine Angabe, die kein Text ist, wird abgelehnt statt still durch den
+    // Kontaktwert ersetzt; ein Datum muss es im Kalender geben.
+    assert.throws(() => rechnung.erstelle(db, { ...zeitraum, empfaenger: { ...kunde, email: 123 } }),
+      /E-Mail/, 'Zahl als E-Mail wurde still uebergangen');
+    assert.throws(() => rechnung.erstelle(db, { ...zeitraum, to: '2026-13-45', empfaenger: kunde }),
+      /Leistungszeitraum/, 'Datum, das es nicht gibt, wurde angenommen');
+    // Ein Kontakt aus der Zeit vor der Formpruefung traegt das Land als Wort.
+    // Fiele es still weg, stuende "DE" in der Rechnung — bei einer
+    // fuenfstelligen Postleitzahl (Frankreich, Italien, Spanien) merkt das
+    // niemand mehr. Deshalb: ablehnen und den Kontakt als Quelle nennen.
+    const altKontakt = kontakte.speichere(db, {
+      firma: 'Client SARL', anschrift: ['Rue 1', '75001 Paris'], email: 'a@client.example', kaeuferReferenz: 'R-FR',
+    });
+    const anAlt = { ...zeitraum, kontaktId: altKontakt.id, empfaenger: { name: 'Client SARL', anschrift: ['Rue 1', '75001 Paris'] } };
+    db.prepare('UPDATE kontakte SET land = ? WHERE id = ?').run('Frankreich', altKontakt.id);
+    assert.throws(() => rechnung.erstelle(db, anAlt), /Land im Kontakt/,
+      'ungueltiges Land im Kontakt wurde still zu DE');
+    // Eine andere unbrauchbare Altangabe blockiert dagegen nichts: sie fehlt
+    // dann in der Abschrift, und die E-Rechnung meldet sie.
+    db.prepare('UPDATE kontakte SET land = ?, email = ? WHERE id = ?').run('FR', 'ohne-at', altKontakt.id);
+    const ohneMail = rechnung.erstelle(db, anAlt);
+    assert.strictEqual(ohneMail.empfaenger.land, 'FR');
+    assert.strictEqual(ohneMail.empfaenger.email, undefined, 'unbrauchbare E-Mail aus dem Kontakt ging in die Abschrift');
+    assert.ok(erechnung.pruefe(ohneMail).includes('Empfänger: E-Mail oder Leitweg-ID'));
+    assert.strictEqual(db.prepare('SELECT COUNT(*) AS n FROM invoices').get().n, vorher + 2,
+      'abgelehnte Anfragen haben Rechnungsnummern verbraucht');
 
     // 8b. Zeichen, die XML 1.0 nicht kennt, duerfen die Datei nicht zerstoeren.
-    const schmutz = rechnung.erstelle(db, { ...zeitraum, empfaenger: { ...kunde, bestellnummer: 'PO￿-\uD800x' } });
+    const schmutz = rechnung.erstelle(db, { ...zeitraum, empfaenger: { ...kunde, bestellnummer: 'PO\uFFFF-\uD800x' } });
     xml = erechnung.alsXml(schmutz);
-    assert.ok(!/[￾￿]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(xml), 'ungueltiges XML-Zeichen in der Datei');
+    assert.ok(!/[\uFFFE\uFFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(xml), 'ungueltiges XML-Zeichen in der Datei');
     assert.ok(xml.includes('<ram:IssuerAssignedID>PO-x</ram:IssuerAssignedID>'), 'bereinigte Bestellnummer fehlt');
 
     // 8c. Mengen stehen immer als Dezimalzahl in der Datei, nie in
