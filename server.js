@@ -25,6 +25,7 @@ const metrics = require('./metrics');
 const pricing = require('./pricing');
 const jira = require('./jira-sync');
 const rechnung = require('./rechnung');
+const erechnung = require('./erechnung');
 const angebot = require('./angebot');
 const kontakte = require('./kontakte');
 
@@ -42,7 +43,7 @@ let ingesting = false;
 // entsteht deshalb eine Kennung, an der die Oberflaeche einen Versionssprung
 // erkennt und zum Neuladen auffordert, statt einen Fehler zu zeigen.
 const CODE_STAND = (() => {
-  const dateien = ['server.js', 'metrics.js', 'rechnung.js', 'angebot.js', 'ingest.js', 'public/index.html'];
+  const dateien = ['server.js', 'metrics.js', 'rechnung.js', 'erechnung.js', 'angebot.js', 'ingest.js', 'public/index.html'];
   let neuestes = 0;
   for (const d of dateien) {
     try { neuestes = Math.max(neuestes, fs.statSync(path.join(__dirname, d)).mtimeMs); } catch { /* fehlt: egal */ }
@@ -328,6 +329,11 @@ const STAMMDATEN = {
   bank: { typ: 'text', max: 80, label: 'Bank' },
   iban: { typ: 'iban', max: 40, label: 'IBAN' },
   bic: { typ: 'text', max: 11, label: 'BIC' },
+  // Nur fuer die E-Rechnung noetig: die Norm verlangt eine Kontaktstelle des
+  // Ausstellers mit E-Mail und Telefon sowie das Land als Kuerzel.
+  email: { typ: 'email', max: 120, label: 'E-Mail' },
+  telefon: { typ: 'text', max: 40, label: 'Telefon' },
+  land: { typ: 'land', max: 2, label: 'Land' },
   kleinunternehmer: { typ: 'schalter', label: 'Kleinunternehmer nach Par. 19 UStG', wurzel: true },
   ustSatz: { typ: 'zahl', min: 0, max: 30, label: 'Umsatzsteuersatz in Prozent', wurzel: true },
   zahlungszielTage: { typ: 'zahl', min: 0, max: 120, label: 'Zahlungsziel in Tagen', wurzel: true },
@@ -384,6 +390,16 @@ function setzeStammdaten(daten) {
       if (regel.typ === 'iban') s = s.replace(/\s+/g, '').toUpperCase();
       if (s.length > regel.max) throw new Error(`${regel.label}: hoechstens ${regel.max} Zeichen.`);
       if (regel.typ === 'iban' && s && !IBAN_RE.test(s)) throw new Error(regel.label + ': Form nicht plausibel.');
+      if (regel.typ === 'email' && s && !s.includes('@')) {
+        throw new Error(regel.label + ': Adresse sieht nicht wie eine E-Mail aus.');
+      }
+      if (regel.typ === 'land') {
+        // Ein ausgeschriebener Laendername ginge woertlich in die E-Rechnung.
+        s = s.toUpperCase();
+        if (s && !/^[A-Z]{2}$/.test(s)) {
+          throw new Error(regel.label + ': zweistelliges Kuerzel erwartet, zum Beispiel DE oder AT.');
+        }
+      }
       ziel[feld] = s;
     }
     geaendert[feld] = ziel[feld];
@@ -395,6 +411,38 @@ function setzeStammdaten(daten) {
   // schrittweise. Wer eine Rechnung erstellt, laeuft ohnehin in die harte
   // Pruefung aus rechnung.js — hier wird nur gemeldet, was noch aussteht.
   return { geaendert, fehlt: rechnung.fehlendeStammdaten() };
+}
+
+// --- E-Rechnung ---------------------------------------------------------------
+// Die Antwort auf den Abruf einer E-Rechnung, getrennt vom HTTP-Teil: so laesst
+// sie sich gegen eine Testdatenbank pruefen, ohne in der echten eine Rechnung
+// anzulegen. Die Nummer prueft rechnung.lade() auf ihre Form, bevor sie
+// irgendwo verwendet wird.
+function eRechnungAntwort(db, nr) {
+  const absage = (status, error) => ({
+    status,
+    kopf: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
+    inhalt: JSON.stringify({ error }),
+  });
+  const inv = rechnung.lade(db, nr);
+  if (!inv) return absage(404, 'Rechnung nicht gefunden.');
+  try {
+    return {
+      status: 200,
+      kopf: {
+        'content-type': 'application/xml; charset=utf-8',
+        // attachment: die Datei ist das Rechnungsoriginal fuer den Empfaenger
+        // und soll gespeichert werden, nicht im Browser aufgehen.
+        'content-disposition': `attachment; filename="Rechnung-${inv.nr}.xml"`,
+        'cache-control': 'no-store',
+      },
+      inhalt: erechnung.alsXml(inv),
+    };
+  } catch (err) {
+    // Fehlende Pflichtangaben sind kein Serverfehler: die Meldung nennt sie.
+    if (err.fehlt) return absage(422, err.message);
+    throw err;
+  }
 }
 
 // --- Positionsvorlagen -------------------------------------------------------
@@ -751,7 +799,12 @@ function handle(req, res) {
           const inv = rechnung.erstelle(db, { ...daten, kontaktId: kid });
           // Wer eine Rechnung bekommt, ist kein Lead mehr.
           kontakte.macheKunde(db, kid);
-          return sendJson(res, { ok: true, nr: inv.nr, brutto_eur: inv.brutto_eur });
+          return sendJson(res, {
+            ok: true, nr: inv.nr, brutto_eur: inv.brutto_eur,
+            // Gleich sagen, was der E-Rechnung fehlt: eine gestellte Rechnung
+            // laesst sich nicht mehr ergaenzen, nur stornieren.
+            erechnung_fehlt: erechnung.pruefe(inv),
+          });
         } catch (err) {
           return sendJson(res, { error: err.message }, 400);
         }
@@ -913,6 +966,15 @@ function handle(req, res) {
       });
     }
 
+    // E-Rechnung als Datei zum Herunterladen.
+    if (p.startsWith('/rechnung-xml/')) {
+      const nr = p.slice('/rechnung-xml/'.length).replace(/\.xml$/, '');
+      if (!/^\d{4}-\d{4}$/.test(nr)) return sendText(res, 'Nicht gefunden', 404);
+      const antwort = eRechnungAntwort(db, nr);
+      res.writeHead(antwort.status, antwort.kopf);
+      return res.end(antwort.inhalt);
+    }
+
     // Druckansicht. Muss vor der Auslieferung statischer Dateien stehen, sonst
     // sucht der Server eine Datei dieses Namens. Die Nummer wird streng
     // geprueft, damit ueber den Pfad nichts anderes adressierbar ist.
@@ -1026,5 +1088,5 @@ module.exports = {
   setzeEinstellungen, EINSTELLUNGEN,
   setzeStammdaten, STAMMDATEN,
   vorlagenListe, setzeVorlage, loescheVorlage,
-  bucheVorgang,
+  bucheVorgang, eRechnungAntwort,
 };

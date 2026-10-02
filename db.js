@@ -232,6 +232,17 @@ function migrate(db) {
   db.exec('CREATE INDEX IF NOT EXISTS idx_events_mcp ON events(mcp_server, day)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_events_skill ON events(skill, day)');
 
+  // Angaben, die erst die E-Rechnung braucht. Am Kontakt: die Kaeuferreferenz
+  // (bei Behoerden die Leitweg-ID), das Land als zweistelliges Kuerzel und die
+  // Lieferantennummer, unter der der Kunde den Aussteller fuehrt.
+  addColumn(db, 'kontakte', 'kaeufer_referenz', 'TEXT');
+  addColumn(db, 'kontakte', 'land', 'TEXT');
+  addColumn(db, 'kontakte', 'lieferantennummer', 'TEXT');
+  // An der Rechnung: der Tag der Faelligkeit. Vorher wurde er beim Anzeigen
+  // aus dem aktuellen Zahlungsziel gerechnet — ein geaendertes Zahlungsziel
+  // verschob damit die Faelligkeit bereits gestellter Rechnungen.
+  addColumn(db, 'invoices', 'faellig_am', 'TEXT');
+
   // Wie belastbar der Preis war, als der Request bepreist wurde. NULL = exakt
   // oder kostenfrei, 'geschaetzt' = Preis eines aehnlich benannten Modells,
   // 'ohne' = kein Preis gefunden, der Request steht mit 0 in der Summe.

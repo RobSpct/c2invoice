@@ -50,6 +50,70 @@ function rund2(n) {
   return Math.round((Number(n) || 0) * 100) / 100;
 }
 
+// --- Abschrift des Empfaengers ------------------------------------------------
+// Was vom Empfaenger in die Rechnung geht. Nur bekannte Felder, jedes mit
+// Laengengrenze: der Anfragekoerper landet sonst unbesehen in einem Dokument
+// nach § 14 UStG.
+//
+// Name und Anschrift kommen aus der Anfrage. Die Angaben fuer die E-Rechnung
+// (E-Mail, Kaeuferreferenz, USt-IdNr., Land, Lieferantennummer) duerfen
+// mitkommen; fehlen sie, werden sie aus dem verknuepften Kontakt gezogen. Danach
+// ist die Abschrift eingefroren — ein spaeter geaenderter Kontakt aendert keine
+// gestellte Rechnung.
+const EMPFAENGER_ZUSATZ = {
+  email: { max: 120, kontakt: 'email' },
+  ust_id_nr: { max: 40, kontakt: 'ustIdNr' },
+  kaeufer_referenz: { max: 80, kontakt: 'kaeuferReferenz' },
+  land: { max: 2, kontakt: 'land' },
+  lieferantennummer: { max: 60, kontakt: 'lieferantennummer' },
+  // Je Rechnung, nicht je Kunde: steht deshalb an keinem Kontakt.
+  bestellnummer: { max: 60, kontakt: null },
+};
+
+function empfaengerAbschrift(db, empfaenger, kontaktId) {
+  const text = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+  // Vor dem Zuschneiden: ein Name, der kein Text ist, soll als Fachmeldung
+  // auffallen und nicht still zu einem leeren Namen werden.
+  kontakte.ohneErsatzzeichen(empfaenger.name, 'Empfaenger');
+  const kontakt = Number.isInteger(kontaktId) && kontaktId > 0 ? kontakte.lade(db, kontaktId) : null;
+
+  const aus = {
+    name: text(empfaenger.name, 200),
+    anschrift: (Array.isArray(empfaenger.anschrift) ? empfaenger.anschrift : [])
+      .filter((z) => typeof z === 'string')
+      .map((z) => z.trim()).filter(Boolean).slice(0, 6)
+      .map((z) => z.slice(0, 120)),
+  };
+  for (const [feld, regel] of Object.entries(EMPFAENGER_ZUSATZ)) {
+    const wert = text(empfaenger[feld], regel.max)
+      || (kontakt && regel.kontakt ? text(kontakt[regel.kontakt], regel.max) : '');
+    if (wert) aus[feld] = wert;
+  }
+  aus.anschrift.forEach((z) => kontakte.ohneErsatzzeichen(z, 'Empfaenger-Anschrift'));
+  return aus;
+}
+
+// --- Faelligkeit ---------------------------------------------------------------
+// Tag der Faelligkeit als "JJJJ-MM-TT". Steht seit Version 1.3 in der Abschrift.
+// Aeltere Rechnungen tragen ihn nicht; fuer sie wird wie frueher aus dem
+// aktuellen Zahlungsziel gerechnet.
+function faelligAm(inv) {
+  if (inv.faellig_am) return inv.faellig_am;
+  return tagNach(inv.erstellt_am, Number(config.rechnung.zahlungszielTage) || 14);
+}
+
+function tagNach(zeitpunkt, tage) {
+  const d = new Date(zeitpunkt);
+  d.setDate(d.getDate() + tage);
+  const zwei = (n) => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + zwei(d.getMonth() + 1) + '-' + zwei(d.getDate());
+}
+
+function zahlungsziel() {
+  const tage = Number(config.rechnung && config.rechnung.zahlungszielTage);
+  return Number.isFinite(tage) && tage >= 0 ? tage : 14;
+}
+
 // --- Nummernkreis ------------------------------------------------------------
 // Fortlaufend und einmalig, je Jahr eine eigene Reihe. Der Zaehler ergibt sich
 // aus dem Bestand, nicht aus einem gemerkten Stand: so entsteht auch nach einem
@@ -75,7 +139,6 @@ function erstelle(db, { from, to, tickets, projekte, empfaenger, kontaktId } = {
   if (!empfaenger || !empfaenger.name) {
     throw new Error('Empfaenger fehlt (Name ist Pflicht).');
   }
-  kontakte.ohneErsatzzeichen(empfaenger.name, 'Empfaenger');
   if (!from || !to) throw new Error('Leistungszeitraum fehlt.');
 
   const gewaehlt = new Set(tListe);
@@ -142,25 +205,34 @@ function erstelle(db, { from, to, tickets, projekte, empfaenger, kontaktId } = {
     });
   }
 
+  return schreibe(db, { von: from, bis: to, empfaenger, positionen, kontaktId });
+}
+
+// Schreibt die Abschrift. Eine Stelle fuer beide Wege (aus der Auswertung und
+// aus fertigen Positionen), damit Nummer, Steuer, Faelligkeit und die Abschrift
+// des Empfaengers nicht zweimal gebaut werden.
+function schreibe(db, { von, bis, empfaenger, positionen, kontaktId }) {
   // Summiert wird ueber die gerundeten Positionen, nicht ueber die
   // ungerundeten Ausgangswerte: sonst weicht die ausgewiesene Summe um Cents
   // von den addierten Zeilen ab, und genau das faellt beim Pruefen auf.
-  const netto = rund2(positionen.reduce((s, p) => s + p.betrag_eur, 0));
+  const netto = rund2(positionen.reduce((s, p) => s + (Number(p.betrag_eur) || 0), 0));
   const { klein, satz, ust, brutto } = steuer(netto);
-
   const jahr = new Date().getFullYear();
   const { nr, laufnr } = naechsteNummer(db, jahr);
+  const jetzt = new Date().toISOString();
+  const kid = Number.isInteger(kontaktId) && kontaktId > 0 ? kontaktId : null;
 
   db.prepare(`
     INSERT INTO invoices (nr, jahr, laufnr, erstellt_am, leistung_von, leistung_bis,
       empfaenger, aussteller, positionen, netto_eur, ust_prozent, ust_eur,
-      brutto_eur, kleinunternehmer, status, kontakt_id)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'erstellt',?)
+      brutto_eur, kleinunternehmer, status, kontakt_id, faellig_am)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'erstellt',?,?)
   `).run(
-    nr, jahr, laufnr, new Date().toISOString(), from, to,
-    JSON.stringify(empfaenger), JSON.stringify(stammdaten()),
+    nr, jahr, laufnr, jetzt, von, bis,
+    // Der Empfaenger ist die massgebliche Abschrift; kontakt_id nur der Verweis.
+    JSON.stringify(empfaengerAbschrift(db, empfaenger, kid)), JSON.stringify(stammdaten()),
     JSON.stringify(positionen), netto, satz, ust, brutto, klein ? 1 : 0,
-    Number.isInteger(kontaktId) && kontaktId > 0 ? kontaktId : null
+    kid, tagNach(jetzt, zahlungsziel())
   );
 
   return lade(db, nr);
@@ -179,25 +251,7 @@ function ausPositionen(db, { positionen, empfaenger, von, bis, kontaktId } = {})
   if (!empfaenger || !empfaenger.name) throw new Error('Empfaenger fehlt (Name ist Pflicht).');
   if (!von || !bis) throw new Error('Leistungszeitraum fehlt.');
 
-  const netto = rund2(positionen.reduce((s, p) => s + (Number(p.betrag_eur) || 0), 0));
-  const { klein, satz, ust, brutto } = steuer(netto);
-  const jahr = new Date().getFullYear();
-  const { nr, laufnr } = naechsteNummer(db, jahr);
-
-  db.prepare(`
-    INSERT INTO invoices (nr, jahr, laufnr, erstellt_am, leistung_von, leistung_bis,
-      empfaenger, aussteller, positionen, netto_eur, ust_prozent, ust_eur,
-      brutto_eur, kleinunternehmer, status, kontakt_id)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'erstellt',?)
-  `).run(
-    nr, jahr, laufnr, new Date().toISOString(), von, bis,
-    JSON.stringify(empfaenger), JSON.stringify(stammdaten()),
-    JSON.stringify(positionen), netto, satz, ust, brutto, klein ? 1 : 0,
-    // Nur der Verweis; der Empfaenger oben bleibt die massgebliche Abschrift.
-    Number.isInteger(kontaktId) && kontaktId > 0 ? kontaktId : null
-  );
-
-  return lade(db, nr);
+  return schreibe(db, { von, bis, empfaenger, positionen, kontaktId });
 }
 
 // Jede Rechnungsnummer, die von aussen hereinkommt, laeuft hier durch. Der
@@ -370,8 +424,8 @@ function renderHtml(inv) {
   const a = inv.aussteller || {};
   const e = inv.empfaenger || {};
   const tokens = inv.positionen.reduce((s, p) => s + (p.tokens_gesamt || 0), 0);
-  const faellig = new Date(inv.erstellt_am);
-  faellig.setDate(faellig.getDate() + (Number(config.rechnung.zahlungszielTage) || 14));
+  // Mittags, damit die Umrechnung in die Ortszeit den Tag nicht verschiebt.
+  const faellig = new Date(faelligAm(inv) + 'T12:00:00');
 
   const zeilen = positionsZeilen(inv.positionen, 'rechnung');
   const hinweisVergleich = vergleichsHinweis(inv.positionen, 'rechnung');
@@ -533,7 +587,7 @@ function erzeugePdf(db, nr, port) {
 
 module.exports = {
   erstelle, ausPositionen, lade, liste, abrechnung, storniere, renderHtml, erzeugePdf, esc,
-  stammdaten, fehlendeStammdaten, pruefeStammdaten,
+  stammdaten, fehlendeStammdaten, pruefeStammdaten, faelligAm,
   // Fuer das Angebotsmodul: dieselbe Steuerlogik, dieselbe Rundung, dasselbe
   // Dokumentgeruest. Ein zweiter Satz Formeln waere die sicherste Art, dass
   // Angebot und Rechnung eines Tages auseinanderlaufen.

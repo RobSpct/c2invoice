@@ -1808,6 +1808,257 @@ function testRechnungUnveraenderlich() {
   });
 }
 
+// --- E-Rechnung --------------------------------------------------------------
+// Alle Werte eines Elements, in Dokumentreihenfolge.
+function xmlWerte(xml, tag) {
+  const re = new RegExp('<' + tag + '(?: [^>]*)?>([^<]*)</' + tag + '>', 'g');
+  return [...xml.matchAll(re)].map((m) => m[1]);
+}
+
+// Wohlgeformtheit ohne Parser-Abhaengigkeit: jedes oeffnende Element muss in
+// umgekehrter Reihenfolge wieder geschlossen werden, und im Text darf kein
+// rohes "<" oder "&" stehen.
+function xmlWohlgeformt(xml) {
+  const rumpf = xml.replace(/^<\?xml[^?]*\?>\s*/, '');
+  const stapel = [];
+  const re = /<(\/?)([A-Za-z][\w:.-]*)((?:\s+[\w:.-]+="[^"<]*")*)\s*(\/?)>|([^<]+)/g;
+  let pos = 0;
+  let m;
+  while ((m = re.exec(rumpf))) {
+    if (m.index !== pos) return 'unlesbar bei Zeichen ' + pos;
+    pos = re.lastIndex;
+    if (m[5] !== undefined) {
+      if (/&(?!(amp|lt|gt|quot|apos);)/.test(m[5])) return 'rohes & im Text: ' + m[5].slice(0, 30);
+      continue;
+    }
+    if (m[4]) continue;
+    if (!m[1]) { stapel.push(m[2]); continue; }
+    const offen = stapel.pop();
+    if (offen !== m[2]) return 'schliesst ' + m[2] + ', offen war ' + offen;
+  }
+  if (pos !== rumpf.length) return 'unlesbar bei Zeichen ' + pos;
+  return stapel.length ? 'nicht geschlossen: ' + stapel.join(', ') : '';
+}
+
+// Die E-Rechnung ist das Rechnungsoriginal, das der Empfaenger maschinell
+// verarbeitet. Ein falscher Betrag oder ein fehlendes Pflichtfeld fuehrt dort
+// zur Zurueckweisung — oder zur Zahlung der falschen Summe.
+function testERechnung() {
+  rechnungsUmgebung((config) => {
+    const rechnung = require('../rechnung');
+    const erechnung = require('../erechnung');
+    const kontakte = require('../kontakte');
+    const db = rechnungsDb();
+    const zeitraum = { from: '2026-08-01', to: '2026-08-31', tickets: ['PROJ-500'] };
+    const kunde = {
+      name: 'Kunde & Söhne GmbH', anschrift: ['Hauptstr. 1', '50667 Köln'],
+      email: 'eingang@kunde.example', kaeufer_referenz: 'KST-4711', bestellnummer: 'PO-42',
+    };
+    const zahl = (xml, tag, i = 0) => Number(xmlWerte(xml, tag)[i]);
+
+    // 1. Dem Aussteller fehlen E-Mail und Telefon: abgelehnt, mit Namen der
+    //    fehlenden Angaben. Ein XML mit leerem Pflichtfeld waere schlimmer als
+    //    keines — es sieht fertig aus und wird beim Empfaenger zurueckgewiesen.
+    const unvollstaendig = rechnung.erstelle(db, { ...zeitraum, empfaenger: kunde });
+    assert.deepStrictEqual(erechnung.pruefe(unvollstaendig), ['Aussteller: E-Mail', 'Aussteller: Telefon'],
+      'fehlende Angaben falsch benannt: ' + erechnung.pruefe(unvollstaendig).join(', '));
+    assert.throws(() => erechnung.alsXml(unvollstaendig), /Aussteller: E-Mail, Aussteller: Telefon/,
+      'unvollstaendige Abschrift wurde exportiert');
+
+    Object.assign(config.rechnung.aussteller, { email: 'rechnung@testfirma.example', telefon: '+49 221 123456' });
+
+    // 2. Kleinunternehmer: steuerbefreit mit Begruendung, Summen aus der Abschrift.
+    const klein = rechnung.erstelle(db, { ...zeitraum, empfaenger: kunde });
+    assert.deepStrictEqual(erechnung.pruefe(klein), [], 'vollstaendige Abschrift gilt als lueckenhaft');
+    let xml = erechnung.alsXml(klein);
+    assert.ok(xml.startsWith('<?xml version="1.0" encoding="UTF-8"?>'), 'XML-Kopf fehlt');
+    assert.strictEqual(xmlWohlgeformt(xml), '', 'XML nicht wohlgeformt');
+    assert.ok(xml.includes('urn:cen.eu:en16931:2017#compliant#urn:xeinkauf.de:kosit:xrechnung_3.0'),
+      'Kennung der Spezifikation fehlt');
+    assert.ok(xml.includes('<ram:ID>' + klein.nr + '</ram:ID>'), 'Rechnungsnummer fehlt');
+    assert.strictEqual(xmlWerte(xml, 'ram:TypeCode')[0], '380', 'Rechnungsart ist nicht 380');
+    assert.deepStrictEqual(xmlWerte(xml, 'ram:BuyerReference'), ['KST-4711']);
+    assert.ok(xml.includes('<ram:Name>Kunde &amp; Söhne GmbH</ram:Name>'), 'Name des Empfaengers nicht maskiert');
+    assert.deepStrictEqual(xmlWerte(xml, 'ram:PostcodeCode'), ['50667', '50667'], 'Postleitzahlen nicht erkannt');
+    assert.deepStrictEqual(xmlWerte(xml, 'ram:CityName'), ['Koeln', 'Köln'], 'Orte nicht erkannt');
+    assert.deepStrictEqual(xmlWerte(xml, 'ram:CountryID'), ['DE', 'DE']);
+    assert.ok(xml.includes('<ram:IBANID>DE00000000000000000000</ram:IBANID>'), 'IBAN fehlt oder traegt Leerzeichen');
+    assert.ok(xml.includes('<ram:ID schemeID="FC">123/456/78910</ram:ID>'), 'Steuernummer fehlt');
+    // Regel BR-CO-26 der EN 16931: ohne USt-IdNr. braucht der Aussteller eine
+    // Kennung, an der ihn der Empfaenger maschinell erkennt. Aufgefallen erst
+    // an den amtlichen Pruefregeln — Kleinunternehmer haben meist keine USt-IdNr.
+    assert.ok(/<ram:SellerTradeParty>\s*<ram:ID>123\/456\/78910<\/ram:ID>/.test(xml),
+      'Aussteller ohne USt-IdNr. traegt keine Kennung (BR-CO-26)');
+    assert.deepStrictEqual(xmlWerte(xml, 'ram:URIID'),
+      ['rechnung@testfirma.example', 'rechnung@testfirma.example', 'eingang@kunde.example'],
+      'elektronische Adressen stimmen nicht');
+    assert.ok(/<ram:BuyerOrderReferencedDocument>\s*<ram:IssuerAssignedID>PO-42</.test(xml), 'Bestellnummer fehlt');
+    assert.deepStrictEqual(xmlWerte(xml, 'ram:CategoryCode'), ['E', 'E'], 'Kleinunternehmer ist nicht steuerbefreit');
+    assert.ok(xmlWerte(xml, 'ram:ExemptionReason')[0].includes('§ 19 UStG'), 'Befreiungsgrund fehlt');
+    assert.ok(xml.includes('unitCode="HUR"'), 'Stunden tragen nicht die Einheit HUR');
+
+    // Summen: nichts wird neu gerechnet, alles stammt aus der Abschrift.
+    assert.ok(klein.netto_eur > 0, 'Testaufbau: Rechnung ohne Betrag');
+    assert.strictEqual(zahl(xml, 'ram:TaxBasisTotalAmount'), klein.netto_eur);
+    assert.strictEqual(zahl(xml, 'ram:TaxTotalAmount'), 0);
+    assert.strictEqual(zahl(xml, 'ram:GrandTotalAmount'), klein.brutto_eur);
+    assert.strictEqual(zahl(xml, 'ram:DuePayableAmount'), klein.brutto_eur);
+    const zeilenSummen = xmlWerte(xml, 'ram:LineTotalAmount').map(Number);
+    // Letzter Wert ist die Kopfsumme, davor steht je Position einer.
+    assert.strictEqual(zeilenSummen.pop(), klein.netto_eur, 'Summe der Positionen im Kopf weicht ab');
+    assert.strictEqual(zeilenSummen.length, klein.positionen.length);
+    assert.ok(Math.abs(zeilenSummen.reduce((a, b) => a + b, 0) - klein.netto_eur) < 0.005,
+      'Positionen ergeben nicht den Nettobetrag');
+    // Menge mal Preis muss die Position ergeben, sonst weist der Empfaenger ab.
+    const menge = zahl(xml, 'ram:BilledQuantity');
+    const preis = zahl(xml, 'ram:ChargeAmount');
+    assert.strictEqual(preis, klein.positionen[0].satz, 'Preis ist nicht der vereinbarte Satz');
+    assert.ok(Math.abs(Math.round(menge * preis * 100) / 100 - klein.positionen[0].betrag_eur) < 0.005,
+      'Menge ' + menge + ' x Preis ' + preis + ' ergibt nicht ' + klein.positionen[0].betrag_eur);
+    // Faelligkeit steht in der Abschrift und im XML, nicht nur in der Config.
+    assert.ok(/^\d{4}-\d{2}-\d{2}$/.test(klein.faellig_am), 'Faelligkeit fehlt in der Abschrift');
+    assert.ok(xml.includes('<udt:DateTimeString format="102">' + klein.faellig_am.replace(/-/g, '') + '<'),
+      'Faelligkeit fehlt im XML');
+    config.rechnung.zahlungszielTage = 90;
+    assert.strictEqual(erechnung.alsXml(klein), xml, 'ein geaendertes Zahlungsziel veraendert eine gestellte Rechnung');
+    config.rechnung.zahlungszielTage = 14;
+
+    // 3. Regelbesteuerung.
+    config.rechnung.kleinunternehmer = false;
+    const regel = rechnung.erstelle(db, { ...zeitraum, empfaenger: kunde });
+    xml = erechnung.alsXml(regel);
+    assert.strictEqual(xmlWohlgeformt(xml), '');
+    assert.deepStrictEqual(xmlWerte(xml, 'ram:CategoryCode'), ['S', 'S']);
+    assert.deepStrictEqual(xmlWerte(xml, 'ram:RateApplicablePercent').map(Number), [19, 19]);
+    assert.strictEqual(xmlWerte(xml, 'ram:ExemptionReason').length, 0, 'Befreiungsgrund trotz Regelbesteuerung');
+    assert.ok(regel.ust_eur > 0, 'Testaufbau: keine Umsatzsteuer');
+    assert.strictEqual(zahl(xml, 'ram:CalculatedAmount'), regel.ust_eur);
+    assert.strictEqual(zahl(xml, 'ram:TaxTotalAmount'), regel.ust_eur);
+    assert.strictEqual(zahl(xml, 'ram:GrandTotalAmount'), regel.brutto_eur);
+
+    // 4. Storno: Rechnungsart 384 mit Verweis, Betraege negativ, Preis bleibt positiv.
+    const storno = rechnung.storniere(db, regel.nr);
+    xml = erechnung.alsXml(storno);
+    assert.strictEqual(xmlWohlgeformt(xml), '');
+    assert.strictEqual(xmlWerte(xml, 'ram:TypeCode')[0], '384', 'Storno ist nicht als 384 gekennzeichnet');
+    assert.ok(new RegExp('<ram:InvoiceReferencedDocument>\\s*<ram:IssuerAssignedID>' + regel.nr + '<').test(xml),
+      'Verweis auf die stornierte Rechnung fehlt');
+    assert.strictEqual(zahl(xml, 'ram:GrandTotalAmount'), -regel.brutto_eur);
+    assert.ok(zahl(xml, 'ram:BilledQuantity') < 0, 'Storno mit positiver Menge');
+    assert.ok(zahl(xml, 'ram:ChargeAmount') > 0, 'Storno mit negativem Preis');
+
+    // 5. Pauschalposition: Menge 1, Einheit Stueck, Bezeichnung maskiert.
+    const pauschal = rechnung.ausPositionen(db, {
+      positionen: [{ typ: 'pauschal', bezeichnung: 'Festpreis <Paket A>', stunden: null, satz: null, betrag_eur: 500 }],
+      empfaenger: kunde, von: '2026-08-01', bis: '2026-08-31',
+    });
+    xml = erechnung.alsXml(pauschal);
+    assert.strictEqual(xmlWohlgeformt(xml), '');
+    assert.ok(xml.includes('<ram:BilledQuantity unitCode="C62">1</ram:BilledQuantity>'), 'Pauschale ohne Menge 1 Stueck');
+    assert.strictEqual(zahl(xml, 'ram:ChargeAmount'), 500);
+    assert.ok(xml.includes('Festpreis &lt;Paket A&gt;'), 'Bezeichnung nicht maskiert');
+
+    // 6. Ohne Kaeuferreferenz und ohne elektronische Adresse: abgelehnt.
+    const karg = rechnung.erstelle(db, { ...zeitraum, empfaenger: { name: 'Kunde', anschrift: ['Weg 2', '10115 Berlin'] } });
+    assert.deepStrictEqual(erechnung.pruefe(karg),
+      ['Empfänger: Käuferreferenz', 'Empfänger: E-Mail oder Leitweg-ID']);
+    const ohneOrt = rechnung.erstelle(db, { ...zeitraum, empfaenger: { ...kunde, anschrift: ['irgendwo'] } });
+    assert.deepStrictEqual(erechnung.pruefe(ohneOrt), ['Empfänger: Anschrift mit Postleitzahl und Ort in der letzten Zeile']);
+
+    // 7. Behoerde: die Leitweg-ID ist Kaeuferreferenz und elektronische Adresse.
+    const amt = rechnung.erstelle(db, {
+      ...zeitraum,
+      empfaenger: { name: 'Bundesamt', anschrift: ['Amtsweg 1', '53113 Bonn'], kaeufer_referenz: '04011000-12345-03' },
+    });
+    xml = erechnung.alsXml(amt);
+    assert.ok(xml.includes('<ram:URIID schemeID="0204">04011000-12345-03</ram:URIID>'),
+      'Leitweg-ID steht nicht als elektronische Adresse');
+
+    // 8. Die Abschrift nimmt nur bekannte Felder an.
+    const fremd = rechnung.erstelle(db, { ...zeitraum, empfaenger: { ...kunde, boese: '<script>', anschrift: ['A 1', '50667 Köln'] } });
+    assert.strictEqual(fremd.empfaenger.boese, undefined, 'fremdes Feld ging in die Abschrift');
+
+    // 9. Angaben fuer die E-Rechnung kommen aus dem Kontakt, wenn die Anfrage
+    //    sie nicht mitbringt. Aendert sich der Kontakt spaeter, bleibt die
+    //    Abschrift stehen.
+    const k = kontakte.speichere(db, {
+      firma: 'Stammkunde AG', anschrift: ['Allee 5', '80331 München'], email: 'ap@stammkunde.example',
+      kaeuferReferenz: 'REF-9', lieferantennummer: 'L-123', land: 'at',
+    });
+    assert.strictEqual(k.land, 'AT', 'Landeskuerzel wird nicht vereinheitlicht');
+    assert.throws(() => kontakte.speichere(db, { firma: 'X', land: 'Deutschland' }), /Land/,
+      'ungueltiges Landeskuerzel angenommen');
+    const ausKontakt = rechnung.erstelle(db, {
+      ...zeitraum, kontaktId: k.id,
+      empfaenger: { name: 'Stammkunde AG', anschrift: ['Allee 5', '80331 München'] },
+    });
+    assert.strictEqual(ausKontakt.empfaenger.email, 'ap@stammkunde.example');
+    assert.strictEqual(ausKontakt.empfaenger.kaeufer_referenz, 'REF-9');
+    xml = erechnung.alsXml(ausKontakt);
+    assert.ok(/<ram:SellerTradeParty>\s*<ram:ID>L-123<\/ram:ID>/.test(xml), 'Lieferantennummer fehlt');
+    assert.deepStrictEqual(xmlWerte(xml, 'ram:CountryID'), ['DE', 'AT']);
+    kontakte.speichere(db, { id: k.id, email: 'neu@stammkunde.example' });
+    assert.strictEqual(erechnung.alsXml(rechnung.lade(db, ausKontakt.nr)), xml,
+      'geaenderter Kontakt veraendert eine gestellte Rechnung');
+    db.close();
+  });
+}
+
+// Die Auslieferung als Datei. Erzeugt wird die Antwort in einer eigenen
+// Funktion, damit sie sich gegen eine Testdatenbank pruefen laesst — der
+// laufende Server haengt an der echten, und dort legt kein Test Rechnungen an.
+async function testERechnungRoute() {
+  const srv = require('../server');
+  const rechnung = require('../rechnung');
+  rechnungsUmgebung((config) => {
+    Object.assign(config.rechnung.aussteller, { email: 'rechnung@testfirma.example', telefon: '+49 221 123456' });
+    const db = rechnungsDb();
+    const basis = { from: '2026-08-01', to: '2026-08-31', tickets: ['PROJ-500'] };
+    const gut = rechnung.erstelle(db, {
+      ...basis,
+      empfaenger: { name: 'Kunde', anschrift: ['Weg 2', '10115 Berlin'], email: 'a@kunde.example', kaeufer_referenz: 'R-1' },
+    });
+    const karg = rechnung.erstelle(db, { ...basis, empfaenger: { name: 'Kunde' } });
+
+    const ok = srv.eRechnungAntwort(db, gut.nr);
+    assert.strictEqual(ok.status, 200);
+    assert.strictEqual(ok.kopf['content-type'], 'application/xml; charset=utf-8');
+    assert.strictEqual(ok.kopf['content-disposition'], 'attachment; filename="Rechnung-' + gut.nr + '.xml"');
+    assert.ok(ok.inhalt.startsWith('<?xml'), 'Inhalt ist kein XML');
+
+    const abgelehnt = srv.eRechnungAntwort(db, karg.nr);
+    assert.strictEqual(abgelehnt.status, 422, 'unvollstaendige Rechnung wird ausgeliefert');
+    assert.ok(/Käuferreferenz/.test(JSON.parse(abgelehnt.inhalt).error), 'Ablehnung nennt die fehlende Angabe nicht');
+
+    assert.strictEqual(srv.eRechnungAntwort(db, '1234-5678').status, 404, 'unbekannte Nummer liefert nicht 404');
+    for (const boese of ['../../config', 'abcd-efgh', '99999-9999', gut.nr + '/../x']) {
+      assert.strictEqual(srv.eRechnungAntwort(db, boese).status, 404, '"' + boese + '" wurde bedient');
+    }
+    db.close();
+  });
+
+  // Ueber echtes HTTP: die Route existiert und weist fremde Pfade ab. Eine
+  // Nummer in gueltiger Form, die es nicht gibt, beantwortet die Route selbst
+  // (als JSON) — fehlte sie, kaeme die Absage der Dateiauslieferung als Text.
+  const lauscht = srv.server.listening;
+  if (!lauscht) await new Promise((ok) => srv.server.listen(0, '127.0.0.1', ok));
+  const port = srv.server.address().port;
+  try {
+    for (const pfad of ['9999-9998', '9999-9998.xml']) {
+      const r = await fetch(`http://127.0.0.1:${port}/rechnung-xml/${pfad}`);
+      assert.strictEqual(r.status, 404, 'Pfad "' + pfad + '" liefert ' + r.status + ' statt 404');
+      assert.ok((r.headers.get('content-type') || '').includes('application/json'),
+        'Route fehlt: "' + pfad + '" fiel bis zur Dateiauslieferung durch');
+    }
+    for (const pfad of ['..%2f..%2fconfig.json', 'abcd-efgh']) {
+      const r = await fetch(`http://127.0.0.1:${port}/rechnung-xml/${pfad}`);
+      assert.strictEqual(r.status, 404, 'Pfad "' + pfad + '" liefert ' + r.status + ' statt 404');
+    }
+  } finally {
+    if (!lauscht) await new Promise((ok) => srv.server.close(ok));
+  }
+}
+
 function testRechnungSteuerUndEscaping() {
   rechnungsUmgebung((config) => {
     const rechnung = require('../rechnung');
@@ -3139,6 +3390,7 @@ async function main() {
   test('Rechnung: Nummer laeuft fort, Pflichtangaben erzwungen', testRechnungNummernkreis);
   test('Rechnung: Abschrift bleibt unveraendert, Storno statt Loeschen', testRechnungUnveraenderlich);
   test('Rechnung: beide Steuermodi, Escaping, keine Werkzeugdaten', testRechnungSteuerUndEscaping);
+  test('E-Rechnung: Pflichtfelder, Summen, Steuerarten und Storno', testERechnung);
   test('Abrechnungsstand: Betrag je Vorgang aus gestellten Rechnungen, Storno faellt raus', testAbrechnungsStatus);
   test('Einstellungen: Grenzen halten, fremde Felder prallen ab, Datei bleibt vollstaendig', testEinstellungenGrenzen);
   test('Stammdaten: Grenzen halten, Teileingabe meldet Fehlendes, Nachbarbloecke bleiben', testStammdatenGrenzen);
@@ -3196,6 +3448,14 @@ async function main() {
   } catch (err) {
     failed++;
     console.log('  FAIL PDF: Datei wird ausgeliefert, fremde Pfade prallen ab\n       ' + err.message);
+  }
+
+  try {
+    await testERechnungRoute();
+    console.log('  ok   E-Rechnung: Datei wird ausgeliefert, fremde Pfade prallen ab');
+  } catch (err) {
+    failed++;
+    console.log('  FAIL E-Rechnung: Datei wird ausgeliefert, fremde Pfade prallen ab\n       ' + err.message);
   }
 
   try {

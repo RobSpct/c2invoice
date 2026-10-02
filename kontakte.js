@@ -23,13 +23,18 @@ const FELDER = {
   steuernummer: { typ: 'text',   max: 40,  label: 'Steuernummer' },
   ustIdNr:      { typ: 'text',   max: 40,  label: 'USt-IdNr.' },
   email:        { typ: 'text',   max: 120, label: 'E-Mail' },
+  // Fuer die E-Rechnung. Die Kaeuferreferenz ist dort Pflicht: bei Behoerden
+  // die Leitweg-ID, sonst das, was der Kunde als Referenz nennt.
+  kaeuferReferenz:   { typ: 'text', max: 80, label: 'Käuferreferenz' },
+  lieferantennummer: { typ: 'text', max: 60, label: 'Lieferantennummer' },
+  land:              { typ: 'land', label: 'Land' },
   notiz:        { typ: 'text',   max: 500, label: 'Notiz' },
   status:       { typ: 'wahl',   werte: ['lead', 'kunde'], label: 'Status' },
 };
 
 // Spaltennamen weichen an zwei Stellen vom Feldnamen ab (SQL mag kein
 // Kamelhoeckerwort), deshalb eine ausdrueckliche Zuordnung statt Raterei.
-const SPALTE = { ustIdNr: 'ust_id_nr' };
+const SPALTE = { ustIdNr: 'ust_id_nr', kaeuferReferenz: 'kaeufer_referenz' };
 
 function spalteVon(feld) {
   return SPALTE[feld] || feld;
@@ -83,6 +88,15 @@ function pruefe(daten, { vollstaendig }) {
         throw new Error(`${regel.label}: nur ${regel.werte.join(' oder ')}.`);
       }
       werte[feld] = s;
+    } else if (regel.typ === 'land') {
+      // Zweistelliges Kuerzel nach ISO 3166 (DE, AT, CH ...). Leer ist erlaubt
+      // und bedeutet Deutschland; ein ausgeschriebener Name dagegen nicht —
+      // er ginge woertlich in die E-Rechnung und wuerde dort zurueckgewiesen.
+      const s = text(roh, 40, regel.label).toUpperCase();
+      if (s && !/^[A-Z]{2}$/.test(s)) {
+        throw new Error(`${regel.label}: zweistelliges Kuerzel erwartet, zum Beispiel DE oder AT.`);
+      }
+      werte[feld] = s;
     } else {
       const s = text(roh, regel.max, regel.label);
       if (regel.pflicht && !s) throw new Error(`${regel.label} fehlt.`);
@@ -111,6 +125,9 @@ function ausZeile(row) {
     steuernummer: row.steuernummer,
     ustIdNr: row.ust_id_nr,
     email: row.email,
+    kaeuferReferenz: row.kaeufer_referenz || '',
+    lieferantennummer: row.lieferantennummer || '',
+    land: row.land || '',
     notiz: row.notiz,
     erstellt_am: row.erstellt_am,
     geaendert_am: row.geaendert_am,

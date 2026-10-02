@@ -1281,6 +1281,8 @@
         </div>
         <label for="r-anschrift"><span data-i18n>Anschrift</span> <span class="note" data-i18n>eine Zeile je Adresszeile</span></label>
         <textarea id="r-anschrift" rows="3"></textarea>
+        <label for="r-bestellnummer"><span data-i18n>Bestellnummer</span> <span class="note" data-i18n>optional — die Bestellnummer des Kunden, erscheint in der E-Rechnung</span></label>
+        <input type="text" id="r-bestellnummer" maxlength="60" autocomplete="off">
       </div>
       <div class="r-abschluss">
         <div id="r-summe" class="r-summe">–</div>
@@ -1329,6 +1331,21 @@
         <div>
           <label for="k-email" data-i18n>E-Mail</label>
           <input type="email" id="k-email" class="feld" maxlength="120" autocomplete="off">
+        </div>
+        <!-- Die folgenden drei Angaben braucht erst die E-Rechnung. Sie stehen
+             am Kontakt, weil sie je Kunde gelten und beim Stellen einer
+             Rechnung in deren Abschrift uebernommen werden. -->
+        <div>
+          <label for="k-kaeuferReferenz"><span data-i18n>Käuferreferenz</span> <span class="note" data-i18n>für die E-Rechnung — bei Behörden die Leitweg-ID</span></label>
+          <input type="text" id="k-kaeuferReferenz" class="feld" maxlength="80" autocomplete="off">
+        </div>
+        <div>
+          <label for="k-lieferantennummer"><span data-i18n>Lieferantennummer</span> <span class="note" data-i18n>falls der Kunde dir eine vergeben hat</span></label>
+          <input type="text" id="k-lieferantennummer" class="feld" maxlength="60" autocomplete="off">
+        </div>
+        <div>
+          <label for="k-land"><span data-i18n>Land</span> <span class="note" data-i18n>Kürzel wie DE oder AT — leer gilt als DE</span></label>
+          <input type="text" id="k-land" class="feld" maxlength="2" autocomplete="off">
         </div>
         <div>
           <label for="k-status" data-i18n>Status</label>
@@ -1574,6 +1591,24 @@ EN["Aktive Stunden"] = "Active hours";
 EN["Aktive Sitzungen"] = "Active sessions";
 EN["Aktive Std."] = "Active hrs";
 EN["Agent Std."] = "Agent hrs";
+EN["E-Rechnung"] = "E-invoice";
+EN["Die Rechnung als strukturierte Datei (XRechnung, EN 16931). Sie ist das Original für den Empfänger; Ansicht und PDF sind die Lesefassung."] = "The invoice as a structured file (XRechnung, EN 16931). It is the original for the recipient; the view and the PDF are the reading copy.";
+EN["E-Rechnung gespeichert: "] = "E-invoice saved: ";
+EN["E-Rechnung nicht erstellt: "] = "E-invoice not created: ";
+EN["Abruf fehlgeschlagen"] = "Request failed";
+EN["Als E-Rechnung noch nicht exportierbar, es fehlen: "] = "Cannot be exported as an e-invoice yet, missing: ";
+EN["Käuferreferenz"] = "Buyer reference";
+EN["für die E-Rechnung — bei Behörden die Leitweg-ID"] = "for the e-invoice — for public authorities the Leitweg-ID";
+EN["Lieferantennummer"] = "Supplier number";
+EN["falls der Kunde dir eine vergeben hat"] = "if the customer has assigned you one";
+EN["Land"] = "Country";
+EN["Kürzel wie DE oder AT — leer gilt als DE"] = "code such as DE or AT — empty means DE";
+EN["Bestellnummer"] = "Order number";
+EN["optional — die Bestellnummer des Kunden, erscheint in der E-Rechnung"] = "optional — the customer's order number, appears in the e-invoice";
+EN["Telefon"] = "Phone";
+EN["Nur für die E-Rechnung nötig: die Norm verlangt eine Kontaktadresse des Ausstellers."] = "Only needed for the e-invoice: the standard requires a contact address of the issuer.";
+EN["Nur für die E-Rechnung nötig, mit mindestens drei Ziffern."] = "Only needed for the e-invoice, with at least three digits.";
+EN["Zweistelliges Kürzel wie DE oder AT. Leer gilt als DE."] = "Two-letter code such as DE or AT. Empty means DE.";
 EN["Ohne Preis:"] = "No price:";
 EN["Preis geschätzt:"] = "Price estimated:";
 EN["Diese Requests stehen mit 0 USD im API-Gegenwert — die Summe ist zu niedrig."] = "These requests count as 0 USD in the API equivalent — the total is too low.";
@@ -4188,6 +4223,9 @@ const SD_HILFE = {
   bank: 'Bleibt das Feld leer, entfällt der Zahlungsblock auf der Rechnung.',
   iban: 'Ohne Leerzeichen oder mit — wird beim Speichern vereinheitlicht.',
   bic: 'Optional, bei deutschen IBANs meist entbehrlich.',
+  email: 'Nur für die E-Rechnung nötig: die Norm verlangt eine Kontaktadresse des Ausstellers.',
+  telefon: 'Nur für die E-Rechnung nötig, mit mindestens drei Ziffern.',
+  land: 'Zweistelliges Kürzel wie DE oder AT. Leer gilt als DE.',
   kleinunternehmer: 'Aktiv: keine Umsatzsteuer, dafür der Hinweis nach § 19 UStG auf der Rechnung.',
   ustSatz: 'Gilt nur bei Regelbesteuerung. Bereits gestellte Rechnungen behalten ihren Satz.',
   zahlungszielTage: 'Tage ab Rechnungsdatum bis zur Fälligkeit.',
@@ -4648,7 +4686,7 @@ document.getElementById('a-posten-plus').addEventListener('click', () => {
 const kZustand = { liste: [], bearbeitet: null, gewaehlt: null, filter: 'alle', suche: '' };
 
 const K_FELDER = ['firma', 'vorname', 'nachname', 'anschrift', 'steuernummer',
-  'ustIdNr', 'email', 'notiz', 'status'];
+  'ustIdNr', 'email', 'kaeuferReferenz', 'lieferantennummer', 'land', 'notiz', 'status'];
 
 function kStatus(text, art) {
   const el = document.getElementById('k-status-text');
@@ -4819,6 +4857,9 @@ function zeichneKontaktDetail() {
       zeile(uebersetze('Anschrift'), anschrift) +
       zeile(uebersetze('Steuernummer'), k.steuernummer) +
       zeile(uebersetze('USt-IdNr.'), k.ustIdNr) +
+      zeile(uebersetze('Käuferreferenz'), k.kaeuferReferenz) +
+      zeile(uebersetze('Lieferantennummer'), k.lieferantennummer) +
+      zeile(uebersetze('Land'), k.land) +
       zeile('Projekte', (k.projekte || []).join(', ')) +
       zeile(uebersetze('Notiz'), k.notiz) +
     '</dl>' +
@@ -5408,7 +5449,13 @@ async function erstelleRechnung() {
     to: document.getElementById('r-bis').value,
     tickets: gewaehlteZeilen.filter((t) => t.ticket).map((t) => t.ticket),
     projekte: gewaehlteZeilen.filter((t) => !t.ticket).map((t) => t.gruppe),
-    empfaenger: { name: document.getElementById('r-name').value.trim(), anschrift },
+    empfaenger: {
+      name: document.getElementById('r-name').value.trim(),
+      anschrift,
+      // Die uebrigen Angaben fuer die E-Rechnung (E-Mail, Kaeuferreferenz,
+      // Land) zieht der Server aus dem gewaehlten Kontakt.
+      bestellnummer: document.getElementById('r-bestellnummer').value.trim(),
+    },
     kontaktId: rZustand.kontaktId || undefined,
   };
   if (!nutzlast.empfaenger.name) {
@@ -5430,9 +5477,16 @@ async function erstelleRechnung() {
       });
       const a = await r.json();
       if (!r.ok || a.error) throw new Error(a.error || uebersetze('Erstellen fehlgeschlagen'));
-      rStatus('Rechnung ' + a.nr + ' erstellt (' + eur(a.brutto_eur) + ').', 'ok');
+      // Gleich sagen, wenn die Rechnung nicht als E-Rechnung taugt: nachtragen
+      // laesst sich an einer gestellten Rechnung nichts mehr, nur stornieren.
+      const fehlt = Array.isArray(a.erechnung_fehlt) ? a.erechnung_fehlt : [];
+      rStatus('Rechnung ' + a.nr + ' erstellt (' + eur(a.brutto_eur) + ').' +
+        (fehlt.length
+          ? ' ' + uebersetze('Als E-Rechnung noch nicht exportierbar, es fehlen: ') + fehlt.join(', ') + '.'
+          : ''), 'ok');
       rZustand.gewaehlt.clear();
       rZustand.kontaktId = null;
+      document.getElementById('r-bestellnummer').value = '';
       // Auch die Kundenwahl zuruecknehmen: bliebe sie stehen, haekte der naechste
       // Zeichenlauf dieselben Vorgaenge erneut an — und die sind eben abgerechnet.
       document.getElementById('r-kunde').value = '';
@@ -5525,6 +5579,7 @@ async function ladeRechnungen() {
           ? '<a class="btn" href="/rechnung-pdf/' + encodeURIComponent(r.nr) + '" target="_blank" rel="noopener">PDF öffnen</a>'
           : '') +
         '<button class="btn r-pdf">' + (r.hat_pdf ? 'PDF neu' : 'PDF') + '</button>' +
+        '<button class="btn r-xml" title="' + esc(uebersetze(XML_TITEL)) + '">' + uebersetze('E-Rechnung') + '</button>' +
         (r.status === 'erstellt' ? '<button class="btn r-storno">Stornieren</button>' : '') +
       '</div></td>' +
     '</tr>';
@@ -5541,6 +5596,8 @@ async function ladeRechnungen() {
     pdf.addEventListener('click', () => rAktion(pdf, '/api/rechnung-pdf', { nr },
       () => 'PDF für ' + nr + ' erzeugt und geöffnet.',
       () => window.open('/rechnung-pdf/' + encodeURIComponent(nr), '_blank', 'noopener')));
+    const xml = tr.querySelector('.r-xml');
+    xml.addEventListener('click', () => ladeERechnung(xml, nr));
     const storno = tr.querySelector('.r-storno');
     if (storno) {
       storno.addEventListener('click', () => {
@@ -5549,6 +5606,36 @@ async function ladeRechnungen() {
         if (!confirm(`Rechnung ${nr} stornieren? Es entsteht eine Stornorechnung mit eigener Nummer. Rückgängig machen ist nicht möglich.`)) return;
         rAktion(storno, '/api/rechnung-storno', { nr }, (a) => 'Storno ' + a.nr + ' erstellt.');
       });
+    }
+  });
+}
+
+const XML_TITEL = 'Die Rechnung als strukturierte Datei (XRechnung, EN 16931). Sie ist das Original für den Empfänger; Ansicht und PDF sind die Lesefassung.';
+
+// E-Rechnung herunterladen. Erst abrufen, dann speichern statt eines einfachen
+// Links: fehlt der Rechnung eine Pflichtangabe, antwortet der Server mit einer
+// Meldung, die hier in der Statuszeile landet — ein Link zeigte stattdessen
+// eine nackte Fehlerseite.
+async function ladeERechnung(knopf, nr) {
+  return mitLauf(knopf, async () => {
+    try {
+      const r = await fetch('/rechnung-xml/' + encodeURIComponent(nr));
+      if (!r.ok) {
+        const a = await r.json().catch(() => ({}));
+        throw new Error(a.error || uebersetze('Abruf fehlgeschlagen'));
+      }
+      const datei = 'Rechnung-' + nr + '.xml';
+      const url = URL.createObjectURL(await r.blob());
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = datei;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      rStatus(uebersetze('E-Rechnung gespeichert: ') + datei, 'ok');
+    } catch (err) {
+      rStatus(uebersetze('E-Rechnung nicht erstellt: ') + err.message, 'err');
     }
   });
 }
