@@ -77,6 +77,24 @@ business rule): sequential numbering per year, immutable issued documents,
 cancellation instead of deletion. Adapting it to another jurisdiction is a
 larger piece of work than it looks — open an issue before starting.
 
+### Changing the e-invoice
+
+`erechnung.js` calculates nothing; it writes the stored invoice in another
+form. The self-check only covers structure and totals. Whether a file is
+*valid* is decided by KoSIT's rule files, so after any change run sample
+invoices against them — one rule (`BR-CO-26`, seller identification without a
+VAT id) was only caught that way:
+
+1. Download the current *validator configuration* from
+   [itplr-kosit/validator-configuration-xrechnung](https://github.com/itplr-kosit/validator-configuration-xrechnung/releases).
+2. Validate with KoSIT's validator (needs Java):
+   `java -jar validator-<version>-standalone.jar -s scenarios.xml -r . invoice.xml`
+3. Cover at least: standard VAT, small-business exemption, a flat-rate
+   position, a cancellation, and a recipient with a Leitweg-ID.
+
+KoSIT publishes new XRechnung versions on 31 January and 31 July, valid six
+months later. The identifier is `SPEZIFIKATION` in `erechnung.js`.
+
 ## Legal
 
 The project is licensed under AGPL-3.0-or-later. By contributing you agree your

@@ -142,13 +142,48 @@ with the sync endpoint, background job, deep links and UI elements all disabled.
 | Tokens | Input, output, cache-read and cache-write, deduplicated per request |
 | API equivalent | What the same usage would have cost at API list prices |
 | Subscription share | Your actual cost — the plan price spread over measured usage |
-| Active time | Working time with idle gaps removed (configurable, default 5 min) |
+| Active time | **Your** working time: a window around each of your own inputs. This is what gets billed |
+| Agent time | How long the AI ran per session, including when it worked on its own. Shown, never billed |
 | Work value | Active time × hourly rate, per client and per job |
 | Contribution margin | Work value − direct costs |
 | Margin | Contribution margin − (hours × your own cost rate) |
 
 Every figure carries its reference in the label. Not "margin", but "margin —
 after direct costs and own time". A missing cost block is invisible otherwise.
+
+### Billable time is your time, not the AI's
+
+An agent that works alone for forty minutes has not worked forty minutes of
+*your* time. Two rules keep the hours on an invoice defensible:
+
+**1. Only the window around your own inputs counts.** An input is a typed
+prompt, a slash or shell command, an interrupt, or an answer to a question the
+agent asked (a choice, a plan approval, a rejected tool call). Tool results,
+subagents and programmatic runs (`claude -p`) are not inputs. Each input gets
+half the idle threshold before and after it (`gapMinutes`, default 5, so ±2.5
+minutes):
+
+- Two inputs at most 5 minutes apart: the time between them counts in full.
+- The agent then runs alone for 40 minutes: 5 minutes count, not 40.
+
+**2. A minute counts at most once.** With several sessions open at the same
+time, their time spans are merged first and then shared: two parallel sessions
+give each job half a minute per minute. One hour on the clock is at most one
+hour on the invoice, however many sessions were running. Background tools
+(`overheadProjekte`, local models) step back behind the actual work.
+
+**Agent time** is shown next to it: the AI's runtime per session, every log
+line counting, parallel sessions counted separately. It tells you how much
+machine time sits behind your own time and feeds no amount anywhere.
+
+On the author's own logs (eleven weeks, 614 sessions) this turned 154 logged
+hours into 64 billable ones. If you deliberately bill agent supervision as
+working time, set `"zeitmodell": "aktivitaet"` in `config.json`: then every log
+line counts until a gap exceeds the threshold. Rule 2 applies either way.
+
+Rows read in before version 1.3 carry no input marker yet. As long as their
+log files still exist, the next run adds it once; anything older keeps the
+`aktivitaet` measure.
 
 ### Where the tokens went
 
@@ -176,6 +211,13 @@ overcounts by more than 100%. `c2invoice` keeps only the latest state per
 `requestId`. Verified against `ccusage` over a full month: **0.02% deviation**
 ($2076.67 vs $2076.65).
 
+**Models without an exact price are flagged** instead of sitting silently in a
+total. If the price list does not know a model, one of two things happens: a
+similarly named model exists (its price is used, flagged *estimated*), or none
+does (the request counts as 0 USD, flagged *no price*). The overview names the
+affected models. Once the price list carries the model, the amount is
+recomputed from the stored token counts and the flag disappears.
+
 ### Local models
 
 Local models (Ollama and anything speaking its API) produce no billing data of
@@ -194,6 +236,47 @@ rather than invented API prices.
 - PDF export via headless Chrome or Edge, no extra dependency
 - Quotes have their own separate numbering, so an unaccepted quote never leaves
   a gap in your invoice sequence
+
+### E-invoice (XRechnung)
+
+Every issued invoice can be downloaded as a structured file from the Invoices
+tab: EN 16931 in UN/CEFACT CII syntax, German CIUS **XRechnung 3.0**. The file
+is the original for the recipient; the HTML view and the PDF are the reading
+copy of the same snapshot. Nothing is recalculated on export — every amount
+comes from the stored invoice.
+
+The standard asks for more than § 14 UStG does, so a few fields must be set:
+
+| Where | Field |
+|---|---|
+| Settings → issuer data | email, phone, IBAN; address with postcode and city on the last line |
+| The client's contact | buyer reference, email; address with postcode and city on the last line |
+| optional | country (default DE), supplier number, order number per invoice |
+
+The **buyer reference** is the Leitweg-ID for German public authorities, and
+whatever reference the client asks for otherwise (cost centre, project name).
+For authorities the Leitweg-ID also serves as the electronic address.
+
+If something is missing, the export refuses and names the field — a file with
+an empty mandatory field would look finished and be rejected at the
+recipient's end. Because issued invoices are immutable, nothing can be added
+afterwards: complete the data, cancel the invoice, issue it again. The
+interface therefore tells you what is missing the moment you create an invoice.
+Invoices from before version 1.3 do not carry the new fields.
+
+**Limits:** no transmission (upload, email or Peppol is up to you), no embedded
+attachments, no cash discount terms, one VAT rate per invoice, no reverse
+charge, no ZUGFeRD PDF.
+
+**Checked against** KoSIT's official rule files (validator configuration of
+2026-08-31): the CII D16B schema, the EN 16931 Schematron and the
+XRechnung 3.0.2 Schematron, across six cases — standard VAT, small-business
+exemption, flat-rate position, cancellation, public authority with Leitweg-ID,
+client abroad. The rules were run with Node tooling, not with KoSIT's own Java
+validator; before relying on it for a public-sector client, upload one invoice
+to the test environment of the receiving platform. KoSIT publishes new versions
+on 31 January and 31 July, valid six months later; the identifier lives in
+`erechnung.js`.
 
 **Jurisdiction note:** the invoicing module implements **German** requirements
 (§ 14 UStG mandatory fields, § 19 small-business exemption, 19% VAT). VAT rate
@@ -222,6 +305,7 @@ without a console window. Both are optional; `npm start` is enough.
 
 - Linear and Trello sync adapters
 - Partial billing of long-running jobs across month boundaries
+- ZUGFeRD: the e-invoice embedded in the PDF
 
 ## Contributing
 
