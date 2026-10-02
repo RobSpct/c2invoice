@@ -231,6 +231,13 @@ function migrate(db) {
   addColumn(db, 'events', 'skill', 'TEXT');
   db.exec('CREATE INDEX IF NOT EXISTS idx_events_mcp ON events(mcp_server, day)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_events_skill ON events(skill, day)');
+
+  // Stammt die Zeile von einer eigenen Eingabe des Nutzers? Abgerechnet wird
+  // die eigene Zeit, nicht die Laufzeit der KI — und die beiden lassen sich
+  // nur trennen, wenn beim Einlesen festgehalten wird, wer geschrieben hat.
+  // NULL = unbekannt (eingelesen vor dieser Spalte), 0 = nein, 1 = ja.
+  addColumn(db, 'activity', 'eingabe', 'INTEGER');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_activity_eingabe ON activity(ts) WHERE eingabe = 1');
 }
 
 // ALTER TABLE ... ADD COLUMN wirft, wenn die Spalte schon da ist. Deshalb

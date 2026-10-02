@@ -48,11 +48,108 @@ function activeSecondsFromTimestamps(timestamps, gapMinutes = config.gapMinutes)
   return Math.round(total / 1000);
 }
 
-// Aktivzeit je Gruppe (Ticket oder Projekt). Die Ereignisse einer Sitzung
-// werden nach Zeit sortiert; eine Luecke zaehlt der Gruppe, in der sie beginnt.
-// So bleibt die Zeit korrekt aufgeteilt, wenn innerhalb einer Sitzung der
-// Branch gewechselt wird.
-function activeSecondsByGroup(db, { groupBy = 'ticket', where = '', params = [] } = {}) {
+// Zusammenhaengende Aktivitaet je Sitzung als Zeitabschnitte. Ein Abschnitt
+// gehoert Projekt, Vorgang und Tag der Zeile, mit der er beginnt — so bleibt
+// die Zeit richtig aufgeteilt, wenn in einer Sitzung der Branch wechselt.
+// Gefiltert wird hier nur nach Zeit: Vorgang und Projekt waehlt der Aufrufer
+// erst nach dem Verteilen aus, sonst saehe ein gefilterter Aufruf die
+// parallele Sitzung des anderen Vorgangs nicht.
+function aktivitaetsAbschnitte(db, opts) {
+  const zeit = filterClause({ from: opts.from, to: opts.to, month: opts.month });
+  const rows = db.prepare(`
+    SELECT session_id, ts, project, ticket, day FROM activity
+    ${zeit.where ? 'WHERE ' + zeit.where : ''}
+    ORDER BY session_id, ts
+  `).all(...zeit.params);
+
+  const limit = config.gapMinutes * 60 * 1000;
+  const out = [];
+  let prev = null;
+  let prevMs = 0;
+  let lauf = null;
+  for (const r of rows) {
+    const ms = Date.parse(r.ts);
+    if (!Number.isFinite(ms)) continue;
+    const gap = prev && r.session_id === prev.session_id ? ms - prevMs : Infinity;
+    if (gap > 0 && gap <= limit) {
+      const schliesstAn = lauf && lauf.bis === prevMs && lauf.project === prev.project
+        && lauf.ticket === prev.ticket && lauf.day === prev.day;
+      if (schliesstAn) {
+        lauf.bis = ms;
+      } else {
+        lauf = { von: prevMs, bis: ms, project: prev.project, ticket: prev.ticket, day: prev.day };
+        out.push(lauf);
+      }
+    } else {
+      lauf = null;
+    }
+    prev = r;
+    prevMs = ms;
+  }
+  return out;
+}
+
+// Verteilt ueberlappende Abschnitte so, dass jede Minute hoechstens einmal
+// zaehlt: laufen n Abschnitte gleichzeitig, bekommt jeder ein n-tel. Eine
+// Stunde auf der Uhr ergibt damit hoechstens eine Stunde auf der Rechnung,
+// gleich wie viele Sitzungen offen waren.
+//
+// Werkzeugbetrieb (overheadProjekte, lokale Modelle) begleitet die Arbeit nur.
+// Laeuft er neben einer Arbeitssitzung, bekommt die Arbeit den Abschnitt ganz —
+// sonst naehme jede Hintergrundsitzung dem Vorgang die halbe Zeit weg.
+// Schreibt das Ergebnis als `ms` in jeden Abschnitt.
+function verteile(abschnitte) {
+  const punkte = [];
+  abschnitte.forEach((a, i) => {
+    a.ms = 0;
+    a.werkzeug = isOverhead(a.project);
+    punkte.push([a.von, 1, i], [a.bis, -1, i]);
+  });
+  // Bei gleicher Zeit erst schliessen, dann oeffnen: aneinanderstossende
+  // Abschnitte ueberlappen nicht.
+  punkte.sort((x, y) => x[0] - y[0] || x[1] - y[1]);
+
+  const offen = new Set();
+  let arbeit = 0;
+  let zuletzt = 0;
+  for (const [zeit, art, i] of punkte) {
+    const dauer = zeit - zuletzt;
+    if (dauer > 0 && offen.size > 0) {
+      const teil = dauer / (arbeit || offen.size);
+      for (const j of offen) {
+        if (!arbeit || !abschnitte[j].werkzeug) abschnitte[j].ms += teil;
+      }
+    }
+    zuletzt = zeit;
+    if (art === 1) offen.add(i); else offen.delete(i);
+    if (!abschnitte[i].werkzeug) arbeit += art;
+  }
+  return abschnitte;
+}
+
+// Abrechenbare Zeit je Gruppe (Ticket oder Projekt), in Sekunden.
+// opts: dieselben Filter wie ueberall (from, to, month, ticket, project). Ein
+// Modellfilter wird bewusst nicht gelesen — eine Zeitspanne gehoert keinem
+// einzelnen Request. `ticketlos` beschraenkt auf Arbeit ohne Vorgangsnummer.
+function activeSecondsByGroup(db, opts = {}, { groupBy = 'ticket', ticketlos = false } = {}) {
+  const out = new Map();
+  for (const a of verteile(aktivitaetsAbschnitte(db, opts))) {
+    if (opts.ticket && a.ticket !== opts.ticket) continue;
+    if (opts.project && a.project !== opts.project) continue;
+    if (ticketlos && a.ticket) continue;
+    const grp = (groupBy === 'project' ? a.project : a.ticket) || '(ohne)';
+    out.set(grp, (out.get(grp) || 0) + a.ms);
+  }
+  const result = {};
+  for (const [k, v] of out) result[k] = Math.round(v / 1000);
+  return result;
+}
+
+// Laufzeit je Gruppe (Ticket oder Projekt): jede Sitzung fuer sich, parallele
+// Sitzungen zaehlen einzeln. Das ist Maschinenzeit — sie wird ausgewiesen,
+// aber nicht abgerechnet. Die Ereignisse einer Sitzung werden nach Zeit
+// sortiert; eine Luecke zaehlt der Gruppe, in der sie beginnt.
+function agentSecondsByGroup(db, { groupBy = 'ticket', where = '', params = [] } = {}) {
   const col = groupBy === 'project' ? 'project' : 'ticket';
   const rows = db.prepare(`
     SELECT session_id, ts, ${col} AS grp FROM activity
@@ -648,14 +745,8 @@ function summary(db, opts = {}) {
   const { where, params } = filterClause(opts);
   const row = db.prepare(`SELECT ${SUM_COLS} FROM events ${where ? 'WHERE ' + where : ''}`).get(...params);
   const totals = withTotals(row);
-  // Ohne Modellbedingung, siehe byProject: die activity-Tabelle kennt keine
-  // Modelle, und eine Zeitspanne gehoert ohnehin keinem einzelnen Request.
-  const zeit = filterClause({ ...opts, model: undefined });
-  const act = activeSecondsByGroup(db, {
-    groupBy: 'ticket',
-    where: zeit.where || '',
-    params: zeit.params,
-  });
+  // Die Zeit folgt dem Modellfilter nicht, siehe byProject.
+  const act = activeSecondsByGroup(db, opts, { groupBy: 'ticket' });
   totals.active_seconds = Object.values(act).reduce((a, b) => a + b, 0);
   const range = db.prepare(
     `SELECT MIN(day) AS first_day, MAX(day) AS last_day FROM events ${where ? 'WHERE ' + where : ''}`
@@ -710,8 +801,7 @@ function byProject(db, opts = {}) {
   // deshalb nicht einschraenken — sonst stuende bei einer Modellansicht ein
   // anteiliger Arbeitswert, der nie so abgerechnet wird. Der Zeitfilter gilt
   // weiterhin, nur die Modellbedingung faellt fuer diese Abfrage heraus.
-  const zeit = filterClause({ ...opts, model: undefined });
-  const act = activeSecondsByGroup(db, { groupBy: 'project', where: zeit.where, params: zeit.params });
+  const act = activeSecondsByGroup(db, opts, { groupBy: 'project' });
   return rows.map((r) => {
     const t = withTotals(r);
     const seconds = act[r.project] || 0;
@@ -745,9 +835,7 @@ function byTicket(db, opts = {}) {
   `).all(...params);
 
   // Ohne Modellbedingung, siehe byProject.
-  const zeit = filterClause({ ...opts, model: undefined });
-  const zeitCond = zeit.where ? zeit.where + ' AND ticket IS NOT NULL' : 'ticket IS NOT NULL';
-  const act = activeSecondsByGroup(db, { groupBy: 'ticket', where: zeitCond, params: zeit.params });
+  const act = activeSecondsByGroup(db, opts, { groupBy: 'ticket' });
   // Werkzeuge, die waehrend der Arbeit am Ticket mitgelaufen sind.
   const werkzeugTicket = werkzeugeJeTicket(db, opts);
   // Lokale Modelle, die im selben Zeitraum fuer diesen Vorgang liefen.
@@ -835,9 +923,7 @@ function ohneTicket(db, opts = {}) {
   `).all(...params);
 
   // Ohne Modellbedingung, siehe byProject.
-  const zeit = filterClause({ ...opts, model: undefined });
-  const zeitCond = zeit.where ? zeit.where + ' AND ticket IS NULL' : 'ticket IS NULL';
-  const act = activeSecondsByGroup(db, { groupBy: 'project', where: zeitCond, params: zeit.params });
+  const act = activeSecondsByGroup(db, opts, { groupBy: 'project', ticketlos: true });
   const lokalProjekt = lokalJeGruppe(db, opts, 'project');
   const lokalStunden = lokalStundenJeGruppe(db, opts, 'project');
 
@@ -1091,6 +1177,7 @@ module.exports = {
   isOverhead,
   activeSecondsFromTimestamps,
   activeSecondsByGroup,
+  agentSecondsByGroup,
   summary,
   byModel,
   byDay,

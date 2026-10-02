@@ -135,6 +135,90 @@ function testActiveTime() {
   assert.strictEqual(metrics.activeSecondsFromTimestamps(justOver, 5), 0);
 }
 
+// --- Zeitmodell ------------------------------------------------------------
+// Datenbank fuer die Zeitpruefungen. zeile() schreibt Ereignis und Aktivitaet
+// gemeinsam, weil byTicket() seine Zeilen aus events holt und die Zeit aus
+// activity. `eingabe` bleibt weg, solange ein Test den Altbestand meint.
+function zeitDb(basis = Date.UTC(2026, 7, 18, 10, 0, 0)) {
+  const db = dbmod.open(':memory:');
+  openDbs.push(db);
+  const insE = db.prepare(`
+    INSERT INTO events (request_id, ts, session_id, project, branch, ticket, model,
+      input_tokens, output_tokens, cache_w_5m, cache_w_1h, cache_read,
+      web_search, cost_usd, is_sidechain, day)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  `);
+  const insA = db.prepare(
+    'INSERT INTO activity (session_id, ts, project, branch, ticket, day, eingabe) VALUES (?,?,?,?,?,?,?)'
+  );
+  let n = 0;
+  const t = (min) => new Date(basis + min * 60000).toISOString();
+  const zeile = (session, min, projekt, ticket, eingabe = null) => {
+    const ts = t(min);
+    const tag = ts.slice(0, 10);
+    insE.run('z' + (n++), ts, session, projekt, 'main', ticket, 'claude-opus-5',
+      10, 10, 0, 0, 0, 0, 0.1, 0, tag);
+    insA.run(session, ts, projekt, 'main', ticket, tag, eingabe);
+  };
+  return { db, zeile, t };
+}
+
+// Setzt Pausenschwelle und Zeitmodell fuer die Dauer eines Tests. Kein Test
+// darf sich auf den Wert verlassen, der zufaellig in config.json steht.
+function mitZeitmodell(gapMinutes, zeitmodell, fn) {
+  const cfg = require('../config.json');
+  const vorher = { gapMinutes: cfg.gapMinutes, zeitmodell: cfg.zeitmodell };
+  cfg.gapMinutes = gapMinutes;
+  cfg.zeitmodell = zeitmodell;
+  try {
+    return fn();
+  } finally {
+    cfg.gapMinutes = vorher.gapMinutes;
+    if (vorher.zeitmodell === undefined) delete cfg.zeitmodell;
+    else cfg.zeitmodell = vorher.zeitmodell;
+  }
+}
+
+const summe = (obj) => Object.values(obj).reduce((a, b) => a + b, 0);
+
+// Zwei Sitzungen laufen gleichzeitig. Eine Stunde auf der Uhr ist eine Stunde
+// auf der Rechnung, nicht zwei — wer je Sitzung summiert, stellt dem Kunden
+// mehr als 60 Minuten je Stunde in Rechnung.
+function testZeitParallel() {
+  mitZeitmodell(5, 'aktivitaet', () => {
+    const { db, zeile } = zeitDb();
+    // 10:00-11:00 beide Sitzungen, danach laeuft B noch 30 Minuten allein.
+    for (let min = 0; min <= 60; min += 2) zeile('sA', min, 'Projekt A', 'PROJ-1');
+    for (let min = 0; min <= 90; min += 2) zeile('sB', min, 'Projekt B', 'PROJ-2');
+
+    const gesamt = metrics.summary(db, {}).active_seconds;
+    assert.strictEqual(gesamt, 90 * 60,
+      'Gesamtzeit ' + gesamt + 's statt 5400s — 90 Minuten auf der Uhr');
+
+    const tickets = Object.fromEntries(metrics.byTicket(db, {}).map((x) => [x.ticket, x.active_seconds]));
+    assert.strictEqual(tickets['PROJ-1'], 30 * 60,
+      'PROJ-1 traegt ' + tickets['PROJ-1'] + 's statt 1800s (halbe gemeinsame Stunde)');
+    assert.strictEqual(tickets['PROJ-2'], 60 * 60,
+      'PROJ-2 traegt ' + tickets['PROJ-2'] + 's statt 3600s (halbe Stunde geteilt, halbe allein)');
+
+    // Ein Filter auf einen Vorgang darf die parallele Sitzung des anderen nicht
+    // aus dem Blick verlieren: sonst traegt derselbe Vorgang je nach Ansicht
+    // verschiedene Zeiten.
+    const einzeln = metrics.byTicket(db, { ticket: 'PROJ-1' })[0].active_seconds;
+    assert.strictEqual(einzeln, 30 * 60,
+      'gefiltert traegt PROJ-1 ' + einzeln + 's statt 1800s — vereinigt wurde erst nach dem Filter');
+
+    const projekte = metrics.byProject(db, {}).reduce((a, p) => a + p.active_seconds, 0);
+    assert.strictEqual(projekte, gesamt, 'Summe der Projekte weicht vom Gesamtwert ab');
+
+    // Gegenprobe: die Laufzeit je Sitzung zaehlt beide voll. Das ist die Zahl,
+    // die bisher auf der Rechnung stand.
+    const agent = summe(metrics.agentSecondsByGroup(db, { groupBy: 'ticket' }));
+    assert.strictEqual(agent, 150 * 60, 'Laufzeit je Sitzung ' + agent + 's statt 9000s');
+    db.close();
+  });
+}
+
 // --- Preise ----------------------------------------------------------------
 function testPricing() {
   // Synthetische Eintraege sind keine echten Aufrufe und muessen 0 kosten.
@@ -1683,11 +1767,15 @@ function testAktivstundenOhneWerkzeuge() {
 
   assert.strictEqual(split.arbeit.active_seconds, 4 * 60,
     'Projektarbeit-Zeit falsch: ' + split.arbeit.active_seconds + 's statt 240s');
-  assert.strictEqual(split.overhead.active_seconds, 6 * 60,
-    'Werkzeug-Zeit falsch: ' + split.overhead.active_seconds + 's statt 360s');
+  // Das Werkzeug laeuft sechs Minuten, vier davon neben der Arbeit. Dort
+  // bekommt die Arbeit die Zeit ganz; dem Werkzeug bleiben die zwei Minuten,
+  // in denen sonst nichts lief. Frueher standen hier 360s — dieselben vier
+  // Minuten zaehlten zweimal.
+  assert.strictEqual(split.overhead.active_seconds, 2 * 60,
+    'Werkzeug-Zeit falsch: ' + split.overhead.active_seconds + 's statt 120s');
   // Das ist der Kern: die Gesamtzeit ist groesser als die abrechenbare. Wer
   // sie in die Kachel schreibt, weist Werkzeugbetrieb als Arbeitszeit aus.
-  assert.strictEqual(gesamt, 10 * 60, 'Gesamtzeit falsch: ' + gesamt + 's statt 600s');
+  assert.strictEqual(gesamt, 6 * 60, 'Gesamtzeit falsch: ' + gesamt + 's statt 360s (sechs Minuten auf der Uhr)');
   assert.ok(split.arbeit.active_seconds < gesamt,
     'Projektarbeit und Gesamtzeit sind gleich — die Trennung greift nicht');
   assert.strictEqual(split.arbeit.active_seconds + split.overhead.active_seconds, gesamt,
@@ -2687,6 +2775,7 @@ async function main() {
   test('Ticket wird aus dem Branch gelesen', testTicket);
   test('Projekt wird aus dem Arbeitsverzeichnis abgeleitet', testProject);
   test('Aktivzeit ignoriert Pausen ueber der Schwelle', testActiveTime);
+  test('Zeit: parallele Sitzungen zaehlen jede Minute nur einmal', testZeitParallel);
   test('Preise: synthetisch = 0, Haiku < Opus, unbekannte Variante > 0', testPricing);
   test('Mehrwert rechnet Dollar in Euro um, bevor addiert wird', testMehrwert);
   test('Marge zieht die eigene Arbeitszeit ab, Zielmarge nur als Vergleich', testMargeZiehtEigeneZeitAb);
