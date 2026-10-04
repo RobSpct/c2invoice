@@ -2351,6 +2351,35 @@ async function testERechnungRoute() {
   }
 }
 
+// DNS-Rebinding: eine fremde Webseite laesst ihren Namen auf 127.0.0.1 zeigen
+// und liest dann als "same-origin" alle Abrechnungsdaten. Der Browser schickt
+// dabei aber ihren Namen im Host-Header — der Server bedient nur die eigenen.
+async function testHostHeader() {
+  const http = require('node:http');
+  const srv = require('../server');
+  const lauscht = srv.server.listening;
+  if (!lauscht) await new Promise((ok) => srv.server.listen(0, '127.0.0.1', ok));
+  const port = srv.server.address().port;
+  const frage = (host) => new Promise((ok, fehler) => {
+    const req = http.request({ host: '127.0.0.1', port, path: '/api/saetze', headers: { host } }, (r) => {
+      r.resume();
+      r.on('end', () => ok(r.statusCode));
+    });
+    req.on('error', fehler);
+    req.end();
+  });
+  try {
+    for (const host of ['127.0.0.1:' + port, 'localhost:' + port, '127.0.0.1', '[::1]:' + port]) {
+      assert.strictEqual(await frage(host), 200, 'eigener Host "' + host + '" abgewiesen');
+    }
+    for (const host of ['boese.example', 'boese.example:' + port, '127.0.0.1.boese.example', 'localhost.boese.example:' + port]) {
+      assert.strictEqual(await frage(host), 421, 'fremder Host "' + host + '" wurde bedient');
+    }
+  } finally {
+    if (!lauscht) await new Promise((ok) => srv.server.close(ok));
+  }
+}
+
 function testRechnungSteuerUndEscaping() {
   rechnungsUmgebung((config) => {
     const rechnung = require('../rechnung');
@@ -3752,6 +3781,14 @@ async function main() {
   } catch (err) {
     failed++;
     console.log('  FAIL E-Rechnung: Datei wird ausgeliefert, fremde Pfade prallen ab\n       ' + err.message);
+  }
+
+  try {
+    await testHostHeader();
+    console.log('  ok   Server: fremder Host-Header wird abgewiesen (DNS-Rebinding)');
+  } catch (err) {
+    failed++;
+    console.log('  FAIL Server: fremder Host-Header wird abgewiesen (DNS-Rebinding)\n       ' + err.message);
   }
 
   try {

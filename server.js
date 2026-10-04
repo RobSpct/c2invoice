@@ -600,6 +600,15 @@ function handle(req, res) {
   const u = new URL(req.url, 'http://127.0.0.1');
   const p = u.pathname;
 
+  // DNS-Rebinding: eine fremde Webseite laesst ihren Namen auf 127.0.0.1
+  // zeigen und gilt dann als "same-origin" — CORS und der Herkunfts-Check
+  // unten greifen nicht mehr. Ihren Namen schickt der Browser aber im
+  // Host-Header mit. Bedient werden nur die eigenen Namen. Ein fehlender
+  // Header kommt nicht aus einem Browser und bleibt erlaubt.
+  const host = req.headers.host;
+  if (host && !/^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i.test(host)) {
+    return sendJson(res, { error: 'Unbekannter Host' }, 421);
+  }
 
   // Obsidian laedt die Seite unter der Herkunft app://obsidian.md und braucht
   // deshalb eine Freigabe. Bewusst keine Freigabe fuer alle: sonst koennte
