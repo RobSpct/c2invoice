@@ -514,7 +514,6 @@
      Monospace-Schrift macht drei Knoepfe so breit, dass die Live-Tabelle
      ueberlaeuft. */
   .zm-schalter button { padding: 3px 7px; white-space: nowrap; font-family: var(--font-ui); font-size: 11.5px; }
-  .zm-schalter button.geerbt { border-style: dashed; color: var(--accent); }
   .d-zeitmodell { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0 0 12px; }
   .d-zeitmodell .dimlabel { font-size: 12px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .06em; }
   /* Aktiver Modellfilter: die Karte sagt, worauf sie gerade eingeschraenkt ist. */
@@ -1089,7 +1088,7 @@
       <p class="note" id="l-erklaerung" hidden><span data-i18n>Arbeit ohne Ticket-Branch trägt keinen Vorgang und bleibt damit unabrechenbar. Im Feld</span>
         <b data-i18n>Vorgang</b>
         <span data-i18n>lässt sich eine Sitzung von Hand buchen — ein Jira-Schlüssel oder ein frei gewählter Name. Leeren stellt die automatische Zuordnung wieder her.</span>
-        <span data-i18n>In der Spalte Zeitmodell legst du je Sitzung fest, wie ihre Zeit zählt; „Standard“ übernimmt die Wahl von Vorgang, Projekt oder Einstellungen.</span></p>
+        <span data-i18n>In der Spalte Zeitmodell legst du je Sitzung fest, wie ihre Zeit zählt. Gedrückt ist, was gilt; ohne eigene Wahl ist das der Standard aus Vorgang, Projekt oder Einstellungen.</span></p>
       <!-- Platzhalter in der Größe der späteren Tabelle: früher stand hier
            eine einzeilige Textmeldung, beim Eintreffen der Daten sprang alles
            darunter nach unten. -->
@@ -1633,8 +1632,8 @@ EN["Zeitmodell"] = "Time model";
 EN["Eigene Zeit"] = "Own time";
 EN["Aktivität"] = "Activity";
 EN["Welche Zeit abgerechnet wird. „Eigene Zeit“ (empfohlen) zählt nur das Fenster um deine Eingaben; die Laufzeit der KI steht als Agentenzeit daneben. „Aktivität“ zählt jede Logzeile, auch wenn die KI allein arbeitet. Eine Minute zählt in beiden höchstens einmal. Gestellte Rechnungen ändern sich nicht. Das ist der Standard: je Projekt (Stundensätze), je Vorgang (Detailansicht) und je Sitzung (Live) lässt er sich überschreiben."] = "Which time is billed. “Own time” (recommended) counts only the window around your inputs; the AI's runtime is shown next to it as agent time. “Activity” counts every log line, even when the AI works alone. In both, a minute counts at most once. Issued invoices do not change. This is the default: it can be overridden per project (hourly rates), per job (detail view) and per session (Live).";
-EN["Standard"] = "Default";
-EN["Standard – gilt: "] = "Default – applies: ";
+EN["Gilt als Standard aus Vorgang, Projekt oder Einstellungen."] = "Applies as the default from the job, the project or Settings.";
+EN["Eigene Wahl. Ein Klick auf den anderen Wert stellt den Standard wieder her: "] = "Own choice. Clicking the other value restores the default: ";
 EN["Zeitmodell für "] = "Time model for ";
 EN["Aktive Zeit"] = "Active time";
 EN["Agentenzeit"] = "Agent time";
@@ -1648,7 +1647,7 @@ EN["Sitzung"] = "Session";
 EN["Zuletzt aktiv"] = "Last active";
 EN["Aktive Zeit der ganzen Sitzung nach ihrem Zeitmodell, also die abrechenbare Zeit. Darunter die Laufzeit der KI, die nicht abgerechnet wird."] = "Active time of the whole session under its time model, i.e. the billable time. Below it the AI's runtime, which is not billed.";
 EN["Erklärung"] = "Explanation";
-EN["In der Spalte Zeitmodell legst du je Sitzung fest, wie ihre Zeit zählt; „Standard“ übernimmt die Wahl von Vorgang, Projekt oder Einstellungen."] = "In the Time model column you decide per session how its time counts; “Default” takes the choice of the job, the project or Settings.";
+EN["In der Spalte Zeitmodell legst du je Sitzung fest, wie ihre Zeit zählt. Gedrückt ist, was gilt; ohne eigene Wahl ist das der Standard aus Vorgang, Projekt oder Einstellungen."] = "In the Time model column you decide per session how its time counts. The pressed value is the one that applies; without a choice of its own that is the default from the job, the project or Settings.";
 EN["E-Rechnung"] = "E-invoice";
 EN["Die Rechnung als strukturierte Datei (XRechnung, EN 16931). Sie ist das Original für den Empfänger; Ansicht und PDF sind die Lesefassung."] = "The invoice as a structured file (XRechnung, EN 16931). It is the original for the recipient; the view and the PDF are the reading copy.";
 EN["E-Rechnung gespeichert: "] = "E-invoice saved: ";
@@ -4253,22 +4252,22 @@ const E_WAHL = {
 };
 
 // Zeitmodell-Schalter fuer Projekt, Vorgang und Sitzung. Derselbe Umschalter
-// wie in den Einstellungen, mit einer dritten Stellung "Standard": keine eigene
-// Wahl, es gilt die naechsthoehere Ebene. Welche das ist, zeigt der gestrichelte
-// Rahmen am geerbten Wert — sonst muesste man raten, was "Standard" gerade heisst.
+// wie in den Einstellungen, zwei Werte, gedrueckt ist der, der gerade gilt —
+// ohne eigene Wahl also der geerbte Standard. Wer den geerbten Wert anklickt,
+// nimmt die eigene Wahl zurueck; aendert sich spaeter der Standard, folgt der
+// Eintrag mit. Eine eigene Stellung "Standard" brauchte es deshalb nicht.
 // `wahl`: eigene Wahl oder null. `erbt`: was ohne eigene Wahl gilt.
 function zeitmodellSchalter(wahl, erbt, label) {
-  const eigene = wahl || '';
-  const knopf = (wert, text, titel) =>
-    '<button type="button" data-wahl="' + wert + '" aria-pressed="' + (eigene === wert) + '"' +
-      (!eigene && wert === erbt ? ' class="geerbt"' : '') +
-      (titel ? ' title="' + esc(titel) + '"' : '') + '>' + esc(text) + '</button>';
-  return '<div class="zeitraum-schalter zm-schalter" role="group" aria-label="' + esc(label) + '"' +
-      ' data-wert="' + esc(eigene) + '" data-erbt="' + esc(erbt || '') + '">' +
-    knopf('', uebersetze('Standard'), uebersetze('Standard – gilt: ') + uebersetze(E_WAHL[erbt] || erbt || '')) +
-    knopf('eingaben', uebersetze(E_WAHL.eingaben)) +
-    knopf('aktivitaet', uebersetze(E_WAHL.aktivitaet)) +
-  '</div>';
+  const knopf = (wert) =>
+    '<button type="button" data-wahl="' + wert + '">' + esc(uebersetze(E_WAHL[wert])) + '</button>';
+  const html = '<div class="zeitraum-schalter zm-schalter" role="group" aria-label="' + esc(label) + '"' +
+      ' data-erbt="' + esc(erbt || '') + '">' + knopf('eingaben') + knopf('aktivitaet') + '</div>';
+  // Stellung und Tooltip setzt stelleZeitmodell(), damit beides nur an einer
+  // Stelle entsteht. Dafuer kurz als Element bauen.
+  const halter = document.createElement('div');
+  halter.innerHTML = html;
+  stelleZeitmodell(halter.firstChild, wahl);
+  return halter.innerHTML;
 }
 
 // Klick setzt die Stellung sofort sichtbar um; `beiWahl` speichert (oder nicht,
@@ -4283,11 +4282,15 @@ function verdrahteZeitmodell(gruppe, beiWahl) {
   knoepfe.forEach((b) => {
     b.addEventListener('click', async () => {
       const vorher = gruppe.dataset.wert || '';
-      stelleZeitmodell(gruppe, b.dataset.wahl);
+      // Der geerbte Wert ist keine eigene Wahl: Klick darauf heisst "zurueck
+      // zum Standard".
+      const wahl = b.dataset.wahl === gruppe.dataset.erbt ? '' : b.dataset.wahl;
+      if (wahl === vorher) return;
+      stelleZeitmodell(gruppe, wahl);
       if (!beiWahl) return;
       knoepfe.forEach((x) => { x.disabled = true; });
       let ok = false;
-      try { ok = (await beiWahl(b.dataset.wahl || null, b)) !== false; } finally {
+      try { ok = (await beiWahl(wahl || null, b)) !== false; } finally {
         knoepfe.forEach((x) => { x.disabled = false; });
       }
       if (!ok) stelleZeitmodell(gruppe, vorher);
@@ -4295,12 +4298,17 @@ function verdrahteZeitmodell(gruppe, beiWahl) {
   });
 }
 
+// `wahl`: eigene Wahl oder leer. Gedrueckt ist, was gilt.
 function stelleZeitmodell(gruppe, wahl) {
   const w = wahl || '';
+  const gilt = w || gruppe.dataset.erbt;
   gruppe.dataset.wert = w;
+  gruppe.title = w
+    ? uebersetze('Eigene Wahl. Ein Klick auf den anderen Wert stellt den Standard wieder her: ') +
+      uebersetze(E_WAHL[gruppe.dataset.erbt] || '')
+    : uebersetze('Gilt als Standard aus Vorgang, Projekt oder Einstellungen.');
   gruppe.querySelectorAll('button').forEach((x) => {
-    x.setAttribute('aria-pressed', String(x.dataset.wahl === w));
-    x.classList.toggle('geerbt', !w && x.dataset.wahl === gruppe.dataset.erbt);
+    x.setAttribute('aria-pressed', String(x.dataset.wahl === gilt));
   });
 }
 

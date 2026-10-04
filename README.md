@@ -193,8 +193,10 @@ work actually differs:
 | Live → column *Time model* | one session, with or without a job | the database |
 
 The narrowest choice wins: session, then job, then project, then the default.
-*Default* in a switch means "no choice of its own"; the value it inherits is
-marked with a dashed border. A job whose sessions use different models shows
+Each switch shows the model that applies. Without a choice of its own that is
+the inherited default; clicking the other value sets a choice, clicking the
+inherited value again removes it, so the entry follows the default if that
+changes later. A job whose sessions use different models shows
 *varies by session*. Each invoice position stores the time model its hours were
 counted with.
 
