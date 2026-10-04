@@ -222,7 +222,8 @@
   td.trunc { max-width: 210px; overflow: hidden; text-overflow: ellipsis; }
   /* Live: der Branch macht Platz fuer die Zeitmodell-Spalte. Der volle Name
      steht im Tooltip. */
-  #l-sessions td.trunc.mono { max-width: 150px; }
+  #l-sessions td.trunc.mono { max-width: 110px; }
+  #l-sessions .zm-schalter button { padding: 2px 5px; font-size: 11px; }
   #l-sessions th, #l-sessions td { padding-left: 7px; padding-right: 7px; }
 
   /* Werkzeugbetrieb sichtbar von abrechenbarer Projektarbeit abheben. */
@@ -275,13 +276,20 @@
   }
 
   /* Buchungsfeld sitzt in einer schmalen Tabellenspalte neben seinem Knopf. */
-  td.buchung { display: flex; gap: 6px; align-items: center; }
-  td.buchung input.feld { min-width: 110px; font-family: var(--font-zahl); }
+  /* Bewusst keine Flex-Zelle: eine Zelle mit display:flex ist keine
+     Tabellenzelle mehr, ihre Breite zaehlt nicht sauber in die Spalte, und
+     in Obsidian ragte der Inhalt in die Nachbarspalte. */
+  td.buchung { text-align: left; white-space: nowrap; }
+  td.buchung > * { vertical-align: middle; }
+  td.buchung > * + * { margin-left: 6px; }
+  /* Feste Breite: mit 100 % aus der allgemeinen Feldregel schob das Feld
+     ohne Flex-Zelle den Knopf ueber den Zellrand. */
+  td.buchung input.feld { width: 110px; font-family: var(--font-zahl); }
   td.buchung .btn { padding: 5px 10px; white-space: nowrap; }
   /* Zugeordnet ist ein Ergebnis, kein offenes Formular: Wert plus Herkunft,
      der Weg zum Aendern bleibt da, draengt sich aber nicht auf. */
   td.buchung.zugeordnet .vorgang-wert { font-size: 13px; color: var(--text); }
-  td.buchung.zugeordnet .tag { margin-left: 0; }
+  td.buchung.zugeordnet .tag { margin-left: 6px; }
   .btn.schlicht {
     background: none; border-color: transparent; color: var(--text-faint);
     padding: 4px 6px;
@@ -487,7 +495,21 @@
   .zeitraum-schalter button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   /* Zeitmodell je Projekt, Vorgang, Sitzung: kompakt in Tabellenzeilen. Der
      gestrichelte Rahmen zeigt, was "Standard" gerade bedeutet. */
-  .zm-schalter { margin: 0; flex-wrap: nowrap; }
+  /* inline-flex: der Schalter ist Inhalt der Zelle, zaehlt in ihre Breite
+     und folgt der Ausrichtung. Spalte und Ueberschrift stehen mittig. */
+  .zm-schalter { margin: 0; flex-wrap: nowrap; display: inline-flex; vertical-align: middle; }
+  th.zm, td.zm { text-align: center; }
+  td.z-std small { display: block; font-size: 11px; color: var(--text-faint); }
+  /* Erklaertext hinter einem "i": die Tabelle steht oben, wer die Erklaerung
+     braucht, klappt sie auf. */
+  .info-i {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 16px; height: 16px; margin-left: 6px; padding: 0; vertical-align: middle;
+    border: 1px solid var(--line); border-radius: 50%; background: var(--panel-2);
+    color: var(--text-faint); font: italic 600 10px/1 Georgia, serif; cursor: pointer;
+  }
+  .info-i:hover, .info-i[aria-expanded="true"] { color: var(--accent); border-color: var(--accent); }
+  .info-i:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   /* Schrift der Oberflaeche statt der Zahlenschrift der Tabellenzelle: die
      Monospace-Schrift macht drei Knoepfe so breit, dass die Live-Tabelle
      ueberlaeuft. */
@@ -1063,10 +1085,11 @@
     </div>
 
     <div class="card">
-      <h2><span data-i18n>Aktive Sitzungen</span> <span class="note" id="l-fenster" data-i18n>letzte 60 Minuten</span></h2>
-      <p class="note"><span data-i18n>Arbeit ohne Ticket-Branch trägt keinen Vorgang und bleibt damit unabrechenbar. Im Feld</span>
+      <h2><span data-i18n>Aktive Sitzungen</span> <span class="note" id="l-fenster" data-i18n>letzte 60 Minuten</span><button type="button" class="info-i" aria-expanded="false" aria-controls="l-erklaerung" data-i18n-aria-label aria-label="Erklärung" data-i18n-title title="Erklärung">i</button></h2>
+      <p class="note" id="l-erklaerung" hidden><span data-i18n>Arbeit ohne Ticket-Branch trägt keinen Vorgang und bleibt damit unabrechenbar. Im Feld</span>
         <b data-i18n>Vorgang</b>
-        <span data-i18n>lässt sich eine Sitzung von Hand buchen — ein Jira-Schlüssel oder ein frei gewählter Name. Leeren stellt die automatische Zuordnung wieder her.</span></p>
+        <span data-i18n>lässt sich eine Sitzung von Hand buchen — ein Jira-Schlüssel oder ein frei gewählter Name. Leeren stellt die automatische Zuordnung wieder her.</span>
+        <span data-i18n>In der Spalte Zeitmodell legst du je Sitzung fest, wie ihre Zeit zählt; „Standard“ übernimmt die Wahl von Vorgang, Projekt oder Einstellungen.</span></p>
       <!-- Platzhalter in der Größe der späteren Tabelle: früher stand hier
            eine einzeilige Textmeldung, beim Eintreffen der Daten sprang alles
            darunter nach unten. -->
@@ -1622,6 +1645,11 @@ EN["Zeitmodell gespeichert: "] = "Time model saved: ";
 EN["folgt wieder dem Standard"] = "follows the default again";
 EN["Zeitmodell nicht gespeichert: "] = "Time model not saved: ";
 EN["Sitzung"] = "Session";
+EN["Abgerechnet"] = "Billed";
+EN["Zuletzt aktiv"] = "Last active";
+EN["Abgerechnete Zeit der ganzen Sitzung nach ihrem Zeitmodell, darunter die Laufzeit der KI (nicht abgerechnet)."] = "Billed time of the whole session under its time model, below it the AI's runtime (not billed).";
+EN["Erklärung"] = "Explanation";
+EN["In der Spalte Zeitmodell legst du je Sitzung fest, wie ihre Zeit zählt; „Standard“ übernimmt die Wahl von Vorgang, Projekt oder Einstellungen."] = "In the Time model column you decide per session how its time counts; “Default” takes the choice of the job, the project or Settings.";
 EN["E-Rechnung"] = "E-invoice";
 EN["Die Rechnung als strukturierte Datei (XRechnung, EN 16931). Sie ist das Original für den Empfänger; Ansicht und PDF sind die Lesefassung."] = "The invoice as a structured file (XRechnung, EN 16931). It is the original for the recipient; the view and the PDF are the reading copy.";
 EN["E-Rechnung gespeichert: "] = "E-invoice saved: ";
@@ -2740,8 +2768,11 @@ function zeichneLive() {
     aktualisiereBuchungsanzeige(sess);
   } else {
     let h = '<div class="tablewrap"><table><thead><tr>' +
-      '<th>' + uebersetze('Projekt') + '</th><th>' + uebersetze('Branch') + '</th><th>' + uebersetze('Vorgang') + '</th><th>' + uebersetze('Zeitmodell') + '</th><th>' + uebersetze('Modell') + '</th>' +
-      '<th>' + uebersetze('Tokens') + '</th><th>' + uebersetze('API-Gegenwert USD') + '</th><th>' + uebersetze('Letzte Aktivität') + '</th>' +
+      '<th>' + uebersetze('Projekt') + '</th><th>' + uebersetze('Branch') + '</th><th>' + uebersetze('Vorgang') + '</th><th class="zm">' + uebersetze('Zeitmodell') + '</th>' +
+      '<th title="' + esc(uebersetze(LIVE_ZEIT_TITEL)) + '">' + uebersetze('Abgerechnet') + '</th><th>' + uebersetze('Modell') + '</th>' +
+      // "USD" steht an jedem Wert, nicht in der Ueberschrift: die Spalte waere
+      // sonst so breit, dass die Tabelle quer scrollt.
+      '<th>' + uebersetze('Tokens') + '</th><th>' + uebersetze('API-Gegenwert') + '</th><th>' + uebersetze('Zuletzt aktiv') + '</th>' +
       '</tr></thead><tbody>';
     // Eine Sitzung kann mehrere Zeilen haben (je Modell eine). Gebucht wird
     // aber die ganze Sitzung, deshalb bekommt nur ihre erste Zeile das
@@ -2800,8 +2831,12 @@ function zeichneLive() {
           // ihrer ersten Zeile — auch ohne Vorgang.
           (erste
             ? '<td class="zm">' + zeitmodellSchalter(s.zeitmodell_wahl, s.zeitmodell_erbt,
-                uebersetze('Zeitmodell für ') + uebersetze('Sitzung') + ' ' + (s.project || '')) + '</td>'
-            : '<td></td>') +
+                uebersetze('Zeitmodell für ') + uebersetze('Sitzung') + ' ' + (s.project || '')) + '</td>' +
+              // Wie die Vorgangstabelle: abgerechnete Zeit nach dem Zeitmodell,
+              // darunter die Laufzeit der KI. Ueber die ganze Sitzung.
+              '<td class="z-std" title="' + esc(uebersetze(LIVE_ZEIT_TITEL)) + '">' + hrs((s.active_seconds || 0) / 3600) +
+                '<small>' + hrs((s.agent_seconds || 0) / 3600) + uebersetze(' Agent') + '</small></td>'
+            : '<td></td><td></td>') +
           '<td class="dim">' + esc(kurzModell(s.model)) +
             (s.is_sidechain ? '<span class="tag">' + uebersetze('Subagent') + '</span>' : '') + '</td>' +
           '<td class="z-tokens" title="' + num(s.total_tokens) + ' Tokens">' + kurz(s.total_tokens) + '</td>' +
@@ -2820,7 +2855,7 @@ function zeichneLive() {
       const summe = wz.reduce((a, x) => a + (x.cost_usd || 0), 0);
       const tok = wz.reduce((a, x) => a + (x.total_tokens || 0), 0);
       h += '<tr class="summe">' +
-        '<td colspan="5" class="dimlabel">Werkzeuge im Hintergrund <span class="note">' +
+        '<td colspan="6" class="dimlabel">Werkzeuge im Hintergrund <span class="note">' +
           wz.map((x) => esc(x.projekt)).join(', ') + '</span></td>' +
         '<td class="dimlabel">' + kurz(tok) + '</td>' +
         '<td class="dimlabel">' + usd(summe) + '</td>' +
@@ -3317,7 +3352,7 @@ function zeichneSaetze() {
 
   let h = '<div class="tablewrap"><table class="saetze"><thead><tr>' +
     '<th>' + uebersetze('Projekt') + '</th><th>' + uebersetze('Kunde') + '</th><th>' + uebersetze('Satz') + ' ' + w + '</th><th>' + uebersetze('Rabatt %') + '</th>' +
-    '<th>' + uebersetze('Zeitmodell') + '</th><th>' + uebersetze('ergibt') + '</th><th></th></tr></thead><tbody>';
+    '<th class="zm">' + uebersetze('Zeitmodell') + '</th><th>' + uebersetze('ergibt') + '</th><th></th></tr></thead><tbody>';
   // Ohne eigene Wahl gilt fuer ein Projekt der globale Standard.
   const zmStandard = d.config && d.config.zeitmodell === 'aktivitaet' ? 'aktivitaet' : 'eingaben';
 
@@ -3341,7 +3376,7 @@ function zeichneSaetze() {
         nf2.format(standard) + '"' + fuer('Stundensatz') + '></td>' +
       '<td><input class="feld rabatt" type="number" min="0" max="100" step="1" placeholder="0"' +
         fuer('Rabatt in Prozent') + '></td>' +
-      '<td>' + zeitmodellSchalter(null, zmStandard, uebersetze('Zeitmodell') + uebersetze(' für ') + p.project) + '</td>' +
+      '<td class="zm">' + zeitmodellSchalter(null, zmStandard, uebersetze('Zeitmodell') + uebersetze(' für ') + p.project) + '</td>' +
       '<td class="ergibt eur">' + eur(p.stundensatz) + '</td>' +
       '<td><button class="btn speichern"' + fuer('Speichern') + '>Speichern</button></td>' +
     '</tr>';
@@ -4270,6 +4305,8 @@ function stelleZeitmodell(gruppe, wahl) {
   });
 }
 
+const LIVE_ZEIT_TITEL = 'Abgerechnete Zeit der ganzen Sitzung nach ihrem Zeitmodell, darunter die Laufzeit der KI (nicht abgerechnet).';
+
 // Lesbarer Name eines aufgeloesten Modells, auch fuer "gemischt".
 function zeitmodellName(m) {
   return m === 'gemischt' ? uebersetze('je Sitzung verschieden') : uebersetze(E_WAHL[m] || m || '');
@@ -4407,6 +4444,18 @@ async function speichereEinstellungen() {
 }
 
 document.getElementById('e-speichern').addEventListener('click', speichereEinstellungen);
+
+// "i"-Knoepfe: zeigen oder verbergen den Erklaertext, auf den aria-controls
+// zeigt. Ein Handler fuer alle, damit jede Karte ihr "i" ohne eigenen Code
+// bekommt.
+document.addEventListener('click', (e) => {
+  const knopf = e.target.closest('.info-i');
+  if (!knopf) return;
+  const ziel = document.getElementById(knopf.getAttribute('aria-controls'));
+  if (!ziel) return;
+  ziel.hidden = !ziel.hidden;
+  knopf.setAttribute('aria-expanded', String(!ziel.hidden));
+});
 
 /* =========================================================
    Rechnungs-Stammdaten

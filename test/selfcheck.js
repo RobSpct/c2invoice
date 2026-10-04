@@ -559,6 +559,24 @@ function testZeitmodellEbenen() {
   }
 }
 
+// Der Live-Tab zeigt je Sitzung, wie viel Zeit sie bisher traegt: abgerechnet
+// nach ihrem Zeitmodell und daneben die Agentenzeit — ueber die ganze Sitzung,
+// nicht nur das 60-Minuten-Fenster der Ansicht.
+function testLiveSitzungszeit() {
+  mitZeitmodell(5, 'eingaben', () => {
+    const z = zeitDb(Date.now() - 180 * 60000);
+    // Eingaben bei 0 und 20, dazwischen der Agent; spaeter eine Eingabe bei 170.
+    for (let min = 0; min <= 20; min++) z.zeile('sZ', min, 'Q', null, [0, 20].includes(min) ? 1 : 0);
+    z.zeile('sZ', 170, 'Q', null, 1);
+    const s = metrics.live(z.db).sessions.find((x) => x.session_id === 'sZ');
+    assert.ok(s, 'Sitzung fehlt im Live-Tab');
+    // Drei Fenster von je 5 Minuten; Agent: 20 Minuten am Stueck, die Pause zaehlt nicht.
+    assert.strictEqual(s.active_seconds, 15 * 60, 'abgerechnet ' + s.active_seconds + 's statt 900s');
+    assert.strictEqual(s.agent_seconds, 20 * 60, 'Agentenzeit ' + s.agent_seconds + 's statt 1200s');
+    z.db.close();
+  });
+}
+
 // Die Wahl wird ueber die Oberflaeche gesetzt. Sie bestimmt Stunden auf
 // Rechnungen, deshalb wird jeder Wert geprueft. Und ein Projekt ohne eigenen
 // Satz darf seine Wahl nicht verlieren — setzeSatz() loeschte bisher jeden
@@ -3687,6 +3705,7 @@ async function main() {
   test('Zeit: das Zeitmodell laesst sich in den Einstellungen umschalten', testZeitmodellSchalter);
   test('Zeit: Zeitmodell je Sitzung, Vorgang und Projekt ueberschreibt den Standard', testZeitmodellEbenen);
   test('Zeitmodell: Wahl je Vorgang, Sitzung und Projekt wird geprueft und gespeichert', testZeitmodellWahl);
+  test('Live: Sitzung zeigt abgerechnete Zeit und Agentenzeit ueber ihre ganze Dauer', testLiveSitzungszeit);
   test('Rechnung: Position nennt das Zeitmodell ihrer Stunden', testRechnungZeitmodell);
   test('Preise: synthetisch = 0, Haiku < Opus, unbekannte Variante > 0', testPricing);
   test('Mehrwert rechnet Dollar in Euro um, bevor addiert wird', testMehrwert);

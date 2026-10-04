@@ -281,7 +281,7 @@ function zeitJeGruppe(db, opts = {}, { groupBy = 'ticket', ticketlos = false } =
     if (opts.ticket && a.ticket !== opts.ticket) continue;
     if (opts.project && a.project !== opts.project) continue;
     if (ticketlos && a.ticket) continue;
-    const grp = (groupBy === 'project' ? a.project : a.ticket) || '(ohne)';
+    const grp = (groupBy === 'project' ? a.project : groupBy === 'session' ? a.session : a.ticket) || '(ohne)';
     out.set(grp, (out.get(grp) || 0) + a.ms);
     if (a.ms > 0) {
       if (!modelle.has(grp)) modelle.set(grp, new Set());
@@ -324,7 +324,7 @@ function agentSecondsByGroup(db, opts = {}, { groupBy = 'ticket', ticketlos = fa
       && (!opts.project || prev.project === opts.project)
       && !(ticketlos && prev.ticket);
     if (gap > 0 && gap <= limit && gewaehlt) {
-      const grp = (groupBy === 'project' ? prev.project : prev.ticket) || '(ohne)';
+      const grp = (groupBy === 'project' ? prev.project : groupBy === 'session' ? prev.session_id : prev.ticket) || '(ohne)';
       out.set(grp, (out.get(grp) || 0) + gap);
     }
     prev = r;
@@ -1327,10 +1327,29 @@ function live(db, { minutes = 60 } = {}) {
   // Die Wahl gilt je Sitzung, auch ohne Vorgang. `zeitmodell_wahl` ist die
   // eigene Wahl der Sitzung (oder null), `zeitmodell` das, was gerade gilt.
   const karte = zeitmodellKarte(db);
+
+  // Zeit je Sitzung ueber ihre ganze Dauer, nicht nur das Fenster: ab dem
+  // ersten Tag, an dem eine der angezeigten Sitzungen begann. Verteilt wird
+  // wie ueberall, parallele Sitzungen teilen sich also die Minute.
+  const ids = [...new Set(recent.map((r) => r.session_id))];
+  let zeitJe = {};
+  let agentJe = {};
+  if (ids.length) {
+    const beginn = db.prepare(
+      `SELECT MIN(day) AS d FROM activity WHERE session_id IN (${ids.map(() => '?').join(',')})`
+    ).get(...ids).d;
+    zeitJe = activeSecondsByGroup(db, { from: beginn }, { groupBy: 'session' });
+    agentJe = agentSecondsByGroup(db, { from: beginn }, { groupBy: 'session' });
+  }
+
   const sitzungen = recent.map((r) => ({
     session_id: r.session_id, project: r.project, branch: r.branch,
     ticket: r.ticket, ticket_quelle: r.ticket_quelle, model: r.model,
     is_sidechain: r.is_sidechain === 1, last_ts: r.last_ts, ...withTotals(r),
+    // Je Sitzung, nicht je Modellzeile: alle Zeilen einer Sitzung tragen
+    // denselben Wert, angezeigt wird er nur in der ersten.
+    active_seconds: zeitJe[r.session_id] || 0,
+    agent_seconds: agentJe[r.session_id] || 0,
     zeitmodell_wahl: karte.sitzung.get(r.session_id) || null,
     zeitmodell: karte.fuer(r),
     // Was ohne eigene Wahl der Sitzung gaelte: Vorgang, Projekt, Standard.
