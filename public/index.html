@@ -1636,7 +1636,7 @@ EN["Welche Zeit abgerechnet wird. „Eigene Zeit“ (empfohlen) zählt nur das F
 EN["Standard"] = "Default";
 EN["Standard – gilt: "] = "Default – applies: ";
 EN["Zeitmodell für "] = "Time model for ";
-EN["Abgerechnete Zeit"] = "Billed time";
+EN["Aktive Zeit"] = "Active time";
 EN["Agentenzeit"] = "Agent time";
 EN["nicht abgerechnet"] = "not billed";
 EN["Zeitmodell: "] = "Time model: ";
@@ -1645,9 +1645,8 @@ EN["Zeitmodell gespeichert: "] = "Time model saved: ";
 EN["folgt wieder dem Standard"] = "follows the default again";
 EN["Zeitmodell nicht gespeichert: "] = "Time model not saved: ";
 EN["Sitzung"] = "Session";
-EN["Abgerechnet"] = "Billed";
 EN["Zuletzt aktiv"] = "Last active";
-EN["Abgerechnete Zeit der ganzen Sitzung nach ihrem Zeitmodell, darunter die Laufzeit der KI (nicht abgerechnet)."] = "Billed time of the whole session under its time model, below it the AI's runtime (not billed).";
+EN["Aktive Zeit der ganzen Sitzung nach ihrem Zeitmodell, also die abrechenbare Zeit. Darunter die Laufzeit der KI, die nicht abgerechnet wird."] = "Active time of the whole session under its time model, i.e. the billable time. Below it the AI's runtime, which is not billed.";
 EN["Erklärung"] = "Explanation";
 EN["In der Spalte Zeitmodell legst du je Sitzung fest, wie ihre Zeit zählt; „Standard“ übernimmt die Wahl von Vorgang, Projekt oder Einstellungen."] = "In the Time model column you decide per session how its time counts; “Default” takes the choice of the job, the project or Settings.";
 EN["E-Rechnung"] = "E-invoice";
@@ -2769,7 +2768,7 @@ function zeichneLive() {
   } else {
     let h = '<div class="tablewrap"><table><thead><tr>' +
       '<th>' + uebersetze('Projekt') + '</th><th>' + uebersetze('Branch') + '</th><th>' + uebersetze('Vorgang') + '</th><th class="zm">' + uebersetze('Zeitmodell') + '</th>' +
-      '<th title="' + esc(uebersetze(LIVE_ZEIT_TITEL)) + '">' + uebersetze('Abgerechnet') + '</th><th>' + uebersetze('Modell') + '</th>' +
+      '<th title="' + esc(uebersetze(LIVE_ZEIT_TITEL)) + '">' + uebersetze('Aktive Zeit') + '</th><th>' + uebersetze('Modell') + '</th>' +
       // "USD" steht an jedem Wert, nicht in der Ueberschrift: die Spalte waere
       // sonst so breit, dass die Tabelle quer scrollt.
       '<th>' + uebersetze('Tokens') + '</th><th>' + uebersetze('API-Gegenwert') + '</th><th>' + uebersetze('Zuletzt aktiv') + '</th>' +
@@ -4166,7 +4165,7 @@ function werteHtml(t, w) {
   return '' +
     // Erst die Zeit, dann was sie wert ist. Die Tabelle zeigt beide Stunden,
     // das Detail muss es auch — mit dem Zeitmodell als Bezugsgroesse.
-    '<dt>' + uebersetze('Abgerechnete Zeit') + ' <small>' + uebersetze('Zeitmodell: ') +
+    '<dt>' + uebersetze('Aktive Zeit') + ' <small>' + uebersetze('Zeitmodell: ') +
       esc(zeitmodellName(t.zeitmodell)) + '</small></dt>' +
       '<dd>' + hrs(t.active_hours) + '</dd>' +
     '<dt>' + uebersetze('Agentenzeit') + ' <small>' + uebersetze('nicht abgerechnet') + '</small></dt>' +
@@ -4305,7 +4304,7 @@ function stelleZeitmodell(gruppe, wahl) {
   });
 }
 
-const LIVE_ZEIT_TITEL = 'Abgerechnete Zeit der ganzen Sitzung nach ihrem Zeitmodell, darunter die Laufzeit der KI (nicht abgerechnet).';
+const LIVE_ZEIT_TITEL = 'Aktive Zeit der ganzen Sitzung nach ihrem Zeitmodell, also die abrechenbare Zeit. Darunter die Laufzeit der KI, die nicht abgerechnet wird.';
 
 // Lesbarer Name eines aufgeloesten Modells, auch fuer "gemischt".
 function zeitmodellName(m) {
