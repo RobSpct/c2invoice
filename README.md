@@ -183,6 +183,21 @@ working time, switch the **time model** to *Activity* under Settings (stored as
 until a gap exceeds the threshold. Rule 2 applies either way, and the switch
 takes effect immediately — issued invoices never change.
 
+The setting under Settings is the **default**. You can override it where the
+work actually differs:
+
+| Where | Applies to | Stored in |
+|---|---|---|
+| Settings → hourly rates, column *Time model* | one project | `config.json`, `projektSaetze` |
+| Jobs → open a job, switch *Time model* | one job | the database |
+| Live → column *Time model* | one session, with or without a job | the database |
+
+The narrowest choice wins: session, then job, then project, then the default.
+*Default* in a switch means "no choice of its own"; the value it inherits is
+marked with a dashed border. A job whose sessions use different models shows
+*varies by session*. Each invoice position stores the time model its hours were
+counted with.
+
 Rows read in before version 1.3 carry no input marker yet. As long as their
 log files still exist, the next run adds it once; anything older keeps the
 `aktivitaet` measure.
@@ -270,15 +285,17 @@ Invoices from before version 1.3 do not carry the new fields.
 attachments, no cash discount terms, one VAT rate per invoice, no reverse
 charge, no ZUGFeRD PDF.
 
-**Checked against** KoSIT's official rule files (validator configuration of
-2026-08-31): the CII D16B schema, the EN 16931 Schematron and the
-XRechnung 3.0.2 Schematron, across six cases — standard VAT, small-business
-exemption, flat-rate position, cancellation, public authority with Leitweg-ID,
-client abroad. The rules were run with Node tooling, not with KoSIT's own Java
-validator; before relying on it for a public-sector client, upload one invoice
-to the test environment of the receiving platform. KoSIT publishes new versions
-on 31 January and 31 July, valid six months later; the identifier lives in
-`erechnung.js`.
+**Checked with** KoSIT's official validator (version 1.6.3) and the
+XRechnung 3.0.2 validator configuration of 2026-08-31 — the CII D16B schema,
+the EN 16931 Schematron and the XRechnung Schematron — across six cases:
+standard VAT, small-business exemption, flat-rate position, cancellation,
+public authority with Leitweg-ID, client abroad. All six were accepted with no
+error and no warning; the same invoice with a wrong total was rejected. This is
+the check the receiving platforms run, but it is no substitute for their own
+acceptance: before invoicing a public-sector client for the first time, upload
+one invoice to the test environment of the receiving platform. KoSIT publishes
+new versions on 31 January and 31 July, valid six months later; the identifier
+lives in `erechnung.js`.
 
 **Jurisdiction note:** the invoicing module implements **German** requirements
 (§ 14 UStG mandatory fields, § 19 small-business exemption, 19% VAT). VAT rate

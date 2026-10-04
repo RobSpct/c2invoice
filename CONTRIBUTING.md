@@ -87,8 +87,13 @@ VAT id) was only caught that way:
 
 1. Download the current *validator configuration* from
    [itplr-kosit/validator-configuration-xrechnung](https://github.com/itplr-kosit/validator-configuration-xrechnung/releases).
-2. Validate with KoSIT's validator (needs Java):
-   `java -jar validator-<version>-standalone.jar -s scenarios.xml -r . invoice.xml`
+2. Validate with [KoSIT's validator](https://github.com/itplr-kosit/validator/releases)
+   (needs Java 17 or later; a portable JRE is enough). From version 1.6 the
+   download is a jar plus a `libs` folder, so name the main class:
+   `java -cp "validator-<version>.jar;libs/*" de.kosit.validationtool.cmd.CommandLineApplication -s <config>/scenarios.xml -r <config> -o reports invoice.xml`
+   (on Linux and macOS separate the classpath with `:` instead of `;`). If it
+   fails with `IOException` in `isPiped`, the shell gave it no usable stdin;
+   redirect one from an empty file. Every file must end as `ACCEPTABLE`.
 3. Cover at least: standard VAT, small-business exemption, a flat-rate
    position, a cancellation, and a recipient with a Leitweg-ID.
 
