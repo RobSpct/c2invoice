@@ -481,6 +481,161 @@ function testZeitmodellSchalter() {
   }
 }
 
+// Das Zeitmodell gilt nicht nur global. Ein Projekt, ein Vorgang oder eine
+// einzelne Sitzung kann es ueberschreiben, in dieser Reihenfolge:
+// Sitzung vor Vorgang vor Projekt vor Standard. Jede Sitzung hat Eingaben bei
+// 0 und 20, dazwischen arbeitet der Agent: "eingaben" ergibt 10 Minuten,
+// "aktivitaet" 20. Die Sitzungen liegen zeitlich getrennt, damit keine die
+// Zeit einer anderen teilt.
+function testZeitmodellEbenen() {
+  const cfg = require('../config.json');
+  const merk = cfg.projektSaetze;
+  try {
+    cfg.projektSaetze = { P: { zeitmodell: 'aktivitaet' } };
+    mitZeitmodell(5, 'eingaben', () => {
+      const { db, zeile } = zeitDb();
+      const sitzung = (sid, start, projekt, ticket) => {
+        for (let min = 0; min <= 20; min++) {
+          zeile(sid, start + min, projekt, ticket, [0, 20].includes(min) ? 1 : 0);
+        }
+      };
+      sitzung('s1', 0, 'P', 'T1');     // Projekt P: aktivitaet
+      sitzung('s2', 100, 'P', 'T2');   // Vorgang T2: eingaben schlaegt Projekt
+      sitzung('s3', 200, 'P', 'T3');   // Vorgang T3: eingaben, Sitzung s3: aktivitaet
+      sitzung('s4', 300, 'Q', null);   // lose Sitzung, Standard: eingaben
+      sitzung('s5', 400, 'Q', null);   // lose Sitzung mit eigener Wahl: aktivitaet
+      const wahl = db.prepare('INSERT INTO zeitmodell_wahl (art, schluessel, zeitmodell) VALUES (?,?,?)');
+      wahl.run('vorgang', 'T2', 'eingaben');
+      wahl.run('vorgang', 'T3', 'eingaben');
+      wahl.run('sitzung', 's3', 'aktivitaet');
+      wahl.run('sitzung', 's5', 'aktivitaet');
+
+      const je = Object.fromEntries(metrics.byTicket(db, {}).map((x) => [x.ticket, x]));
+      assert.strictEqual(je.T1.active_seconds, 20 * 60, 'T1: Projekt-Wahl greift nicht (' + je.T1.active_seconds + 's)');
+      assert.strictEqual(je.T2.active_seconds, 10 * 60, 'T2: Vorgang schlaegt Projekt nicht (' + je.T2.active_seconds + 's)');
+      assert.strictEqual(je.T3.active_seconds, 20 * 60, 'T3: Sitzung schlaegt Vorgang nicht (' + je.T3.active_seconds + 's)');
+      assert.strictEqual(je.T1.zeitmodell, 'aktivitaet');
+      assert.strictEqual(je.T2.zeitmodell, 'eingaben');
+      assert.strictEqual(je.T2.zeitmodell_wahl, 'eingaben', 'eigene Wahl des Vorgangs fehlt');
+      assert.strictEqual(je.T2.zeitmodell_erbt, 'aktivitaet', 'geerbtes Modell des Vorgangs falsch');
+      assert.strictEqual(je.T1.zeitmodell_wahl, null, 'Vorgang ohne eigene Wahl meldet eine');
+
+      const q = metrics.ohneTicket(db, {}).find((x) => x.gruppe === 'Q');
+      assert.strictEqual(q.active_seconds, 30 * 60, 'lose Sitzungen: ' + q.active_seconds + 's statt 1800s');
+      assert.strictEqual(q.zeitmodell, 'gemischt', 'zwei Modelle in einer Gruppe werden nicht als gemischt gemeldet');
+
+      // Die Summenregel gilt auch, wenn die Modelle gemischt sind.
+      const gesamt = metrics.summary(db, {}).active_seconds;
+      assert.strictEqual(gesamt, (20 + 10 + 20 + 30) * 60, 'Gesamtzeit ' + gesamt + 's');
+      db.close();
+
+      // Der Live-Tab zeigt die Wahl je Sitzung, auch ohne Vorgang.
+      const live = zeitDb(Date.now() - 30 * 60000);
+      live.zeile('sL', 0, 'Q', null, 1);
+      live.db.prepare("INSERT INTO zeitmodell_wahl VALUES ('sitzung','sL','aktivitaet')").run();
+      const s = metrics.live(live.db).sessions.find((x) => x.session_id === 'sL');
+      assert.ok(s, 'Sitzung fehlt im Live-Tab');
+      assert.strictEqual(s.zeitmodell_wahl, 'aktivitaet', 'Live: Wahl der Sitzung fehlt');
+      assert.strictEqual(s.zeitmodell, 'aktivitaet', 'Live: geltendes Modell falsch');
+      live.db.close();
+
+      // Zwei Modelle in einer Sitzung (Branch-Wechsel): TA rechnet nach
+      // Aktivitaet, TB nach Eingaben. Eine Luecke gehoert der Zeile, an der sie
+      // beginnt — die Minuten 5 bis 9 also TA, auch wenn bei 9 eine Eingabe
+      // von TB steht. TA [0,9], TB-Fenster [6,5..11,5], Ueberlappung geteilt.
+      const w = zeitDb();
+      for (let min = 0; min <= 5; min++) w.zeile('sW', min, 'P', 'TA', 0);
+      w.zeile('sW', 9, 'P', 'TB', 1);
+      w.db.prepare("INSERT INTO zeitmodell_wahl VALUES ('vorgang','TB','eingaben')").run();
+      const wj = Object.fromEntries(metrics.byTicket(w.db, {}).map((x) => [x.ticket, x.active_seconds]));
+      assert.strictEqual(metrics.summary(w.db, {}).active_seconds, 690,
+        'Modellwechsel in der Sitzung verliert Zeit: ' + metrics.summary(w.db, {}).active_seconds + 's statt 690s');
+      assert.strictEqual(wj.TA, 465, 'TA: ' + wj.TA + 's statt 465s');
+      assert.strictEqual(wj.TB, 225, 'TB: ' + wj.TB + 's statt 225s');
+      w.db.close();
+    });
+  } finally {
+    cfg.projektSaetze = merk;
+  }
+}
+
+// Die Wahl wird ueber die Oberflaeche gesetzt. Sie bestimmt Stunden auf
+// Rechnungen, deshalb wird jeder Wert geprueft. Und ein Projekt ohne eigenen
+// Satz darf seine Wahl nicht verlieren — setzeSatz() loeschte bisher jeden
+// Eintrag ohne Betrag.
+function testZeitmodellWahl() {
+  const { setzeZeitmodell, setzeSatz } = require('../server');
+  const cfg = require('../config.json');
+  const pfad = path.join(__dirname, '..', 'config.json');
+  const datei = fs.readFileSync(pfad, 'utf8');
+  const merk = cfg.projektSaetze;
+  try {
+    const { db, zeile } = zeitDb();
+    zeile('s1', 0, 'P', 'T1', 1);
+    const gespeichert = (art, k) => {
+      const r = db.prepare('SELECT zeitmodell FROM zeitmodell_wahl WHERE art = ? AND schluessel = ?').get(art, k);
+      return r ? r.zeitmodell : null;
+    };
+
+    assert.throws(() => setzeZeitmodell(db, { art: 'projekt', schluessel: 'P', zeitmodell: 'eingaben' }), /Art/);
+    assert.throws(() => setzeZeitmodell(db, { art: 'sitzung', schluessel: 's1', zeitmodell: 'activity' }), /Zeitmodell/);
+    assert.throws(() => setzeZeitmodell(db, { art: 'sitzung', schluessel: 'gibtsnicht', zeitmodell: 'eingaben' }), /Unbekannte Sitzung/);
+    assert.throws(() => setzeZeitmodell(db, { art: 'vorgang', schluessel: 'T9', zeitmodell: 'eingaben' }), /Unbekannter Vorgang/);
+    assert.strictEqual(db.prepare('SELECT COUNT(*) n FROM zeitmodell_wahl').get().n, 0, 'abgelehnte Wahl wurde gespeichert');
+
+    setzeZeitmodell(db, { art: 'sitzung', schluessel: 's1', zeitmodell: 'aktivitaet' });
+    setzeZeitmodell(db, { art: 'vorgang', schluessel: 'T1', zeitmodell: 'eingaben' });
+    assert.strictEqual(gespeichert('sitzung', 's1'), 'aktivitaet');
+    assert.strictEqual(gespeichert('vorgang', 'T1'), 'eingaben');
+    setzeZeitmodell(db, { art: 'sitzung', schluessel: 's1', zeitmodell: 'eingaben' });
+    assert.strictEqual(gespeichert('sitzung', 's1'), 'eingaben', 'zweite Wahl ueberschreibt die erste nicht');
+    setzeZeitmodell(db, { art: 'sitzung', schluessel: 's1', zeitmodell: '' });
+    assert.strictEqual(gespeichert('sitzung', 's1'), null, 'leere Wahl setzt nicht auf "erbt" zurueck');
+
+    cfg.projektSaetze = {};
+    setzeSatz({ projekt: 'P', zeitmodell: 'aktivitaet' });
+    assert.deepStrictEqual(cfg.projektSaetze.P, { zeitmodell: 'aktivitaet' },
+      'Projekt ohne Satz verliert seine Zeitmodell-Wahl');
+    assert.strictEqual(JSON.parse(fs.readFileSync(pfad, 'utf8')).projektSaetze.P.zeitmodell, 'aktivitaet',
+      'Zeitmodell des Projekts steht nicht in config.json');
+    assert.throws(() => setzeSatz({ projekt: 'P', zeitmodell: 'activity' }), /Zeitmodell/);
+    assert.strictEqual(cfg.projektSaetze.P.zeitmodell, 'aktivitaet', 'abgelehnte Eingabe hat das Projekt veraendert');
+    // Fehlt das Feld ganz (aeltere Oberflaeche, Laden fehlgeschlagen), bleibt
+    // die Wahl stehen. Erst ein ausdrueckliches Leer setzt sie zurueck.
+    setzeSatz({ projekt: 'P', satz: 90 });
+    assert.deepStrictEqual(cfg.projektSaetze.P, { zeitmodell: 'aktivitaet', satz: 90 },
+      'Satzaenderung ohne Zeitmodell-Feld loescht die Wahl des Projekts');
+    setzeSatz({ projekt: 'P', zeitmodell: '' });
+    // Ein Projektname darf das Objekt selbst nicht verbiegen.
+    for (const boese of ['__proto__', 'constructor', 'prototype']) {
+      assert.throws(() => setzeSatz({ projekt: boese, satz: 1 }), /Projektname/, boese + ' wurde angenommen');
+    }
+    assert.strictEqual(Object.getPrototypeOf(cfg.projektSaetze), Object.prototype, 'projektSaetze wurde verbogen');
+    setzeSatz({ projekt: 'P', zeitmodell: '' });
+    assert.strictEqual(cfg.projektSaetze.P, undefined, 'leere Wahl ohne Satz laesst einen leeren Eintrag stehen');
+    db.close();
+  } finally {
+    cfg.projektSaetze = merk;
+    fs.writeFileSync(pfad, datei, 'utf8');
+  }
+}
+
+// Eine gestellte Rechnung wird nie nachgerechnet. Damit spaeter erkennbar
+// bleibt, wie ihre Stunden entstanden sind, steht das Zeitmodell in der Position.
+function testRechnungZeitmodell() {
+  rechnungsUmgebung(() => mitZeitmodell(5, 'eingaben', () => {
+    const rechnung = require('../rechnung');
+    const daten = { from: '2026-08-01', to: '2026-08-31', tickets: ['PROJ-500'], empfaenger: { name: 'Kunde' } };
+    const ohne = rechnungsDb();
+    assert.strictEqual(rechnung.erstelle(ohne, daten).positionen[0].zeitmodell, 'eingaben',
+      'Position ohne eigene Wahl nennt nicht das Standardmodell');
+    const mit = rechnungsDb();
+    mit.prepare("INSERT INTO zeitmodell_wahl VALUES ('vorgang','PROJ-500','aktivitaet')").run();
+    assert.strictEqual(rechnung.erstelle(mit, daten).positionen[0].zeitmodell, 'aktivitaet',
+      'Position nennt nicht das Modell des Vorgangs');
+  }));
+}
+
 // Dieselbe Zeit darf nicht davon abhaengen, wie man sie ansieht: alle Vorgaenge
 // plus die ticketlose Arbeit ergeben den Gesamtwert, und die Monate ergeben
 // zusammen den ganzen Zeitraum — auch wenn sich zwei Fenster ueber Mitternacht
@@ -3501,6 +3656,9 @@ async function main() {
   test('Zeit: Altbestand und Modell aktivitaet rechnen ueber die vereinigte Aktivitaet', testZeitAltbestand);
   test('Zeit: Summe der Vorgaenge ergibt den Gesamtwert, auch ueber die Monatsgrenze', testZeitSummen);
   test('Zeit: das Zeitmodell laesst sich in den Einstellungen umschalten', testZeitmodellSchalter);
+  test('Zeit: Zeitmodell je Sitzung, Vorgang und Projekt ueberschreibt den Standard', testZeitmodellEbenen);
+  test('Zeitmodell: Wahl je Vorgang, Sitzung und Projekt wird geprueft und gespeichert', testZeitmodellWahl);
+  test('Rechnung: Position nennt das Zeitmodell ihrer Stunden', testRechnungZeitmodell);
   test('Preise: synthetisch = 0, Haiku < Opus, unbekannte Variante > 0', testPricing);
   test('Mehrwert rechnet Dollar in Euro um, bevor addiert wird', testMehrwert);
   test('Marge zieht die eigene Arbeitszeit ab, Zielmarge nur als Vergleich', testMargeZiehtEigeneZeitAb);

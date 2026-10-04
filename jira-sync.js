@@ -72,6 +72,9 @@ function fingerprint(t) {
     // Ohne den Satz bliebe ein nachtraeglich geaenderter Rabatt unbemerkt und
     // der Kommentar wiese weiter den alten Arbeitswert aus.
     Math.round((t.stundensatz || 0) * 100),
+    // Der Fusstext nennt das Zeitmodell. Aendert es sich bei gleicher Zeit
+    // (Altbestand ohne Eingabe-Kennung), stuende sonst der alte Satz da.
+    t.zeitmodell,
   ].join('|');
 }
 
@@ -136,10 +139,15 @@ function buildComment(t, models) {
       type: 'text',
       text:
         `Automatisch erstellt (${MARKER}). ` +
-        (config.zeitmodell === 'aktivitaet'
+        // Das Modell des Vorgangs, nicht der globale Standard: Projekt,
+        // Vorgang oder einzelne Sitzungen koennen ihn ueberschreiben.
+        (t.zeitmodell === 'aktivitaet'
           ? `Aktivzeit ohne Pausen ueber ${config.gapMinutes} Minuten. `
-          : `Arbeitszeit ist die Zeit um die eigenen Eingaben (je ${config.gapMinutes / 2} Minuten davor und danach); ` +
-            'die Agentenzeit ist die Laufzeit der KI und wird nicht berechnet. ') +
+          : t.zeitmodell === 'gemischt'
+            ? 'Arbeitszeit je Sitzung nach eigenem Zeitmodell: teils die Zeit um die eigenen Eingaben, ' +
+              `teils jede Aktivitaet ohne Pausen ueber ${config.gapMinutes} Minuten. `
+            : `Arbeitszeit ist die Zeit um die eigenen Eingaben (je ${config.gapMinutes / 2} Minuten davor und danach); ` +
+              'die Agentenzeit ist die Laufzeit der KI und wird nicht berechnet. ') +
         'Werkzeuge sind Hintergrunddienste (z. B. claude-mem), die waehrend der ' +
         'Arbeit an diesem Ticket mitliefen und ueber ein Zeitfenster zugeordnet werden. ' +
         `Stand: ${new Date().toLocaleString('de-DE')}`,

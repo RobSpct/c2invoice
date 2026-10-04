@@ -100,6 +100,7 @@ function vorgangsPositionen(db, { from, to, tickets }, vFaktor) {
     von: t.first_day,
     bis: t.last_day,
     stunden: rund2(t.active_hours),
+    zeitmodell: t.zeitmodell,
     basissatz: rund2(t.stundensatz_standard),
     rabatt_prozent: t.rabatt_prozent || 0,
     satz: rund2(t.stundensatz),

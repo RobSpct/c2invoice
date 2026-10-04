@@ -140,11 +140,29 @@ function leseKoerper(req, fertig) {
 
 // Setzt Satz und/oder Rabatt eines Projekts und schreibt die Konfiguration.
 // Beides zusammen ist erlaubt: der Rabatt wirkt dann auf den eigenen Satz.
-function setzeSatz({ projekt, satz, rabatt, kunde }) {
+// Daneben steht das Zeitmodell des Projekts; ohne Wahl gilt der Standard.
+// Der Eintrag wird als Ganzes ersetzt. Ausnahme Zeitmodell: fehlt das Feld
+// ganz, bleibt die bisherige Wahl stehen — leer ("" oder null) setzt zurueck.
+// Sonst loeschte jede Satzaenderung aus einer Oberflaeche, die die Wahl nicht
+// geladen hat, still das Zeitmodell des Projekts.
+const VERBOTENE_SCHLUESSEL = ['__proto__', 'constructor', 'prototype'];
+
+function setzeSatz({ projekt, satz, rabatt, kunde, zeitmodell }) {
   if (typeof projekt !== 'string' || !projekt.trim()) {
     throw new Error('Projektname fehlt.');
   }
+  // Der Name wird Schluessel in config.projektSaetze. "__proto__" saetze dort
+  // den Prototyp statt einen Eintrag anzulegen.
+  if (VERBOTENE_SCHLUESSEL.includes(projekt)) throw new Error('Projektname nicht zulaessig.');
   const eintrag = {};
+  if (zeitmodell === undefined) {
+    const bisher = config.projektSaetze && Object.hasOwn(config.projektSaetze, projekt)
+      ? config.projektSaetze[projekt].zeitmodell : undefined;
+    if (bisher) eintrag.zeitmodell = bisher;
+  } else if (zeitmodell !== null && zeitmodell !== '') {
+    if (!ZEITMODELLE.includes(zeitmodell)) throw new Error('Zeitmodell: nur ' + ZEITMODELLE.join(' oder ') + '.');
+    eintrag.zeitmodell = zeitmodell;
+  }
 
   if (satz !== null && satz !== undefined && satz !== '') {
     const n = Number(satz);
@@ -169,7 +187,35 @@ function setzeSatz({ projekt, satz, rabatt, kunde }) {
   }
 
   schreibeConfig();
-  return { projekt, ...metrics.satzFuerProjekt(projekt) };
+  return { projekt, ...metrics.satzFuerProjekt(projekt), zeitmodell: eintrag.zeitmodell || null };
+}
+
+// Zeitmodell eines Vorgangs oder einer Sitzung. Leer heisst: keine eigene
+// Wahl mehr, es gilt wieder Projekt bzw. Standard. Nur bekannte Vorgaenge und
+// Sitzungen — eine Wahl fuer einen Tippfehler stuende sonst still herum.
+function setzeZeitmodell(db, { art, schluessel, zeitmodell } = {}) {
+  if (art !== 'vorgang' && art !== 'sitzung') throw new Error('Art: nur vorgang oder sitzung.');
+  const leer = zeitmodell === null || zeitmodell === undefined || zeitmodell === '';
+  if (!leer && !ZEITMODELLE.includes(zeitmodell)) {
+    throw new Error('Zeitmodell: nur ' + ZEITMODELLE.join(' oder ') + '.');
+  }
+  if (typeof schluessel !== 'string' || !schluessel.trim() || schluessel.length > 200) {
+    throw new Error(art === 'sitzung' ? 'Sitzungskennung fehlt.' : 'Vorgang fehlt.');
+  }
+  const k = schluessel.trim();
+  const spalte = art === 'sitzung' ? 'session_id' : 'ticket';
+  if (!db.prepare('SELECT 1 FROM events WHERE ' + spalte + ' = ? LIMIT 1').get(k)) {
+    throw new Error(art === 'sitzung' ? 'Unbekannte Sitzung.' : 'Unbekannter Vorgang.');
+  }
+  if (leer) {
+    db.prepare('DELETE FROM zeitmodell_wahl WHERE art = ? AND schluessel = ?').run(art, k);
+  } else {
+    db.prepare(
+      'INSERT INTO zeitmodell_wahl (art, schluessel, zeitmodell) VALUES (?,?,?) ' +
+      'ON CONFLICT(art, schluessel) DO UPDATE SET zeitmodell = excluded.zeitmodell'
+    ).run(art, k, zeitmodell);
+  }
+  return { art, schluessel: k, zeitmodell: leer ? null : zeitmodell };
 }
 
 // Eine Sitzung von Hand auf einen Vorgang buchen. Deckt die Arbeit ab, die
@@ -281,7 +327,7 @@ const EINSTELLUNGEN = {
 
 // Die einzige Einstellung mit festen Auswahlwerten statt einer Zahl. Sie
 // entscheidet, welche Zeit abgerechnet wird (siehe metrics.js).
-const ZEITMODELLE = ['eingaben', 'aktivitaet'];
+const ZEITMODELLE = metrics.ZEITMODELLE;
 
 function setzeEinstellungen(daten) {
   if (!daten || typeof daten !== 'object') throw new Error('Keine Daten empfangen.');
@@ -554,6 +600,7 @@ function handle(req, res) {
   const u = new URL(req.url, 'http://127.0.0.1');
   const p = u.pathname;
 
+
   // Obsidian laedt die Seite unter der Herkunft app://obsidian.md und braucht
   // deshalb eine Freigabe. Bewusst keine Freigabe fuer alle: sonst koennte
   // jede im Browser geoeffnete Webseite die Abrechnungsdaten auslesen.
@@ -728,6 +775,19 @@ function handle(req, res) {
         if (fehler) return sendJson(res, { error: fehler }, 400);
         try {
           return sendJson(res, { ok: true, ...bucheVorgang(db, daten) });
+        } catch (err) {
+          return sendJson(res, { error: err.message }, 400);
+        }
+      });
+    }
+
+    // Zeitmodell je Vorgang oder Sitzung. Wirkt sofort: die Zeit wird bei
+    // jeder Auswertung neu verteilt, ein Nachtrag ist nicht noetig.
+    if (p === '/api/zeitmodell' && req.method === 'POST') {
+      return leseKoerper(req, (fehler, daten) => {
+        if (fehler) return sendJson(res, { error: fehler }, 400);
+        try {
+          return sendJson(res, { ok: true, ...setzeZeitmodell(db, daten) });
         } catch (err) {
           return sendJson(res, { error: err.message }, 400);
         }
@@ -1123,4 +1183,5 @@ module.exports = {
   setzeStammdaten, STAMMDATEN,
   vorlagenListe, setzeVorlage, loescheVorlage,
   bucheVorgang, eRechnungAntwort,
+  setzeSatz, setzeZeitmodell,
 };

@@ -54,8 +54,46 @@ function activeSecondsFromTimestamps(timestamps, gapMinutes = config.gapMinutes)
 //   berechnet.
 // "aktivitaet": jede Logzeile zaehlt, also auch die Laufzeit der KI. Fuer alle,
 //   die das Beaufsichtigen eines Agenten bewusst als Arbeitszeit abrechnen.
-function zaehltEingaben() {
-  return config.zeitmodell !== 'aktivitaet';
+//
+// config.zeitmodell ist nur der Standard. Ein Projekt (config.projektSaetze),
+// ein Vorgang oder eine einzelne Sitzung (Tabelle zeitmodell_wahl) kann ihn
+// ueberschreiben. Es gilt die engste Wahl: Sitzung vor Vorgang vor Projekt.
+const ZEITMODELLE = ['eingaben', 'aktivitaet'];
+
+function zeitmodellKarte(db) {
+  const sitzung = new Map();
+  const vorgang = new Map();
+  for (const w of db.prepare('SELECT art, schluessel, zeitmodell FROM zeitmodell_wahl').all()) {
+    if (!ZEITMODELLE.includes(w.zeitmodell)) continue;
+    if (w.art === 'sitzung') sitzung.set(w.schluessel, w.zeitmodell);
+    else if (w.art === 'vorgang') vorgang.set(w.schluessel, w.zeitmodell);
+  }
+  const standard = config.zeitmodell === 'aktivitaet' ? 'aktivitaet' : 'eingaben';
+  const saetze = config.projektSaetze || {};
+  // Nur eigene Eintraege: ein Projekt namens "constructor" darf nicht ueber
+  // den Prototyp etwas finden.
+  const projekt = (p) => {
+    const m = Object.hasOwn(saetze, p) && saetze[p] ? saetze[p].zeitmodell : undefined;
+    return ZEITMODELLE.includes(m) ? m : null;
+  };
+  // Waehlt niemand "aktivitaet", braucht keine Auswertung die Zeilen ohne
+  // eigene Eingabe — die Abfrage darf sie dann gleich weglassen. Das sind
+  // ueber 90 % aller Zeilen.
+  const nurEingaben = standard === 'eingaben'
+    && ![...sitzung.values(), ...vorgang.values()].includes('aktivitaet')
+    && !Object.keys(config.projektSaetze || {}).some((p) => projekt(p) === 'aktivitaet');
+  return {
+    sitzung, vorgang, projekt, standard, nurEingaben,
+    fuer: (r) => sitzung.get(r.session_id) || (r.ticket && vorgang.get(r.ticket))
+      || projekt(r.project) || standard,
+  };
+}
+
+// Mehrere Modelle in einer Gruppe heissen "gemischt"; ohne Abschnitte gilt,
+// was die Gruppe gewaehlt haette.
+function zeitmodellAus(modelle, ersatz) {
+  if (!modelle || modelle.size === 0) return ersatz;
+  return modelle.size === 1 ? [...modelle][0] : 'gemischt';
 }
 
 // Claude Code schreibt mitten in eine Sitzung Zeilen ohne Arbeitsverzeichnis.
@@ -101,21 +139,24 @@ function zeitRahmen({ from, to, month }) {
 // anderen Vorgangs oder das Fenster jenseits der Monatsgrenze nicht, und
 // dieselbe Arbeit truege je nach Ansicht verschiedene Zeiten.
 function zeitAbschnitte(db, rahmen) {
-  const eingaben = zaehltEingaben();
+  const karte = zeitmodellKarte(db);
   const rows = db.prepare(`
     SELECT session_id, ts, project, ticket, day, eingabe FROM activity
     WHERE (? IS NULL OR day >= date(?, '-1 day'))
       AND (? IS NULL OR day <= date(?, '+1 day'))
-      ${eingaben ? 'AND (eingabe IS NULL OR eingabe = 1)' : ''}
+      ${karte.nurEingaben ? 'AND (eingabe IS NULL OR eingabe = 1)' : ''}
     ORDER BY session_id, ts
   `).all(rahmen.von, rahmen.von, rahmen.bis, rahmen.bis);
 
   const limit = config.gapMinutes * 60 * 1000;
   const halb = limit / 2;
+  // Projekt, Vorgang und Sitzung legen das Modell fest. Wer in allen dreien
+  // gleich ist, hat also auch dasselbe Modell.
   const gleich = (a, r) => a.session === r.session_id && a.project === r.project
     && a.ticket === r.ticket && a.day === r.day;
   const neu = (von, bis, r) => ({
     von, bis, session: r.session_id, project: r.project, ticket: r.ticket, day: r.day,
+    modell: r.modell,
   });
 
   const out = [];
@@ -128,9 +169,27 @@ function zeitAbschnitte(db, rahmen) {
     const ms = Date.parse(r.ts);
     if (!Number.isFinite(ms)) continue;
     erbeProjekt(r, davor);
+    // Das Modell haengt am Projekt, deshalb erst nach dem Erben entscheiden.
+    r.modell = karte.fuer(r);
+    const eingaben = r.modell === 'eingaben';
+    // Im Modell "eingaben" sind Zeilen ohne eigene Eingabe Agentenzeit. Sie
+    // fallen ganz heraus, auch als Vorgaenger fuer das Erben: so verhaelt sich
+    // die Rechnung wie vorher, als die Abfrage sie gar nicht erst las.
+    if (eingaben && r.eingabe === 0) continue;
     davor = r;
 
     if (eingaben && r.eingabe === 1) {
+      // Wechselt die Sitzung mitten in der Arbeit von einem Vorgang mit
+      // Modell "aktivitaet" hierher, gehoert die Luecke davor noch jenem
+      // Vorgang: eine Luecke zaehlt dort, wo sie beginnt. Ohne das ginge sie
+      // beim Zuruecksetzen unten verloren.
+      if (prev && prev.modell !== 'eingaben' && r.session_id === prev.session_id) {
+        const gap = ms - prevMs;
+        if (gap > 0 && gap <= limit) {
+          if (lauf && lauf.bis === prevMs && gleich(lauf, prev)) lauf.bis = ms;
+          else out.push(neu(prevMs, ms, prev));
+        }
+      }
       // Fenster derselben Sitzung wachsen zusammen, damit eine Sitzung beim
       // Verteilen als ein Teilnehmer zaehlt und nicht als mehrere.
       if (fenster && gleich(fenster, r) && ms - halb <= fenster.bis) {
@@ -206,9 +265,16 @@ function verteile(abschnitte) {
 // opts: dieselben Filter wie ueberall (from, to, month, ticket, project). Ein
 // Modellfilter wird bewusst nicht gelesen — eine Zeitspanne gehoert keinem
 // einzelnen Request. `ticketlos` beschraenkt auf Arbeit ohne Vorgangsnummer.
-function activeSecondsByGroup(db, opts = {}, { groupBy = 'ticket', ticketlos = false } = {}) {
+function activeSecondsByGroup(db, opts = {}, wie = {}) {
+  return zeitJeGruppe(db, opts, wie).sekunden;
+}
+
+// Wie activeSecondsByGroup, liefert dazu je Gruppe die Zeitmodelle, nach denen
+// ihre Zeit entstanden ist. Ein Durchlauf fuer beides.
+function zeitJeGruppe(db, opts = {}, { groupBy = 'ticket', ticketlos = false } = {}) {
   const rahmen = zeitRahmen(opts);
   const out = new Map();
+  const modelle = new Map();
   for (const a of verteile(zeitAbschnitte(db, rahmen))) {
     if (rahmen.von && a.day < rahmen.von) continue;
     if (rahmen.bis && a.day > rahmen.bis) continue;
@@ -217,10 +283,14 @@ function activeSecondsByGroup(db, opts = {}, { groupBy = 'ticket', ticketlos = f
     if (ticketlos && a.ticket) continue;
     const grp = (groupBy === 'project' ? a.project : a.ticket) || '(ohne)';
     out.set(grp, (out.get(grp) || 0) + a.ms);
+    if (a.ms > 0) {
+      if (!modelle.has(grp)) modelle.set(grp, new Set());
+      modelle.get(grp).add(a.modell);
+    }
   }
-  const result = {};
-  for (const [k, v] of out) result[k] = Math.round(v / 1000);
-  return result;
+  const sekunden = {};
+  for (const [k, v] of out) sekunden[k] = Math.round(v / 1000);
+  return { sekunden, modelle };
 }
 
 // Laufzeit je Gruppe (Ticket oder Projekt): jede Sitzung fuer sich, parallele
@@ -404,6 +474,14 @@ if (config.zeitmodell !== undefined && !['eingaben', 'aktivitaet'].includes(conf
   throw new Error(
     'config.json: zeitmodell kennt nur "eingaben" oder "aktivitaet", nicht "' + config.zeitmodell + '".'
   );
+}
+for (const [projekt, eintrag] of Object.entries(config.projektSaetze || {})) {
+  const m = eintrag && eintrag.zeitmodell;
+  if (m !== undefined && !ZEITMODELLE.includes(m)) {
+    throw new Error(
+      'config.json: projektSaetze["' + projekt + '"].zeitmodell kennt nur "eingaben" oder "aktivitaet", nicht "' + m + '".'
+    );
+  }
 }
 
 function isOverhead(project) {
@@ -953,7 +1031,9 @@ function byTicket(db, opts = {}) {
   `).all(...params);
 
   // Ohne Modellbedingung, siehe byProject.
-  const act = activeSecondsByGroup(db, opts, { groupBy: 'ticket' });
+  const zeit = zeitJeGruppe(db, opts, { groupBy: 'ticket' });
+  const act = zeit.sekunden;
+  const karte = zeitmodellKarte(db);
   const agent = agentSecondsByGroup(db, opts, { groupBy: 'ticket' });
   // Werkzeuge, die waehrend der Arbeit am Ticket mitgelaufen sind.
   const werkzeugTicket = werkzeugeJeTicket(db, opts);
@@ -967,6 +1047,10 @@ function byTicket(db, opts = {}) {
     const stunden = seconds / 3600;
     const satzInfo = satzFuerTicket(db, r.ticket);
     const arbeitswert = stunden * satzInfo.satz;
+    // Was der Vorgang ohne eigene Wahl haette: das Modell seines Projekts
+    // oder der Standard. Die Oberflaeche zeigt es neben der eigenen Wahl.
+    const erbt = karte.projekt(satzInfo.projekt) || karte.standard;
+    const wahl = karte.vorgang.get(r.ticket) || null;
     const wz = werkzeugTicket.get(r.ticket) || { requests: 0, total_tokens: 0, cost_usd: 0 };
     const lok = lokalTicket.get(r.ticket) || { requests: 0, tokens: 0, modelle: new Set() };
     const lokStd = lokalStunden.get(r.ticket) || 0;
@@ -988,6 +1072,11 @@ function byTicket(db, opts = {}) {
       // Laufzeit der KI je Sitzung. Wird ausgewiesen, nicht abgerechnet.
       agent_seconds: agent[r.ticket] || 0,
       agent_hours: (agent[r.ticket] || 0) / 3600,
+      // Nach welchem Modell die Zeit entstanden ist; "gemischt", wenn einzelne
+      // Sitzungen eine eigene Wahl tragen.
+      zeitmodell: zeitmodellAus(zeit.modelle.get(r.ticket), wahl || erbt),
+      zeitmodell_wahl: wahl,
+      zeitmodell_erbt: erbt,
       arbeitswert,                            // Zeit x Stundensatz, in Euro
       stundensatz: satzInfo.satz,
       stundensatz_standard: satzInfo.standard,
@@ -1045,7 +1134,9 @@ function ohneTicket(db, opts = {}) {
   `).all(...params);
 
   // Ohne Modellbedingung, siehe byProject.
-  const act = activeSecondsByGroup(db, opts, { groupBy: 'project', ticketlos: true });
+  const zeit = zeitJeGruppe(db, opts, { groupBy: 'project', ticketlos: true });
+  const act = zeit.sekunden;
+  const karte = zeitmodellKarte(db);
   const agent = agentSecondsByGroup(db, opts, { groupBy: 'project', ticketlos: true });
   const lokalProjekt = lokalJeGruppe(db, opts, 'project');
   const lokalStunden = lokalStundenJeGruppe(db, opts, 'project');
@@ -1079,6 +1170,7 @@ function ohneTicket(db, opts = {}) {
         active_hours: stunden,
         agent_seconds: agent[r.project] || 0,
         agent_hours: (agent[r.project] || 0) / 3600,
+        zeitmodell: zeitmodellAus(zeit.modelle.get(r.project), karte.projekt(r.project) || karte.standard),
         arbeitswert,
         stundensatz: satzInfo.satz,
         stundensatz_standard: satzInfo.standard,
@@ -1231,10 +1323,18 @@ function live(db, { minutes = 60 } = {}) {
            is_sidechain, MAX(ts) AS last_ts, ${SUM_COLS}
     FROM events WHERE ts >= ?${nichtWerkzeug}
     GROUP BY session_id, model, is_sidechain ORDER BY last_ts DESC LIMIT 20
-  `).all(since, ...werkzeugParams).map((r) => ({
+  `).all(since, ...werkzeugParams);
+  // Die Wahl gilt je Sitzung, auch ohne Vorgang. `zeitmodell_wahl` ist die
+  // eigene Wahl der Sitzung (oder null), `zeitmodell` das, was gerade gilt.
+  const karte = zeitmodellKarte(db);
+  const sitzungen = recent.map((r) => ({
     session_id: r.session_id, project: r.project, branch: r.branch,
     ticket: r.ticket, ticket_quelle: r.ticket_quelle, model: r.model,
     is_sidechain: r.is_sidechain === 1, last_ts: r.last_ts, ...withTotals(r),
+    zeitmodell_wahl: karte.sitzung.get(r.session_id) || null,
+    zeitmodell: karte.fuer(r),
+    // Was ohne eigene Wahl der Sitzung gaelte: Vorgang, Projekt, Standard.
+    zeitmodell_erbt: (r.ticket && karte.vorgang.get(r.ticket)) || karte.projekt(r.project) || karte.standard,
   }));
 
   // Werkzeugkosten des Zeitfensters, nach Projekt aufgeschluesselt.
@@ -1255,7 +1355,7 @@ function live(db, { minutes = 60 } = {}) {
     window_minutes: minutes,
     window: w,
     burn_usd_per_hour: minutes > 0 ? (w.cost_usd / minutes) * 60 : 0,
-    sessions: recent,
+    sessions: sitzungen,
     werkzeuge: werkzeugJeProjekt,
   };
 }
@@ -1304,6 +1404,8 @@ module.exports = {
   activeSecondsFromTimestamps,
   activeSecondsByGroup,
   agentSecondsByGroup,
+  zeitmodellKarte,
+  ZEITMODELLE,
   summary,
   byModel,
   preisLuecken,

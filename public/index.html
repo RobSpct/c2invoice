@@ -220,6 +220,10 @@
   tr.clickable.sel { background: var(--accent-soft); }
   tr.clickable.sel td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
   td.trunc { max-width: 210px; overflow: hidden; text-overflow: ellipsis; }
+  /* Live: der Branch macht Platz fuer die Zeitmodell-Spalte. Der volle Name
+     steht im Tooltip. */
+  #l-sessions td.trunc.mono { max-width: 150px; }
+  #l-sessions th, #l-sessions td { padding-left: 7px; padding-right: 7px; }
 
   /* Werkzeugbetrieb sichtbar von abrechenbarer Projektarbeit abheben. */
   tr.row-overhead td { opacity: .62; }
@@ -481,6 +485,16 @@
     background: var(--accent-soft); color: var(--accent); border-color: var(--accent);
   }
   .zeitraum-schalter button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  /* Zeitmodell je Projekt, Vorgang, Sitzung: kompakt in Tabellenzeilen. Der
+     gestrichelte Rahmen zeigt, was "Standard" gerade bedeutet. */
+  .zm-schalter { margin: 0; flex-wrap: nowrap; }
+  /* Schrift der Oberflaeche statt der Zahlenschrift der Tabellenzelle: die
+     Monospace-Schrift macht drei Knoepfe so breit, dass die Live-Tabelle
+     ueberlaeuft. */
+  .zm-schalter button { padding: 3px 7px; white-space: nowrap; font-family: var(--font-ui); font-size: 11.5px; }
+  .zm-schalter button.geerbt { border-style: dashed; color: var(--accent); }
+  .d-zeitmodell { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0 0 12px; }
+  .d-zeitmodell .dimlabel { font-size: 12px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .06em; }
   /* Aktiver Modellfilter: die Karte sagt, worauf sie gerade eingeschraenkt ist. */
   .filter-hinweis {
     display: inline-flex; align-items: center; gap: 8px; margin-left: 8px;
@@ -1595,7 +1609,19 @@ EN["Agent Std."] = "Agent hrs";
 EN["Zeitmodell"] = "Time model";
 EN["Eigene Zeit"] = "Own time";
 EN["Aktivität"] = "Activity";
-EN["Welche Zeit abgerechnet wird. „Eigene Zeit“ (empfohlen) zählt nur das Fenster um deine Eingaben; die Laufzeit der KI steht als Agentenzeit daneben. „Aktivität“ zählt jede Logzeile, auch wenn die KI allein arbeitet. Eine Minute zählt in beiden höchstens einmal. Gestellte Rechnungen ändern sich nicht."] = "Which time is billed. “Own time” (recommended) counts only the window around your inputs; the AI's runtime is shown next to it as agent time. “Activity” counts every log line, even when the AI works alone. In both, a minute counts at most once. Issued invoices do not change.";
+EN["Welche Zeit abgerechnet wird. „Eigene Zeit“ (empfohlen) zählt nur das Fenster um deine Eingaben; die Laufzeit der KI steht als Agentenzeit daneben. „Aktivität“ zählt jede Logzeile, auch wenn die KI allein arbeitet. Eine Minute zählt in beiden höchstens einmal. Gestellte Rechnungen ändern sich nicht. Das ist der Standard: je Projekt (Stundensätze), je Vorgang (Detailansicht) und je Sitzung (Live) lässt er sich überschreiben."] = "Which time is billed. “Own time” (recommended) counts only the window around your inputs; the AI's runtime is shown next to it as agent time. “Activity” counts every log line, even when the AI works alone. In both, a minute counts at most once. Issued invoices do not change. This is the default: it can be overridden per project (hourly rates), per job (detail view) and per session (Live).";
+EN["Standard"] = "Default";
+EN["Standard – gilt: "] = "Default – applies: ";
+EN["Zeitmodell für "] = "Time model for ";
+EN["Abgerechnete Zeit"] = "Billed time";
+EN["Agentenzeit"] = "Agent time";
+EN["nicht abgerechnet"] = "not billed";
+EN["Zeitmodell: "] = "Time model: ";
+EN["je Sitzung verschieden"] = "varies by session";
+EN["Zeitmodell gespeichert: "] = "Time model saved: ";
+EN["folgt wieder dem Standard"] = "follows the default again";
+EN["Zeitmodell nicht gespeichert: "] = "Time model not saved: ";
+EN["Sitzung"] = "Session";
 EN["E-Rechnung"] = "E-invoice";
 EN["Die Rechnung als strukturierte Datei (XRechnung, EN 16931). Sie ist das Original für den Empfänger; Ansicht und PDF sind die Lesefassung."] = "The invoice as a structured file (XRechnung, EN 16931). It is the original for the recipient; the view and the PDF are the reading copy.";
 EN["E-Rechnung gespeichert: "] = "E-invoice saved: ";
@@ -2714,7 +2740,7 @@ function zeichneLive() {
     aktualisiereBuchungsanzeige(sess);
   } else {
     let h = '<div class="tablewrap"><table><thead><tr>' +
-      '<th>' + uebersetze('Projekt') + '</th><th>' + uebersetze('Branch') + '</th><th>' + uebersetze('Vorgang') + '</th><th>' + uebersetze('Modell') + '</th>' +
+      '<th>' + uebersetze('Projekt') + '</th><th>' + uebersetze('Branch') + '</th><th>' + uebersetze('Vorgang') + '</th><th>' + uebersetze('Zeitmodell') + '</th><th>' + uebersetze('Modell') + '</th>' +
       '<th>' + uebersetze('Tokens') + '</th><th>' + uebersetze('API-Gegenwert USD') + '</th><th>' + uebersetze('Letzte Aktivität') + '</th>' +
       '</tr></thead><tbody>';
     // Eine Sitzung kann mehrere Zeilen haben (je Modell eine). Gebucht wird
@@ -2762,7 +2788,7 @@ function zeichneLive() {
         // Stelle, an der sonst der Projektname steht.
         const projektZelle = erste
           ? '<td class="trunc" title="' + esc(s.project) + '">' + esc(s.project || '–') + '</td>' +
-            '<td class="trunc dim mono">' + esc(s.branch || '–') + '</td>'
+            '<td class="trunc dim mono" title="' + esc(s.branch || '') + '">' + esc(s.branch || '–') + '</td>'
           : '<td class="folge-label" colspan="2">' + (s.is_sidechain
               ? uebersetze('Subagents dieser Sitzung') : 'gleiche Sitzung, anderes Modell') + '</td>';
         h += '<tr data-session="' + esc(s.session_id || '') + '"' +
@@ -2770,6 +2796,12 @@ function zeichneLive() {
             (mehrteilig ? ' class="sitzung' + (erste ? ' s-kopf' : ' s-folge') + '"' : '') + '>' +
           projektZelle +
           vorgangZelle +
+          // Wie die Buchung gilt die Wahl fuer die ganze Sitzung, also nur in
+          // ihrer ersten Zeile — auch ohne Vorgang.
+          (erste
+            ? '<td class="zm">' + zeitmodellSchalter(s.zeitmodell_wahl, s.zeitmodell_erbt,
+                uebersetze('Zeitmodell für ') + uebersetze('Sitzung') + ' ' + (s.project || '')) + '</td>'
+            : '<td></td>') +
           '<td class="dim">' + esc(kurzModell(s.model)) +
             (s.is_sidechain ? '<span class="tag">' + uebersetze('Subagent') + '</span>' : '') + '</td>' +
           '<td class="z-tokens" title="' + num(s.total_tokens) + ' Tokens">' + kurz(s.total_tokens) + '</td>' +
@@ -2788,7 +2820,7 @@ function zeichneLive() {
       const summe = wz.reduce((a, x) => a + (x.cost_usd || 0), 0);
       const tok = wz.reduce((a, x) => a + (x.total_tokens || 0), 0);
       h += '<tr class="summe">' +
-        '<td colspan="4" class="dimlabel">Werkzeuge im Hintergrund <span class="note">' +
+        '<td colspan="5" class="dimlabel">Werkzeuge im Hintergrund <span class="note">' +
           wz.map((x) => esc(x.projekt)).join(', ') + '</span></td>' +
         '<td class="dimlabel">' + kurz(tok) + '</td>' +
         '<td class="dimlabel">' + usd(summe) + '</td>' +
@@ -2800,6 +2832,22 @@ function zeichneLive() {
       const aendern = tr.querySelector('.aendern');
       if (aendern) aendern.addEventListener('click', () => zeigeVorgangsfeld(tr));
       verdrahteBuchung(tr);
+      // Speichert sofort. Danach den Fokus loesen: solange er in der Tabelle
+      // steht, haelt buchungInArbeit() den Neuaufbau fuer eine Eingabe.
+      verdrahteZeitmodell(tr.querySelector('.zm-schalter'), async (wahl, knopf) => {
+        const projekt = tr.querySelector('td.trunc');
+        const ok = await speichereZeitmodell('sitzung', tr.getAttribute('data-session'), wahl,
+          document.getElementById('l-buchung-status'),
+          uebersetze('Sitzung') + ' ' + (projekt ? projekt.textContent : ''));
+        knopf.blur();
+        ladeLive();
+        if (ok) {
+          hole('/api/summary').then((s) => {
+            if (s) { state.summary = s; zeichneUeberblick(); zeichneTickets(); }
+          }).catch(() => {});
+        }
+        return ok;
+      });
     });
   }
 
@@ -3269,7 +3317,9 @@ function zeichneSaetze() {
 
   let h = '<div class="tablewrap"><table class="saetze"><thead><tr>' +
     '<th>' + uebersetze('Projekt') + '</th><th>' + uebersetze('Kunde') + '</th><th>' + uebersetze('Satz') + ' ' + w + '</th><th>' + uebersetze('Rabatt %') + '</th>' +
-    '<th>' + uebersetze('ergibt') + '</th><th></th></tr></thead><tbody>';
+    '<th>' + uebersetze('Zeitmodell') + '</th><th>' + uebersetze('ergibt') + '</th><th></th></tr></thead><tbody>';
+  // Ohne eigene Wahl gilt fuer ein Projekt der globale Standard.
+  const zmStandard = d.config && d.config.zeitmodell === 'aktivitaet' ? 'aktivitaet' : 'eingaben';
 
   // Die Felder bleiben zunaechst leer; die gespeicherten Werte traegt
   // ladeSaetze() gleich darauf ein. Leer heisst immer: Standardsatz.
@@ -3291,6 +3341,7 @@ function zeichneSaetze() {
         nf2.format(standard) + '"' + fuer('Stundensatz') + '></td>' +
       '<td><input class="feld rabatt" type="number" min="0" max="100" step="1" placeholder="0"' +
         fuer('Rabatt in Prozent') + '></td>' +
+      '<td>' + zeitmodellSchalter(null, zmStandard, uebersetze('Zeitmodell') + uebersetze(' für ') + p.project) + '</td>' +
       '<td class="ergibt eur">' + eur(p.stundensatz) + '</td>' +
       '<td><button class="btn speichern"' + fuer('Speichern') + '>Speichern</button></td>' +
     '</tr>';
@@ -3303,6 +3354,8 @@ function zeichneSaetze() {
   ziel.querySelectorAll('tr[data-projekt]').forEach((tr) => {
     const knopf = tr.querySelector('.speichern');
     knopf.addEventListener('click', () => speichereSatz(tr));
+    // Gespeichert wird wie bei Satz und Rabatt erst mit dem Knopf der Zeile.
+    verdrahteZeitmodell(tr.querySelector('.zm-schalter'));
     tr.querySelectorAll('input').forEach((el) => {
       el.addEventListener('keydown', (e) => { if (e.key === 'Enter') speichereSatz(tr); });
     });
@@ -3337,7 +3390,11 @@ async function ladeSaetze() {
       if (eintrag.satz != null) tr.querySelector('.satz').value = eintrag.satz;
       if (eintrag.rabatt != null) tr.querySelector('.rabatt').value = eintrag.rabatt;
       if (eintrag.kunde) tr.querySelector('.kunde').value = eintrag.kunde;
+      stelleZeitmodell(tr.querySelector('.zm-schalter'), eintrag.zeitmodell);
     }
+    // Erst jetzt zeigt jeder Schalter die gespeicherte Wahl. Vorher schickt
+    // speichereSatz() kein Zeitmodell mit, der Server laesst es dann stehen.
+    document.querySelectorAll('#s-saetze .zm-schalter').forEach((g) => { g.dataset.geladen = '1'; });
   } catch { /* Anzeige bleibt wie sie ist */ }
 }
 
@@ -3350,6 +3407,11 @@ async function speichereSatz(tr) {
     rabatt: tr.querySelector('.rabatt').value.trim(),
     kunde: tr.querySelector('.kunde').value.trim(),
   };
+  // Nur wenn die gespeicherte Wahl geladen war: sonst stuende der Schalter auf
+  // "Standard", und das Speichern loeschte eine Wahl, die niemand geaendert hat.
+  // Ohne Feld laesst der Server die bisherige Wahl stehen.
+  const zm = tr.querySelector('.zm-schalter');
+  if (zm.dataset.geladen === '1' || zm.dataset.wert) nutzlast.zeitmodell = zm.dataset.wert || null;
   try {
     const r = await fetch('/api/saetze', {
       method: 'POST',
@@ -3897,6 +3959,11 @@ function zeichneDetail() {
       '</div>' +
 
       '<div class="calc">' +
+        // Zeitmodell dieses Vorgangs. "Standard" erbt vom Projekt bzw. global;
+        // einzelne Sitzungen koennen es im Live-Tab noch einmal ueberschreiben.
+        '<div class="d-zeitmodell"><span class="dimlabel">' + uebersetze('Zeitmodell') + '</span>' +
+          zeitmodellSchalter(t.zeitmodell_wahl, t.zeitmodell_erbt, uebersetze('Zeitmodell für ') + t.ticket) +
+          '<span id="d-zm-status" class="status"></span></div>' +
         '<div id="d-status" class="statuszeile"></div>' +
         '<dl id="d-werte"><dd><small>' + uebersetze('wird geladen…') + '</small></dd></dl>' +
       '</div>' +
@@ -3963,6 +4030,18 @@ function zeichneDetail() {
 
   document.getElementById('d-close').addEventListener('click', () => {
     state.offenesTicket = null; zeichneTickets();
+  });
+
+  // Wirkt sofort auf Stunden und Arbeitswert: danach Zusammenfassung neu holen
+  // und Tabelle samt Detail neu zeichnen.
+  verdrahteZeitmodell(box.querySelector('.d-zeitmodell .zm-schalter'), async (wahl) => {
+    const ok = await speichereZeitmodell('vorgang', key, wahl, document.getElementById('d-zm-status'));
+    if (!ok) return false;
+    // zeichneTickets() zeichnet das offene Detail mit.
+    hole('/api/summary').then((s) => {
+      if (s) { state.summary = s; zeichneUeberblick(); zeichneTickets(); }
+    }).catch(() => {});
+    return true;
   });
 }
 
@@ -4050,6 +4129,14 @@ function werteHtml(t, w) {
           nf1.format(w.zielmarge_abweichung) + ' Pp)</small></dd>');
 
   return '' +
+    // Erst die Zeit, dann was sie wert ist. Die Tabelle zeigt beide Stunden,
+    // das Detail muss es auch — mit dem Zeitmodell als Bezugsgroesse.
+    '<dt>' + uebersetze('Abgerechnete Zeit') + ' <small>' + uebersetze('Zeitmodell: ') +
+      esc(zeitmodellName(t.zeitmodell)) + '</small></dt>' +
+      '<dd>' + hrs(t.active_hours) + '</dd>' +
+    '<dt>' + uebersetze('Agentenzeit') + ' <small>' + uebersetze('nicht abgerechnet') + '</small></dt>' +
+      '<dd class="faint">' + hrs(t.agent_hours || 0) + '</dd>' +
+    '<div class="sep"></div>' +
     '<dt>Arbeitswert <small>' + hrs(t.active_hours) + ' × Stundensatz</small></dt>' +
       '<dd class="eur">' + eur(w.arbeitswert) + '</dd>' +
     '<dt>API-Gegenwert <small>aus ' + usd(t.api_gegenwert_usd) + '</small></dt>' +
@@ -4131,8 +4218,85 @@ const E_WAHL = {
   aktivitaet: 'Aktivität',
 };
 
+// Zeitmodell-Schalter fuer Projekt, Vorgang und Sitzung. Derselbe Umschalter
+// wie in den Einstellungen, mit einer dritten Stellung "Standard": keine eigene
+// Wahl, es gilt die naechsthoehere Ebene. Welche das ist, zeigt der gestrichelte
+// Rahmen am geerbten Wert — sonst muesste man raten, was "Standard" gerade heisst.
+// `wahl`: eigene Wahl oder null. `erbt`: was ohne eigene Wahl gilt.
+function zeitmodellSchalter(wahl, erbt, label) {
+  const eigene = wahl || '';
+  const knopf = (wert, text, titel) =>
+    '<button type="button" data-wahl="' + wert + '" aria-pressed="' + (eigene === wert) + '"' +
+      (!eigene && wert === erbt ? ' class="geerbt"' : '') +
+      (titel ? ' title="' + esc(titel) + '"' : '') + '>' + esc(text) + '</button>';
+  return '<div class="zeitraum-schalter zm-schalter" role="group" aria-label="' + esc(label) + '"' +
+      ' data-wert="' + esc(eigene) + '" data-erbt="' + esc(erbt || '') + '">' +
+    knopf('', uebersetze('Standard'), uebersetze('Standard – gilt: ') + uebersetze(E_WAHL[erbt] || erbt || '')) +
+    knopf('eingaben', uebersetze(E_WAHL.eingaben)) +
+    knopf('aktivitaet', uebersetze(E_WAHL.aktivitaet)) +
+  '</div>';
+}
+
+// Klick setzt die Stellung sofort sichtbar um; `beiWahl` speichert (oder nicht,
+// in der Stundensatz-Tabelle speichert erst der Knopf der Zeile).
+// Liefert `beiWahl` false, ist nichts gespeichert: dann springt der Schalter
+// zurueck, statt eine Wahl zu zeigen, die es auf dem Server nicht gibt.
+// Waehrend gespeichert wird, ist er gesperrt — sonst gewaenne bei schnellen
+// Klicks die zuletzt eintreffende Antwort, nicht der letzte Klick.
+function verdrahteZeitmodell(gruppe, beiWahl) {
+  if (!gruppe) return;
+  const knoepfe = gruppe.querySelectorAll('button');
+  knoepfe.forEach((b) => {
+    b.addEventListener('click', async () => {
+      const vorher = gruppe.dataset.wert || '';
+      stelleZeitmodell(gruppe, b.dataset.wahl);
+      if (!beiWahl) return;
+      knoepfe.forEach((x) => { x.disabled = true; });
+      let ok = false;
+      try { ok = (await beiWahl(b.dataset.wahl || null, b)) !== false; } finally {
+        knoepfe.forEach((x) => { x.disabled = false; });
+      }
+      if (!ok) stelleZeitmodell(gruppe, vorher);
+    });
+  });
+}
+
+function stelleZeitmodell(gruppe, wahl) {
+  const w = wahl || '';
+  gruppe.dataset.wert = w;
+  gruppe.querySelectorAll('button').forEach((x) => {
+    x.setAttribute('aria-pressed', String(x.dataset.wahl === w));
+    x.classList.toggle('geerbt', !w && x.dataset.wahl === gruppe.dataset.erbt);
+  });
+}
+
+// Lesbarer Name eines aufgeloesten Modells, auch fuer "gemischt".
+function zeitmodellName(m) {
+  return m === 'gemischt' ? uebersetze('je Sitzung verschieden') : uebersetze(E_WAHL[m] || m || '');
+}
+
+// Speichert die Wahl eines Vorgangs oder einer Sitzung und meldet in `status`.
+// `anzeige` nennt, wofuer — eine Sitzungskennung sagt dem Leser nichts.
+async function speichereZeitmodell(art, schluessel, zeitmodell, status, anzeige) {
+  try {
+    await sende('/api/zeitmodell', { art, schluessel, zeitmodell });
+    if (status) {
+      status.className = (status.className.split(' ')[0] || 'status') + ' ok';
+      status.textContent = uebersetze('Zeitmodell gespeichert: ') + (anzeige || schluessel) + ' — ' +
+        (zeitmodell ? zeitmodellName(zeitmodell) : uebersetze('folgt wieder dem Standard'));
+    }
+    return true;
+  } catch (err) {
+    if (status) {
+      status.className = (status.className.split(' ')[0] || 'status') + ' err';
+      status.textContent = uebersetze('Zeitmodell nicht gespeichert: ') + err.message;
+    }
+    return false;
+  }
+}
+
 const E_HILFE = {
-  zeitmodell: 'Welche Zeit abgerechnet wird. „Eigene Zeit“ (empfohlen) zählt nur das Fenster um deine Eingaben; die Laufzeit der KI steht als Agentenzeit daneben. „Aktivität“ zählt jede Logzeile, auch wenn die KI allein arbeitet. Eine Minute zählt in beiden höchstens einmal. Gestellte Rechnungen ändern sich nicht.',
+  zeitmodell: 'Welche Zeit abgerechnet wird. „Eigene Zeit“ (empfohlen) zählt nur das Fenster um deine Eingaben; die Laufzeit der KI steht als Agentenzeit daneben. „Aktivität“ zählt jede Logzeile, auch wenn die KI allein arbeitet. Eine Minute zählt in beiden höchstens einmal. Gestellte Rechnungen ändern sich nicht. Das ist der Standard: je Projekt (Stundensätze), je Vorgang (Detailansicht) und je Sitzung (Live) lässt er sich überschreiben.',
   stundensatz: 'Gilt für Projekte ohne eigenen Satz.',
   selbstkostenStunde: 'Was eine Arbeitsstunde kostet, bevor Gewinn entsteht — eigene Zeit zu Marktwert plus anteilige Sachkosten. Basis der Marge; steht hier 0, wird nur der Deckungsbeitrag ausgewiesen. Herleitung siehe Kommentar in config.json.',
   zielmargeProzent: 'Angestrebter Gewinnanteil am Erlös. Reiner Soll-Ist-Vergleich, verändert keine Rechnung. 0 blendet den Vergleich aus.',
@@ -4228,7 +4392,10 @@ async function speichereEinstellungen() {
     if (!r.ok || antwort.error) throw new Error(antwort.error || uebersetze('Speichern fehlgeschlagen'));
     status.textContent = uebersetze('Gespeichert. Die Auswertung rechnet ab sofort damit.');
     status.className = 'saetze-status ok';
-    // Zahlen neu holen, sonst stehen im Dashboard noch die alten Werte.
+    // Zahlen neu holen, sonst stehen im Dashboard noch die alten Werte. Die
+    // Stundensatz-Tabelle zeigt am Zeitmodell, was "Standard" heisst — nach
+    // einem Wechsel muss sie neu aufgebaut werden.
+    saetzeSignatur = '';
     await ladeSummary();
     if (state.offenesTicket) zeichneDetail();
   } catch (err) {

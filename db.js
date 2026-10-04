@@ -193,6 +193,17 @@ function migrate(db) {
       kontakt_id INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_projekt_kontakt_kontakt ON projekt_kontakt(kontakt_id);
+
+    -- Zeitmodell je Vorgang oder Sitzung. Ueberschreibt das Modell des
+    -- Projekts (config.projektSaetze) und den Standard (config.zeitmodell).
+    -- Bewusst nicht in overrides: eine Buchung zurueckzunehmen loescht dort
+    -- die Zeile, und die Wahl des Zeitmodells ginge mit verloren.
+    CREATE TABLE IF NOT EXISTS zeitmodell_wahl (
+      art        TEXT NOT NULL,   -- 'vorgang' | 'sitzung'
+      schluessel TEXT NOT NULL,   -- Vorgangsschluessel bzw. session_id
+      zeitmodell TEXT NOT NULL,   -- 'eingaben' | 'aktivitaet'
+      PRIMARY KEY (art, schluessel)
+    );
   `);
 
   // Nachtraeglich zugeordnete Tickets sollen nachvollziehbar bleiben: woher

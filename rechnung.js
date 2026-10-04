@@ -211,6 +211,9 @@ function erstelle(db, { from, to, tickets, projekte, empfaenger, kontaktId } = {
     von: t.first_day,
     bis: t.last_day,
     stunden: Math.round(t.active_hours * 100) / 100,
+    // Wie die Stunden entstanden sind. Die Abschrift wird nie nachgerechnet,
+    // also muss sie selbst sagen, nach welchem Modell gezaehlt wurde.
+    zeitmodell: t.zeitmodell,
     basissatz: rund2(t.stundensatz_standard),
     rabatt_prozent: t.rabatt_prozent || 0,
     satz: rund2(t.stundensatz),
