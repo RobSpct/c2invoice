@@ -132,7 +132,9 @@ function pruefe(inv) {
   if (!e.name) fehlt.push('Empfänger: Name');
   if (!anschriftTeile(e.anschrift, land(e.land))) fehlt.push('Empfänger: Anschrift mit Postleitzahl und Ort in der letzten Zeile');
   if (e.ust_id_nr && !/^[A-Za-z]{2}/.test(String(e.ust_id_nr).trim())) fehlt.push('Empfänger: USt-IdNr. mit Länderkürzel');
-  if (!e.kaeufer_referenz) fehlt.push('Empfänger: Käuferreferenz');
+  // Die Kaeuferreferenz (BT-10) ist Pflicht. Nennt der Kunde keine, traegt die
+  // Kundennummer sie — kleine Kunden haben weder Leitweg-ID noch Kostenstelle.
+  if (!e.kaeufer_referenz && !e.kundennummer) fehlt.push('Empfänger: Käuferreferenz oder Kundennummer');
   if (!adresseEmpfaenger(e)) fehlt.push('Empfänger: E-Mail oder Leitweg-ID');
   if (!land(e.land)) fehlt.push('Empfänger: Land als zweistelliges Kürzel');
 
@@ -269,7 +271,7 @@ function alsXml(inv) {
   </rsm:ExchangedDocument>
   <rsm:SupplyChainTradeTransaction>${inv.positionen.map((p, i) => position(p, i + 1, steuer)).join('')}
     <ram:ApplicableHeaderTradeAgreement>
-      <ram:BuyerReference>${x(e.kaeufer_referenz)}</ram:BuyerReference>
+      <ram:BuyerReference>${x(e.kaeufer_referenz || e.kundennummer)}</ram:BuyerReference>
       <ram:SellerTradeParty>
         ${kennung ? `<ram:ID>${x(kennung)}</ram:ID>` : ''}
         <ram:Name>${x(a.name)}</ram:Name>
@@ -283,6 +285,7 @@ function alsXml(inv) {
         ${steuerIds}
       </ram:SellerTradeParty>
       <ram:BuyerTradeParty>
+        ${e.kundennummer ? `<ram:ID>${x(e.kundennummer)}</ram:ID>` : ''}
         <ram:Name>${x(e.name)}</ram:Name>
         ${postanschrift(anschriftTeile(e.anschrift), land(e.land))}
         <ram:URIUniversalCommunication><ram:URIID schemeID="${adresseE.schema}">${x(adresseE.wert)}</ram:URIID></ram:URIUniversalCommunication>

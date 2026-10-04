@@ -66,6 +66,9 @@ const EMPFAENGER_ZUSATZ = {
   kaeufer_referenz: { max: 80, kontakt: 'kaeuferReferenz', label: 'Käuferreferenz' },
   land: { max: 2, kontakt: 'land', label: 'Land', form: /^[A-Za-z]{2}$/, gross: true },
   lieferantennummer: { max: 60, kontakt: 'lieferantennummer', label: 'Lieferantennummer' },
+  // Kommt aus dem Kontakt (dort automatisch, wenn keine eigene vergeben ist).
+  // Fuellt in der E-Rechnung die Kaeuferreferenz, wenn der Kunde keine nennt.
+  kundennummer: { max: 30, kontakt: 'kundennummer', label: 'Kundennummer' },
   // Je Rechnung, nicht je Kunde: steht deshalb an keinem Kontakt.
   bestellnummer: { max: 60, kontakt: null, label: 'Bestellnummer' },
 };
@@ -546,7 +549,10 @@ ${inv.status === 'storno' ? `<p class="storno">Storno zu Rechnung ${esc(inv.stor
 ${inv.status === 'storniert' ? '<p class="storno">Diese Rechnung wurde storniert.</p>' : ''}
 <p class="klein">
   Rechnungsdatum: ${esc(datum(inv.erstellt_am))} &middot;
-  Leistungszeitraum: ${esc(inv.leistung_von)} bis ${esc(inv.leistung_bis)}
+  Leistungszeitraum: ${esc(inv.leistung_von)} bis ${esc(inv.leistung_bis)}${
+  // Nur wenn die Abschrift eine traegt: Rechnungen von vor der Kundennummer
+  // muessen byte-gleich bleiben.
+  e.kundennummer ? ` &middot;\n  Kundennummer: ${esc(e.kundennummer)}` : ''}
 </p>
 
 <table>

@@ -1373,7 +1373,11 @@
              am Kontakt, weil sie je Kunde gelten und beim Stellen einer
              Rechnung in deren Abschrift uebernommen werden. -->
         <div>
-          <label for="k-kaeuferReferenz"><span data-i18n>Käuferreferenz</span> <span class="note" data-i18n>für die E-Rechnung — bei Behörden die Leitweg-ID</span></label>
+          <label for="k-kundennummer"><span data-i18n>Kundennummer</span> <span class="note" data-i18n>leer lassen für eine automatische; steht auf jeder Rechnung</span></label>
+          <input type="text" id="k-kundennummer" class="feld" maxlength="30" autocomplete="off" placeholder="automatisch" data-i18n-placeholder>
+        </div>
+        <div>
+          <label for="k-kaeuferReferenz"><span data-i18n>Käuferreferenz</span> <span class="note" data-i18n>nur falls der Kunde eine vorgibt, bei Behörden die Leitweg-ID — sonst gilt die Kundennummer</span></label>
           <input type="text" id="k-kaeuferReferenz" class="feld" maxlength="80" autocomplete="off">
         </div>
         <div>
@@ -1655,7 +1659,10 @@ EN["E-Rechnung nicht erstellt: "] = "E-invoice not created: ";
 EN["Abruf fehlgeschlagen"] = "Request failed";
 EN["Als E-Rechnung noch nicht exportierbar, es fehlen: "] = "Cannot be exported as an e-invoice yet, missing: ";
 EN["Käuferreferenz"] = "Buyer reference";
-EN["für die E-Rechnung — bei Behörden die Leitweg-ID"] = "for the e-invoice — for public authorities the Leitweg-ID";
+EN["nur falls der Kunde eine vorgibt, bei Behörden die Leitweg-ID — sonst gilt die Kundennummer"] = "only if the client specifies one, for public authorities the Leitweg-ID — otherwise the customer number is used";
+EN["Kundennummer"] = "Customer number";
+EN["leer lassen für eine automatische; steht auf jeder Rechnung"] = "leave empty for an automatic one; printed on every invoice";
+EN["automatisch"] = "automatic";
 EN["Lieferantennummer"] = "Supplier number";
 EN["falls der Kunde dir eine vergeben hat"] = "if the customer has assigned you one";
 EN["Land"] = "Country";
@@ -4942,7 +4949,7 @@ document.getElementById('a-posten-plus').addEventListener('click', () => {
 const kZustand = { liste: [], bearbeitet: null, gewaehlt: null, filter: 'alle', suche: '' };
 
 const K_FELDER = ['firma', 'vorname', 'nachname', 'anschrift', 'steuernummer',
-  'ustIdNr', 'email', 'kaeuferReferenz', 'lieferantennummer', 'land', 'notiz', 'status'];
+  'ustIdNr', 'email', 'kundennummer', 'kaeuferReferenz', 'lieferantennummer', 'land', 'notiz', 'status'];
 
 function kStatus(text, art) {
   const el = document.getElementById('k-status-text');
@@ -5113,6 +5120,7 @@ function zeichneKontaktDetail() {
       zeile(uebersetze('Anschrift'), anschrift) +
       zeile(uebersetze('Steuernummer'), k.steuernummer) +
       zeile(uebersetze('USt-IdNr.'), k.ustIdNr) +
+      zeile(uebersetze('Kundennummer'), k.kundennummer) +
       zeile(uebersetze('Käuferreferenz'), k.kaeuferReferenz) +
       zeile(uebersetze('Lieferantennummer'), k.lieferantennummer) +
       zeile(uebersetze('Land'), k.land) +
@@ -5140,6 +5148,11 @@ async function kontaktAktion(knopf, id, tun) {
       const el = document.getElementById('k-' + f);
       el.value = f === 'anschrift' ? (k.anschrift || []).join('\n') : (k[f] || '');
     }
+    // Im Feld steht nur eine selbst vergebene Nummer. Die automatische zeigt
+    // der Platzhalter — so sieht man, welche gilt, ohne sie festzuschreiben.
+    const kn = document.getElementById('k-kundennummer');
+    kn.value = k.kundennummer_eigen ? k.kundennummer : '';
+    kn.placeholder = k.kundennummer || uebersetze('automatisch');
     // Die eigenen Projekte nach rechts; die Namensliste steht bereits.
     projektauswahlSetzen(k.projekte);
     document.getElementById('k-titel').textContent = uebersetze('Kontakt bearbeiten');
@@ -5177,6 +5190,7 @@ async function kontaktAktion(knopf, id, tun) {
 function kFormularZuruecksetzen() {
   kZustand.bearbeitet = null;
   for (const f of K_FELDER) document.getElementById('k-' + f).value = f === 'status' ? 'lead' : '';
+  document.getElementById('k-kundennummer').placeholder = uebersetze('automatisch');
   projektauswahlSetzen([]);
   document.getElementById('k-titel').textContent = uebersetze('Neuer Kontakt');
   document.getElementById('k-speichern').textContent = uebersetze('Kontakt anlegen');

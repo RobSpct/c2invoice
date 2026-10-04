@@ -269,12 +269,20 @@ The standard asks for more than § 14 UStG does, so a few fields must be set:
 | Where | Field |
 |---|---|
 | Settings → issuer data | email, phone, IBAN; address with postcode and city on the last line |
-| The client's contact | buyer reference, email; address with postcode and city on the last line |
-| optional | country (default DE), supplier number, order number per invoice |
+| The client's contact | email; address with postcode and city on the last line |
+| optional | buyer reference, country (default DE), supplier number, order number per invoice |
 
-The **buyer reference** is the Leitweg-ID for German public authorities, and
-whatever reference the client asks for otherwise (cost centre, project name).
-For authorities the Leitweg-ID also serves as the electronic address.
+Every contact has a **customer number**. It is assigned automatically
+(`K-0001`, derived from the contact's id, never reused) unless you enter your
+own; numbers must be unique, and the `K-0000` pattern is reserved for the
+automatic ones. The customer number is printed on every invoice and written to
+the e-invoice as the buyer identifier (BT-46).
+
+The **buyer reference** (BT-10) is mandatory in XRechnung. Small clients rarely
+have one, so if the contact leaves it empty, the customer number fills it. If
+a client does specify one, theirs wins: the Leitweg-ID for German public
+authorities, otherwise a cost centre, order or project code. For authorities
+the Leitweg-ID also serves as the electronic address.
 
 If something is missing, the export refuses and names the field — a file with
 an empty mandatory field would look finished and be rejected at the
@@ -289,9 +297,10 @@ charge, no ZUGFeRD PDF.
 
 **Checked with** KoSIT's official validator (version 1.6.3) and the
 XRechnung 3.0.2 validator configuration of 2026-08-31 — the CII D16B schema,
-the EN 16931 Schematron and the XRechnung Schematron — across six cases:
+the EN 16931 Schematron and the XRechnung Schematron — across seven cases:
 standard VAT, small-business exemption, flat-rate position, cancellation,
-public authority with Leitweg-ID, client abroad. All six were accepted with no
+public authority with Leitweg-ID, client abroad, small client with nothing but
+the customer number. All seven were accepted with no
 error and no warning; the same invoice with a wrong total was rejected. This is
 the check the receiving platforms run, but it is no substitute for their own
 acceptance: before invoicing a public-sector client for the first time, upload

@@ -249,6 +249,9 @@ function migrate(db) {
   addColumn(db, 'kontakte', 'kaeufer_referenz', 'TEXT');
   addColumn(db, 'kontakte', 'land', 'TEXT');
   addColumn(db, 'kontakte', 'lieferantennummer', 'TEXT');
+  // Eigene Kundennummer, nur wenn von Hand vergeben. Leer heisst: die
+  // automatische aus der Kontakt-ID (kontakte.js), die nie neu vergeben wird.
+  addColumn(db, 'kontakte', 'kundennummer', 'TEXT');
   // An der Rechnung: der Tag der Faelligkeit. Vorher wurde er beim Anzeigen
   // aus dem aktuellen Zahlungsziel gerechnet — ein geaendertes Zahlungsziel
   // verschob damit die Faelligkeit bereits gestellter Rechnungen.

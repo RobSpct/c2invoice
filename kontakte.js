@@ -27,6 +27,9 @@ const FELDER = {
   // die Leitweg-ID, sonst das, was der Kunde als Referenz nennt.
   kaeuferReferenz:   { typ: 'text', max: 80, label: 'Käuferreferenz' },
   lieferantennummer: { typ: 'text', max: 60, label: 'Lieferantennummer' },
+  // Leer = automatisch (K-0001 aus der Kontakt-ID). Steht auf der Rechnung und
+  // fuellt in der E-Rechnung die Kaeuferreferenz, wenn der Kunde keine nennt.
+  kundennummer:      { typ: 'text', max: 30, label: 'Kundennummer' },
   land:              { typ: 'land', label: 'Land' },
   notiz:        { typ: 'text',   max: 500, label: 'Notiz' },
   status:       { typ: 'wahl',   werte: ['lead', 'kunde'], label: 'Status' },
@@ -113,6 +116,30 @@ function pruefe(daten, { vollstaendig }) {
   return werte;
 }
 
+// Automatische Kundennummer aus der Kontakt-ID. Die ID wird nie neu vergeben
+// (AUTOINCREMENT), die Nummer also auch nicht.
+const AUTO_KUNDENNUMMER = /^K-\d+$/i;
+
+function autoKundennummer(id) {
+  return 'K-' + String(id).padStart(4, '0');
+}
+
+// Eine von Hand vergebene Nummer darf weder eine andere eigene doppeln noch im
+// automatischen Muster liegen — "K-0099" bekaeme sonst spaeter der 99. Kontakt.
+// Die eigene automatische Nummer zu bestaetigen ist erlaubt und speichert nichts.
+function pruefeKundennummer(db, nummer, eigeneId) {
+  if (!nummer) return '';
+  if (eigeneId && nummer.toUpperCase() === autoKundennummer(eigeneId)) return '';
+  if (AUTO_KUNDENNUMMER.test(nummer)) {
+    throw new Error('Kundennummer: das Muster K-0000 ist den automatischen Nummern vorbehalten.');
+  }
+  const doppelt = db.prepare(
+    'SELECT id FROM kontakte WHERE kundennummer = ? COLLATE NOCASE AND id <> ?'
+  ).get(nummer, eigeneId || 0);
+  if (doppelt) throw new Error('Kundennummer: ' + nummer + ' ist schon vergeben.');
+  return nummer;
+}
+
 function ausZeile(row) {
   if (!row) return null;
   return {
@@ -127,6 +154,8 @@ function ausZeile(row) {
     email: row.email,
     kaeuferReferenz: row.kaeufer_referenz || '',
     lieferantennummer: row.lieferantennummer || '',
+    kundennummer: row.kundennummer || autoKundennummer(row.id),
+    kundennummer_eigen: Boolean(row.kundennummer),
     land: row.land || '',
     notiz: row.notiz,
     erstellt_am: row.erstellt_am,
@@ -272,6 +301,7 @@ function speichere(db, daten = {}) {
 
   if (id === null) {
     const werte = pruefe(daten, { vollstaendig: true });
+    if ('kundennummer' in werte) werte.kundennummer = pruefeKundennummer(db, werte.kundennummer, null);
     const felder = Object.keys(werte);
     const spalten = felder.map(spalteVon);
     // Beides in einer Transaktion: eine abgewiesene Projektzuordnung darf keinen
@@ -304,6 +334,7 @@ function speichere(db, daten = {}) {
   // Erst pruefen, dann schreiben: sonst stuenden die Projekte schon in der
   // Datenbank, waehrend eine ungueltige Anschrift den Aufruf abbrechen laesst.
   const werte = nurProjekte ? null : pruefe(daten, { vollstaendig: false });
+  if (werte && 'kundennummer' in werte) werte.kundennummer = pruefeKundennummer(db, werte.kundennummer, id);
 
   // Beide Schreibvorgaenge zusammen: scheitert einer, gilt keiner. Sonst stuende
   // die neue Zuordnung fest, waehrend die Anschrift die alte bliebe.

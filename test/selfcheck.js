@@ -2188,7 +2188,7 @@ function testERechnung() {
     // 6. Ohne Kaeuferreferenz und ohne elektronische Adresse: abgelehnt.
     const karg = rechnung.erstelle(db, { ...zeitraum, empfaenger: { name: 'Kunde', anschrift: ['Weg 2', '10115 Berlin'] } });
     assert.deepStrictEqual(erechnung.pruefe(karg),
-      ['Empfänger: Käuferreferenz', 'Empfänger: E-Mail oder Leitweg-ID']);
+      ['Empfänger: Käuferreferenz oder Kundennummer', 'Empfänger: E-Mail oder Leitweg-ID']);
     const ohneOrt = rechnung.erstelle(db, { ...zeitraum, empfaenger: { ...kunde, anschrift: ['irgendwo'] } });
     assert.deepStrictEqual(erechnung.pruefe(ohneOrt), ['Empfänger: Anschrift mit Postleitzahl und Ort in der letzten Zeile']);
 
@@ -2311,6 +2311,67 @@ function testERechnung() {
     assert.strictEqual(erechnung.alsXml(rechnung.lade(db, ausKontakt.nr)), xml,
       'geaenderter Kontakt veraendert eine gestellte Rechnung');
     db.close();
+  });
+}
+
+// Kundennummer: jeder Kontakt hat eine, ohne dass jemand sie vergeben muss.
+// Kleine Kunden nennen keine Referenz; die E-Rechnung verlangt aber eine
+// Kaeuferreferenz (BT-10). Die Kundennummer fuellt sie dann aus und steht
+// ausserdem als Kaeuferkennung (BT-46) in der Datei und auf dem Dokument.
+function testKundennummer() {
+  rechnungsUmgebung((config) => {
+    const rechnung = require('../rechnung');
+    const erechnung = require('../erechnung');
+    const kontakte = require('../kontakte');
+    Object.assign(config.rechnung.aussteller, { email: 'rechnung@testfirma.example', telefon: '+49 221 123456' });
+    const auto = (id) => 'K-' + String(id).padStart(4, '0');
+
+    // 1. Automatisch, ueberschreibbar, eindeutig.
+    const db = rechnungsDb();
+    const a = kontakte.speichere(db, { firma: 'Kleine Firma', anschrift: ['Weg 2', '10115 Berlin'], email: 'info@klein.example' });
+    assert.strictEqual(a.kundennummer, auto(a.id), 'keine automatische Kundennummer');
+    assert.strictEqual(a.kundennummer_eigen, false);
+    const b = kontakte.speichere(db, { firma: 'Zweite GmbH', kundennummer: '10023' });
+    assert.strictEqual(b.kundennummer, '10023', 'eigene Kundennummer nicht uebernommen');
+    assert.strictEqual(b.kundennummer_eigen, true);
+    assert.throws(() => kontakte.speichere(db, { firma: 'Dritte', kundennummer: '10023' }), /Kundennummer/,
+      'doppelte Kundennummer angenommen');
+    // Das automatische Muster ist reserviert: K-0099 bekaeme spaeter der 99. Kontakt.
+    assert.throws(() => kontakte.speichere(db, { firma: 'Vierte', kundennummer: 'K-0099' }), /Kundennummer/,
+      'Kundennummer im automatischen Muster angenommen');
+    assert.strictEqual(kontakte.speichere(db, { id: a.id, kundennummer: a.kundennummer }).kundennummer, a.kundennummer,
+      'die eigene automatische Nummer laesst sich nicht bestaetigen');
+    assert.strictEqual(kontakte.speichere(db, { id: b.id, kundennummer: '' }).kundennummer, auto(b.id),
+      'leere Kundennummer faellt nicht auf die automatische zurueck');
+
+    // 2. Ohne Kaeuferreferenz: die Kundennummer traegt BT-10 und BT-46.
+    const daten = {
+      from: '2026-08-01', to: '2026-08-31', tickets: ['PROJ-500'],
+      empfaenger: { name: 'Kleine Firma', anschrift: ['Weg 2', '10115 Berlin'] }, kontaktId: a.id,
+    };
+    const inv = rechnung.erstelle(db, daten);
+    assert.strictEqual(inv.empfaenger.kundennummer, a.kundennummer, 'Kundennummer fehlt in der Abschrift');
+    assert.deepStrictEqual(erechnung.pruefe(inv), [], 'E-Rechnung verlangt trotz Kundennummer eine Kaeuferreferenz');
+    const xml = erechnung.alsXml(inv);
+    assert.deepStrictEqual(xmlWerte(xml, 'ram:BuyerReference'), [a.kundennummer], 'BT-10 nicht mit der Kundennummer gefuellt');
+    assert.ok(new RegExp('<ram:BuyerTradeParty>\\s*<ram:ID>' + a.kundennummer + '</ram:ID>').test(xml),
+      'Kundennummer steht nicht als Kaeuferkennung (BT-46) in der Datei');
+    assert.ok(rechnung.renderHtml(inv).includes('Kundennummer: ' + a.kundennummer), 'Kundennummer fehlt auf dem Dokument');
+
+    // 3. Gibt der Kunde eine Referenz vor, gilt seine.
+    const db2 = rechnungsDb();
+    const c = kontakte.speichere(db2, {
+      firma: 'Amt', anschrift: ['Platz 1', '10115 Berlin'], email: 'x@amt.example', kaeuferReferenz: '991-12345-67',
+    });
+    const xml2 = erechnung.alsXml(rechnung.erstelle(db2, { ...daten, kontaktId: c.id }));
+    assert.deepStrictEqual(xmlWerte(xml2, 'ram:BuyerReference'), ['991-12345-67'], 'Vorgabe des Kunden wurde ueberschrieben');
+
+    // 4. Ohne Kontakt und ohne Referenz bleibt es eine Luecke, und sie wird benannt.
+    const db3 = rechnungsDb();
+    const frei = rechnung.erstelle(db3, { ...daten, kontaktId: undefined,
+      empfaenger: { name: 'Frei', anschrift: ['Weg 3', '10115 Berlin'], email: 'f@frei.example' } });
+    assert.deepStrictEqual(erechnung.pruefe(frei), ['Empfänger: Käuferreferenz oder Kundennummer'],
+      'fehlende Referenz falsch benannt: ' + erechnung.pruefe(frei).join(', '));
   });
 }
 
@@ -3735,6 +3796,7 @@ async function main() {
   test('Rechnung: Abschrift bleibt unveraendert, Storno statt Loeschen', testRechnungUnveraenderlich);
   test('Rechnung: beide Steuermodi, Escaping, keine Werkzeugdaten', testRechnungSteuerUndEscaping);
   test('E-Rechnung: Pflichtfelder, Summen, Steuerarten und Storno', testERechnung);
+  test('Kundennummer: automatisch, eindeutig, fuellt Kaeuferreferenz und Kaeuferkennung', testKundennummer);
   test('Abrechnungsstand: Betrag je Vorgang aus gestellten Rechnungen, Storno faellt raus', testAbrechnungsStatus);
   test('Einstellungen: Grenzen halten, fremde Felder prallen ab, Datei bleibt vollstaendig', testEinstellungenGrenzen);
   test('Stammdaten: Grenzen halten, Teileingabe meldet Fehlendes, Nachbarbloecke bleiben', testStammdatenGrenzen);
