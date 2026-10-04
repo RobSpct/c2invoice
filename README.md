@@ -32,10 +32,11 @@ uses the list price.
 
 ![Overview: API equivalent at list price next to the subscription cost actually paid, active hours, spend over time and split by model](docs/overview.png)
 
-Per job — the margin bar is scaled against your target margin, so "above or
-below what I aimed for" is readable at a glance:
+Per job — active time and agent time side by side, the job's time model as a
+switch, and a margin bar scaled against your target margin, so "above or below
+what I aimed for" is readable at a glance:
 
-![Job detail: token split, work value, contribution margin and margin with a bar scaled against the target](docs/jobs.png)
+![Job detail: time model switch, active time and agent time, token split, work value, contribution margin and margin with a bar scaled against the target](docs/jobs.png)
 
 Where the tokens actually went — MCP servers and skills as ranked bars. Open a
 server to see its individual tools, drawn at the same scale as their parent.
@@ -44,13 +45,15 @@ changes no billing figure:
 
 ![Tools tab: MCP servers as horizontal bars, one expanded to show its individual tools indented below](docs/tools.png)
 
-Live, while you work — sessions can be booked onto a job by hand. The burn
+Live, while you work — each session shows its active time and agent time so
+far, can be booked onto a job by hand and can get its own time model. The burn
 rate is the list price of the last 60 minutes extrapolated to an hour: a
 snapshot of how intensive the current session is, not an hourly cost:
 
-![Live tab: running sessions with tokens, API equivalent and a field to assign a job](docs/live.png)
+![Live tab: running sessions with job field, time model switch, active time and agent time, tokens and API equivalent](docs/live.png)
 
-*Screenshots use anonymised project, job and tool names.*
+*Screenshots use anonymised project, job and customer names and show the German
+interface; switch to English under Settings.*
 
 ## Why this exists
 
