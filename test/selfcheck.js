@@ -629,6 +629,11 @@ function testZeitmodellWahl() {
       assert.throws(() => setzeSatz({ projekt: boese, satz: 1 }), /Projektname/, boese + ' wurde angenommen');
     }
     assert.strictEqual(Object.getPrototypeOf(cfg.projektSaetze), Object.prototype, 'projektSaetze wurde verbogen');
+    // Name und Kunde landen als Schluessel bzw. Text in config.json und auf Belegen: Laenge begrenzt.
+    assert.throws(() => setzeSatz({ projekt: 'x'.repeat(201), satz: 1 }), /Projektname/, 'ueberlanger Projektname angenommen');
+    assert.throws(() => setzeSatz({ projekt: 'P', satz: 1, kunde: 'k'.repeat(201) }), /Kunde/, 'ueberlanger Kunde angenommen');
+    setzeSatz({ projekt: 'x'.repeat(200), satz: 1 });
+    setzeSatz({ projekt: 'x'.repeat(200), zeitmodell: '' });
     setzeSatz({ projekt: 'P', zeitmodell: '' });
     assert.strictEqual(cfg.projektSaetze.P, undefined, 'leere Wahl ohne Satz laesst einen leeren Eintrag stehen');
     db.close();
@@ -683,6 +688,20 @@ function testZeitSummen() {
     // Dasselbe ueber from/to, so wie eine Rechnung ihren Zeitraum waehlt.
     const bisEnde = metrics.byTicket(db, { from: '2026-08-01', to: '2026-08-31' })[0].active_seconds;
     assert.strictEqual(bisEnde, 4 * 60, 'Rechnungszeitraum August traegt ' + bisEnde + 's statt 240s');
+
+    // Je Tag (Hub: heute/Woche, Heatmap): dieselbe Zeit, nur nach Tagen geteilt.
+    const tage = metrics.byDay(db, {});
+    const jeTag = Object.fromEntries(tage.map((t) => [t.day, t.active_seconds]));
+    assert.strictEqual(jeTag['2026-08-31'], 4 * 60, '31.08. traegt ' + jeTag['2026-08-31'] + 's statt 240s');
+    assert.strictEqual(tage.reduce((a, t) => a + t.active_seconds, 0), gesamt, 'Tage ergeben nicht die Gesamtzeit');
+    const monate = metrics.byMonth(db, {});
+    assert.strictEqual(monate.reduce((a, t) => a + t.active_seconds, 0), gesamt, 'Monate ergeben nicht die Gesamtzeit');
+    // Woche Montag bis Sonntag, benannt nach ihrem Montag: Mo 31.08. und
+    // Di 01.09. liegen in derselben Woche, obwohl der Monat wechselt.
+    const wochen = metrics.byPeriod(db, {}, 'woche');
+    assert.deepStrictEqual(wochen.map((w) => w.day), ['2026-08-31'], 'Wochen: ' + wochen.map((w) => w.day));
+    assert.strictEqual(wochen[0].active_seconds, gesamt, 'Woche traegt nicht die Gesamtzeit');
+    assert.strictEqual(wochen[0].requests, 3, 'Woche zaehlt nicht alle Requests');
     db.close();
   });
 }
@@ -1301,6 +1320,14 @@ function testWerkzeugZuordnung() {
   assert.strictEqual(w.summe.requests, 2, 'erwartet 2 Werkzeug-Aufrufe');
   assert.ok(Math.abs(w.summe.cost_usd - 0.75) < 1e-9, 'Werkzeugkosten falsch: ' + w.summe.cost_usd);
   assert.strictEqual(w.summe.ohne_zuordnung, 0, 'Aufrufe blieben ohne Zuordnung');
+
+  // Leerer Zeitraum: der letzte Werkzeug-Request steht trotzdem da, damit die
+  // Oberflaeche "seit wann still" sagen kann (claude-mem 13.18 schrieb keine Logs mehr).
+  // Gegenprobe: zuletzt aus dem gefilterten Zeitraum lesen -> null, Test rot.
+  const still = metrics.werkzeuge(db, { from: '2026-09-01', to: '2026-09-30' });
+  assert.strictEqual(still.summe.requests, 0, 'September hat keine Werkzeug-Aufrufe');
+  assert.strictEqual(still.summe.zuletzt, t(61), 'letzter Werkzeug-Request fehlt: ' + still.summe.zuletzt);
+  assert.deepStrictEqual(still.summe.projekte, config.overheadProjekte, 'konfigurierte Werkzeug-Projekte fehlen');
 
   const proProjekt = Object.fromEntries(w.nach_projekt.map((x) => [x.projekt, x.cost_usd]));
   assert.ok(Math.abs(proProjekt['Projekt A'] - 0.5) < 1e-9,
@@ -2616,6 +2643,11 @@ function testEinstellungenGrenzen() {
     assert.strictEqual(nachher.jira.enabled, vorher.jira.enabled,
       'fremdes Feld wurde doch geschrieben');
 
+    // Alles oder nichts: scheitert ein Feld, bleibt auch das gueltige davor unveraendert —
+    // im Speicher, nicht nur in der Datei (sonst rechnet der laufende Server mit halben Werten).
+    assert.throws(() => setzeEinstellungen({ stundensatz: 51, gapMinutes: 9999 }), /Pausenschwelle/);
+    assert.strictEqual(config.stundensatz, 95, 'gueltiges Feld trotz abgelehnter Eingabe uebernommen');
+
     // Leere Angaben lassen den bestehenden Wert stehen.
     setzeEinstellungen({ stundensatz: 88, zielmargeProzent: '' });
     assert.strictEqual(config.zielmargeProzent, 40, 'leerer Wert hat den Bestand ueberschrieben');
@@ -2763,6 +2795,10 @@ function testAktivstundenOhneWerkzeuge() {
     'Projektarbeit und Gesamtzeit sind gleich — die Trennung greift nicht');
   assert.strictEqual(split.arbeit.active_seconds + split.overhead.active_seconds, gesamt,
     'Projektarbeit plus Werkzeugbetrieb ergibt nicht die Gesamtzeit');
+  // Die Tageszeit im Hub ist Projektarbeit, kein Werkzeugbetrieb.
+  const tagZeit = metrics.byDay(db, {})[0].active_seconds;
+  assert.strictEqual(tagZeit, split.arbeit.active_seconds,
+    'Tageszeit ' + tagZeit + 's enthaelt Werkzeugbetrieb (Projektarbeit: ' + split.arbeit.active_seconds + 's)');
 
   // Der Arbeitswert darf ebenfalls keinen Werkzeugbetrieb enthalten.
   assert.ok(split.overhead.arbeitswert > 0, 'Testaufbau: Werkzeug ohne Arbeitswert');
@@ -3587,6 +3623,9 @@ function testStammdatenGrenzen() {
       'IBAN nicht vereinheitlicht (Leerzeichen/Kleinschreibung)');
     assert.strictEqual(config.rechnung.aussteller.name, 'Testfirma GmbH', 'Modul-Cache nicht aktualisiert');
     assert.strictEqual(config.rechnung.kleinunternehmer, true, 'Steuerschalter nicht am Rechnungsblock');
+    // Der Schalter nimmt nur true/false: aus dem Text 'false' wuerde sonst !!'false' = an.
+    for (const roh of ['false', '0', 1]) assert.throws(() => setzeStammdaten({ kleinunternehmer: roh }), /Kleinunternehmer/, JSON.stringify(roh) + ' als Schalter angenommen');
+    assert.strictEqual(config.rechnung.kleinunternehmer, true, 'abgelehnter Schalter hat den Wert veraendert');
 
     const geschrieben = JSON.parse(fs.readFileSync(pfad, 'utf8'));
     assert.strictEqual(geschrieben.rechnung.aussteller.name, 'Testfirma GmbH',
@@ -3751,8 +3790,3169 @@ function testJsonlDirTilde() {
   }
 }
 
+// --- Diagramm-Bausteine der neuen Oberflaeche ------------------------------
+// Die Builder liefern SVG-Pfade aus Zahlen. Ein NaN im Pfad laesst den Browser
+// das ganze Element stumm verwerfen — die Karte ist dann leer, ohne Fehler.
+function testChartBausteine() {
+  const C = require('../public/app/charts.js');
+  const ohneNaN = (s, wo) => assert.ok(!/NaN|Infinity/.test(String(s)), wo + ': ' + s);
+
+  assert.strictEqual(C.smooth([[0, 10], [10, 0]]), 'M0.0,10.0 C5.0,10.0 5.0,0.0 10.0,0.0');
+
+  const a = C.area([0, 10], 100, 50, 6);
+  assert.ok(a.line.startsWith('M0.0,50.0'), 'Fläche beginnt nicht auf der Grundlinie: ' + a.line);
+  assert.ok(a.line.endsWith('100.0,6.0'), 'Höchster Wert liegt nicht am oberen Rand: ' + a.line);
+  assert.ok(a.fill.endsWith(' L100,50 L0,50 Z'), 'Fläche wird nicht geschlossen: ' + a.fill);
+  ohneNaN(C.area([0, 0, 0], 100, 50).fill, 'Fläche nur Nullen');
+  ohneNaN(C.area([5], 100, 50).fill, 'Fläche ein Wert');
+  ohneNaN(C.area([], 100, 50).fill, 'Fläche ohne Werte');
+
+  // Ring: Anteile stimmen, Laengen plus Luecken ergeben je den Umfang.
+  const r = C.ring([{ v: 1 }, { v: 3 }], 10);
+  const U = 2 * Math.PI * 10;
+  assert.strictEqual(r[0].anteil, 0.25);
+  assert.strictEqual(r[1].anteil, 0.75);
+  for (const s of r) {
+    const [len, rest] = s.dash.split(' ').map(Number);
+    assert.ok(Math.abs(len + rest - U) < 0.02, 'Strich+Lücke ≠ Umfang: ' + s.dash);
+  }
+  assert.ok(Math.abs(Number(r[1].off) + 0.25 * U) < 0.02, 'zweites Segment beginnt nicht nach dem ersten');
+  for (const s of C.ring([{ v: 0 }, { v: 0 }], 10)) ohneNaN(s.dash + s.off, 'Ring ohne Werte');
+
+  const p0 = C.arcPt(0, 0, 10, 0), p5 = C.arcPt(0, 0, 10, 0.5), p1 = C.arcPt(0, 0, 10, 1);
+  assert.ok(Math.abs(p0[0] + 10) < 1e-9 && Math.abs(p0[1]) < 1e-9, 'Bogen 0 liegt nicht links');
+  assert.ok(Math.abs(p5[0]) < 1e-9 && Math.abs(p5[1] + 10) < 1e-9, 'Bogen 0,5 liegt nicht oben');
+  assert.ok(Math.abs(p1[0] - 10) < 1e-9, 'Bogen 1 liegt nicht rechts');
+
+  // Gauge (Marge im Detail): klemmt, bleibt ohne Wert leer, Ziel auf dem Bogen.
+  const g = C.gauge(30, 60, 30);
+  assert.ok(/^M24\.0,112\.0 A86,86 0 0 1 196\.0,112\.0$/.test(g.bahn), 'Gauge-Bahn ' + g.bahn);
+  assert.ok(g.wert.endsWith('110.0,26.0'), 'Gauge bei Hälfte nicht oben: ' + g.wert);
+  assert.deepStrictEqual(g.zielPt, [110, 26]);
+  assert.strictEqual(C.gauge(null).wert, '', 'ohne Marge kein Zeiger');
+  assert.ok(C.gauge(-20).wert.endsWith('24.0,112.0') && C.gauge(500).wert.endsWith('196.0,112.0'), 'Gauge klemmt nicht');
+  assert.strictEqual(C.gauge(10, 60, null).zielPt, null);
+
+  // Wasserfall: jede Abzugsstufe endet dort, wo die naechste beginnt.
+  const wf = C.wasserfall([{ l: 'Erlös', v: 100, summe: true }, { l: 'Abo', v: 10, neg: true },
+    { l: 'Zeit', v: 50, neg: true }, { l: 'Marge', v: 40, summe: true }], 400, 216);
+  for (const b of wf) ohneNaN(b.x + b.y + b.h + b.w, 'Wasserfall');
+  const unten = (b) => Number(b.y) + Number(b.h);
+  assert.ok(Math.abs(Number(wf[0].y) - 16) < 0.05 && Math.abs(unten(wf[0]) - 216) < 0.05, 'Erlös füllt nicht die Höhe');
+  assert.ok(Math.abs(Number(wf[1].y) - Number(wf[0].y)) < 0.05, 'Abo beginnt nicht oben am Erlös');
+  assert.ok(Math.abs(unten(wf[1]) - Number(wf[2].y)) < 0.05, 'Zeit beginnt nicht unter Abo');
+  assert.ok(Math.abs(unten(wf[2]) - Number(wf[3].y)) < 0.05, 'Marge endet nicht unter Zeit');
+  assert.ok(Math.abs(Number(wf[3].h) - 80) < 0.05, 'Marge-Höhe ' + wf[3].h + ' statt 80');
+  const wfNeg = C.wasserfall([{ l: 'E', v: 10, summe: true }, { l: 'K', v: 30, neg: true }, { l: 'M', v: -20, summe: true }], 300, 116);
+  for (const b of wfNeg) ohneNaN(b.y + b.h, 'Wasserfall negativ');
+  assert.ok(Math.abs(unten(wfNeg[2]) - 116) < 0.05, 'negative Marge reicht nicht bis unten');
+  for (const b of C.wasserfall([{ l: 'x', v: 0, summe: true }], 400, 200)) ohneNaN(b.y + b.h, 'Wasserfall nur 0');
+
+  // heatmap (Analyse, Aktivitaet): 12 Wochen x 7 Tage, Montag oben, Stufen nach Werten.
+  const tage84 = Array.from({ length: 84 }, (_, i) => {
+    const d = new Date(Date.UTC(2026, 6, 13 + i));                    // Mo 13.07.2026 …
+    return { day: d.toISOString().slice(0, 10), v: i % 7 === 6 ? 0 : (i % 5) + 1 };
+  });
+  const hm = C.heatmap(tage84, { wochen: 12, bis: '2026-10-04' });   // So 04.10.
+  assert.strictEqual(hm.zellen.length, 84, 'Zellen ' + hm.zellen.length);
+  assert.strictEqual(hm.zellen[0].day, '2026-07-13', 'erste Zelle ist nicht der Montag');
+  assert.strictEqual(hm.zellen[6].day, '2026-07-19', 'Spalte endet nicht am Sonntag');
+  assert.strictEqual(hm.zellen[6].stufe, 0, 'leerer Tag nicht Stufe 0');
+  assert.ok(hm.zellen.every((z) => z.stufe == null || (z.stufe >= 0 && z.stufe <= 4)), 'Stufe ausserhalb 0–4');
+  assert.strictEqual(Math.max(...hm.zellen.map((z) => z.stufe || 0)), 4, 'Hoechstwert nicht Stufe 4');
+  assert.strictEqual(hm.monate.length, 12);
+  assert.strictEqual(hm.monate[0], 6, 'erste Spalte nennt den Juli nicht');
+  const hmZukunft = C.heatmap(tage84.slice(0, 80), { wochen: 12, bis: '2026-10-01' });   // Do
+  assert.strictEqual(hmZukunft.zellen[83].stufe, null, 'Tag nach "bis" ist nicht leer markiert');
+  assert.ok(C.heatmap([], { wochen: 2, bis: '2026-10-04' }).zellen.every((z) => z.stufe === 0), 'ohne Daten nicht alles Stufe 0');
+  // Gleiche Werte bekommen den hoechsten Rang ihrer Gruppe: lauter gleiche Tage sind voll, nicht blass.
+  const gleich = C.heatmap([{ day: '2026-09-28', v: 2 }, { day: '2026-09-29', v: 2 }], { wochen: 1, bis: '2026-10-04' });
+  assert.deepStrictEqual(gleich.zellen.slice(0, 2).map((z) => z.stufe), [4, 4], 'gleiche Werte nicht Stufe 4');
+
+  // Gestapelt: Obergrenze ueber der hoechsten Tagessumme, eine Schicht je Reihe.
+  const st = C.stacked([{ vals: [1, 2, 3] }, { vals: [3, 2, 1] }], 300, 100);
+  assert.strictEqual(st.layers.length, 2);
+  assert.ok(Math.abs(st.max - 4 * 1.05) < 1e-9, 'Obergrenze ' + st.max);
+  for (const l of st.layers) ohneNaN(l.d, 'Stapel');
+  for (const l of C.stacked([{ vals: [2] }], 300, 100).layers) ohneNaN(l.d, 'Stapel mit einem Tag');
+  for (const l of C.stacked([{ vals: [0, 0] }], 300, 100).layers) ohneNaN(l.d, 'Stapel nur Nullen');
+
+  // Sankey: was links hineinfliesst, kommt rechts in derselben Hoehe an.
+  const sk = C.sankey(
+    [[{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }], [{ id: 'z', label: 'Z' }]],
+    [{ s: 'a', t: 'z', v: 30 }, { s: 'b', t: 'z', v: 10 }], 960, 340, 10, 8);
+  const h = (id) => Number(sk.nodes.find((n) => n.label === id).h);
+  assert.ok(Math.abs(h('A') + h('B') - h('Z')) < 0.2, 'Zufluss ' + (h('A') + h('B')) + ' ≠ Knoten ' + h('Z'));
+  assert.ok(Math.abs(h('A') / h('B') - 3) < 0.01, 'Verhältnis 30:10 nicht erhalten');
+  assert.strictEqual(sk.paths.length, 2);
+  for (const pa of sk.paths) ohneNaN(pa.d, 'Sankey');
+  ohneNaN(JSON.stringify(C.sankey([[{ id: 'a', label: 'A' }], [{ id: 'z', label: 'Z' }]], [], 960, 340, 10, 8)), 'Sankey ohne Fluss');
+  // Beschriftungen kleiner Knoten liegen mindestens 17 Einheiten (eine Zeile) auseinander
+  // und bleiben im Bild; ein grosser Knoten behaelt seine Mitte.
+  const klein = C.sankey([[{ id: 'g', label: 'G' }, { id: 'k1', label: 'K1' }, { id: 'k2', label: 'K2' }, { id: 'k3', label: 'K3' }], [{ id: 'z', label: 'Z' }]],
+    [{ s: 'g', t: 'z', v: 1000 }, { s: 'k1', t: 'z', v: 1 }, { s: 'k2', t: 'z', v: 1 }, { s: 'k3', t: 'z', v: 1 }], 960, 340, 10, 2);
+  const ly = (id) => Number(klein.nodes.find((n) => n.label === id).ly);
+  const mitte = (id) => { const n = klein.nodes.find((x) => x.label === id); return Number(n.y) + Number(n.h) / 2; };
+  assert.ok(Math.abs(ly('G') - mitte('G')) < 0.2, 'grosser Knoten verschoben');
+  for (const [a, b] of [['G', 'K1'], ['K1', 'K2'], ['K2', 'K3']]) assert.ok(ly(b) - ly(a) >= 17 - 0.1, a + '/' + b + ' zu dicht: ' + ly(a) + ' ' + ly(b));
+  assert.ok(ly('K3') <= 340 - 9, 'unten aus dem Bild: ' + ly('K3'));
+  // dieselben kleinen Knoten oben in der Spalte: Abstand nach unten, nicht ueber den Rand
+  const oben = C.sankey([[{ id: 'k1', label: 'K1' }, { id: 'k2', label: 'K2' }, { id: 'k3', label: 'K3' }, { id: 'g', label: 'G' }], [{ id: 'z', label: 'Z' }]],
+    [{ s: 'g', t: 'z', v: 1000 }, { s: 'k1', t: 'z', v: 1 }, { s: 'k2', t: 'z', v: 1 }, { s: 'k3', t: 'z', v: 1 }], 960, 340, 10, 2);
+  const lo = (id) => Number(oben.nodes.find((n) => n.label === id).ly);
+  assert.ok(lo('K1') >= 9, 'oben aus dem Bild: ' + lo('K1'));
+  for (const [a, b] of [['K1', 'K2'], ['K2', 'K3'], ['K3', 'G']]) assert.ok(lo(b) - lo(a) >= 17 - 0.1, 'oben ' + a + '/' + b + ' zu dicht: ' + lo(a) + ' ' + lo(b));
+
+  // Margen-Ampel: dieselben Stufen wie in der bisherigen Oberflaeche.
+  const k = (p) => C.margeKlasse(p, 32);
+  // Je Stufe ein Wert an beiden Kanten, sonst faellt eine verschobene Grenze nicht auf.
+  assert.deepStrictEqual(
+    [k(40), k(32.1), k(32.03), k(32), k(31.9), k(30), k(29.9), k(28), k(27.9), k(25.1), k(25), k(null)],
+    ['m-top', 'm-top', 'm-ok', 'm-ok', 'm-fast', 'm-fast', 'm-knapp', 'm-knapp', 'm-schwach', 'm-schwach', 'm-bad', '']);
+  assert.strictEqual(C.margeKlasse(5, 0), 'pos');
+}
+
+// Globaler Zeitraum der neuen Oberflaeche. Die Vorperiode ist gleich lang
+// ("bis heute" gegen "bis zum selben Tag davor"), sonst vergleicht der
+// Delta-Pfeil fuenf Oktobertage mit dem ganzen September und zeigt immer rot.
+function testZeitraum() {
+  const { zeitraum } = require('../public/app/kern.js');
+  const heute = new Date(2026, 9, 5); // Montag, 05.10.2026
+  const z = (art, extra) => {
+    const r = zeitraum(art, heute, extra);
+    return [r.von, r.bis, r.vorVon, r.vorBis].join(' ');
+  };
+  assert.strictEqual(z('heute'), '2026-10-05 2026-10-05 2026-10-04 2026-10-04');
+  assert.strictEqual(z('woche'), '2026-10-05 2026-10-05 2026-09-28 2026-09-28');
+  assert.strictEqual(z('monat'), '2026-10-01 2026-10-05 2026-09-01 2026-09-05');
+  assert.strictEqual(z('letzter'), '2026-09-01 2026-09-30 2026-08-01 2026-08-31');
+  assert.strictEqual(z('quartal'), '2026-10-01 2026-10-05 2026-07-01 2026-07-05');
+  assert.strictEqual(z('jahr'), '2026-01-01 2026-10-05 2025-01-01 2025-10-05');
+  assert.strictEqual(z('frei', { von: '2026-09-10', bis: '2026-09-19' }),
+    '2026-09-10 2026-09-19 2026-08-31 2026-09-09');
+  // Monatsende: der 31.03. vergleicht mit dem ganzen Februar, nicht mit dem 03.03.
+  const r = zeitraum('monat', new Date(2026, 2, 31));
+  assert.strictEqual(r.vorVon + ' ' + r.vorBis, '2026-02-01 2026-02-28');
+  // Sonntag gehoert zur laufenden Woche (Montag bis Sonntag).
+  const so = zeitraum('woche', new Date(2026, 9, 4));
+  assert.strictEqual(so.von + ' ' + so.bis, '2026-09-28 2026-10-04');
+  // Unbekannte Art faellt auf den Monat zurueck statt auf "alles".
+  assert.strictEqual(zeitraum('quatsch', heute).von, '2026-10-01');
+  // Gesamt: vom ersten Tag mit Daten bis heute, ohne Vorperiode (es gibt keine davor).
+  const g = zeitraum('gesamt', heute, {}, '2026-08-17');
+  assert.deepStrictEqual([g.von, g.bis, g.vorVon, g.vorBis], ['2026-08-17', '2026-10-05', null, null]);
+  // Vor dem ersten Laden ist der erste Tag unbekannt: Jahresanfang statt Absturz.
+  assert.strictEqual(zeitraum('gesamt', heute, {}).von, '2026-01-01');
+  assert.strictEqual(zeitraum('gesamt', heute, {}, 'kaputt').von, '2026-01-01', 'kaputter erster Tag angenommen');
+}
+
+// Sparkline "Nach Projekt" (Analyse): Dollar je Tag und Projekt, mit und ohne
+// Vorgang. Summe je Projekt = byProject, sonst zeigt die Linie andere Kosten
+// als die Zeile daneben.
+function testVerlaufJeProjekt() {
+  const { db, zeile } = zeitDb();
+  zeile('s1', 0, 'P', 'ABC-1'); zeile('s1', 24 * 60, 'P', null); zeile('s2', 0, 'Q', 'XYZ-9'); zeile('s2', 5, 'Q', 'XYZ-9');
+  const v = metrics.verlaufJeProjekt(db, {});
+  assert.deepStrictEqual(v.P.map((x) => x[0]), ['2026-08-18', '2026-08-19'], 'ticketlose Arbeit zaehlt mit');
+  assert.deepStrictEqual(v.Q.map((x) => x[0]), ['2026-08-18'], 'ein Eintrag je Tag');
+  for (const p of metrics.byProject(db, {})) {
+    assert.ok(Math.abs(v[p.project].reduce((a, x) => a + x[1], 0) - p.cost_usd) < 1e-9, 'Summe ' + p.project);
+  }
+  assert.strictEqual(metrics.verlaufJeProjekt(db, { from: '2026-08-19' }).Q, undefined, 'Zeitfilter');
+  db.close();
+}
+
+// Kosten je aktive Stunde ueber mehrere Wochen: Summe USD durch Summe Stunden,
+// nicht Mittel der Wochenwerte. Wochen ohne Zeit zaehlen ihre Kosten mit.
+function testUsdJeStunde() {
+  const w = [{ cost_usd: 10, active_seconds: 3600 }, { cost_usd: 30, active_seconds: 7200 }, { cost_usd: 5, active_seconds: 0 }];
+  assert.ok(Math.abs(metrics.usdJeStunde(w) - 15) < 1e-9, 'Schnitt ' + metrics.usdJeStunde(w));
+  assert.strictEqual(metrics.usdJeStunde([{ cost_usd: 5, active_seconds: 0 }]), null, 'ohne Zeit kein Wert');
+  assert.strictEqual(metrics.usdJeStunde([]), null);
+  assert.ok(Math.abs(metrics.usdJeStunde([w[1]]) - 15) < 1e-9, 'eine Periode = ihr eigener Wert');
+}
+
+// Freie Kachelgroesse (Hub + Analyse): Breite und Hoehe kommen aus dem
+// Browser-Speicher und landen im style-Attribut. Nur ganze Zahlen in festen
+// Grenzen kommen durch, alles andere heisst Auto.
+// Wochen-Marge als Zeichnung: Balken = Abstand zur Zielmarge in Pp, eine
+// Woche ohne Marge (kein Erloes oder Selbstkostensatz) hat keinen Balken
+// statt einer 0-%-Saeule. Analyse-Karte und Hub-Widget nutzen dieselbe.
+function testMargeWochenZeichnung() {
+  const C = require('../public/app/charts.js');
+  const wo = (montag, marge, ziel = 30) => ({ montag, kennzahlen: { wert: { marge_prozent: marge, zielmarge_prozent: ziel } } });
+  const M = C.margeWochen([wo('2025-12-29', 40), wo('2026-01-05', null), wo('2026-01-12', 20)]);
+  assert.strictEqual(M.ziel, 30);
+  assert.strictEqual(M.leer, false);
+  assert.strictEqual(M.balken.length, 2, 'Woche ohne Marge hat einen Balken: ' + JSON.stringify(M.balken));
+  // +10 und −10 Pp: gleich hoch, einer endet an der Ziellinie (y 110) von oben, einer beginnt dort.
+  assert.deepStrictEqual([M.balken[0].y, M.balken[0].h, M.balken[0].farbe], [10, 100, 'var(--ok)']);
+  assert.deepStrictEqual([M.balken[1].y, M.balken[1].h, M.balken[1].farbe], [110, 100, 'var(--bad)']);
+  assert.deepStrictEqual(M.achse.map((a) => a.v), [10, null, -10]);
+  assert.deepStrictEqual(M.achse.map((a) => a.text), ['+10', '–', '-10']);
+  // Knapp unter Ziel (−0,3 Pp) gerundet ist 0, nicht „-0“.
+  assert.deepStrictEqual(C.margeWochen([wo('2026-01-05', 29.7), wo('2026-01-12', 40)]).achse.map((a) => a.text), ['0', '+10']);
+  assert.deepStrictEqual(M.achse.map((a) => a.kw), [1, 2, 3], 'ISO-KW über den Jahreswechsel');
+  assert.strictEqual(C.kw('2026-12-28'), 53, '2026 hat 53 ISO-Wochen');
+  assert.ok(M.linie.startsWith('M'), 'Linie fehlt');
+
+  // Ohne Zielmarge wird die Marge selbst gezeichnet.
+  const O = C.margeWochen([wo('2026-01-05', 12, null), wo('2026-01-12', -3, null)]);
+  assert.strictEqual(O.ziel, null);
+  assert.deepStrictEqual(O.achse.map((a) => a.v), [12, -3]);
+
+  // Keine Woche mit Marge: leer, keine Balken, kein NaN.
+  const L = C.margeWochen([wo('2026-01-05', null), wo('2026-01-12', null)]);
+  assert.strictEqual(L.leer, true);
+  assert.ok(!/NaN|Infinity/.test(JSON.stringify(L)), JSON.stringify(L));
+  assert.strictEqual(C.margeWochen([]).leer, true);
+}
+
+function testKachelGroesse() {
+  const { kachelGroesse } = require('../public/app/kern.js');
+  assert.deepStrictEqual(kachelGroesse({ w: 480, h: 300 }), { w: 480, h: 300 });
+  assert.deepStrictEqual(kachelGroesse({ w: 480 }), { w: 480 });
+  assert.deepStrictEqual(kachelGroesse({ h: 300 }), { h: 300 });
+  assert.deepStrictEqual(kachelGroesse({ w: 120, h: 80 }), { w: 120, h: 80 });
+  assert.deepStrictEqual(kachelGroesse({ w: 2000, h: 1600 }), { w: 2000, h: 1600 });
+  // ungueltige Achse faellt einzeln weg, die gueltige bleibt
+  assert.deepStrictEqual(kachelGroesse({ w: 119, h: 300 }), { h: 300 });
+  assert.deepStrictEqual(kachelGroesse({ w: 480, h: 1601 }), { w: 480 });
+  for (const roh of [null, undefined, 3, 'x', [], {}, { w: '480' }, { w: NaN }, { w: 480.5 },
+    { w: -480 }, { w: Infinity }, { w: 2001, h: 79 }, { w: '1px;background:url(x)' }, { h: '<b>' }]) {
+    assert.strictEqual(kachelGroesse(roh), null, JSON.stringify(roh));
+  }
+}
+
+// Betrag aus einem Eingabefeld (Zahlung buchen). Deutsch wie englisch getippt,
+// mit Euro-Zeichen und Leerzeichen; alles andere ist keine Zahl.
+function testBetragAus() {
+  const { betragAus } = require('../public/app/kern.js');
+  for (const [ein, aus] of [
+    ['1.234,56', 1234.56], ['1234,56', 1234.56], ['1234.56', 1234.56], ['12', 12], ['12,5', 12.5],
+    [' 99,90 € ', 99.9], ['1.234', 1234], ['1.234.567,8', 1234567.8], ['0,01', 0.01], ['1,234.56', 1234.56],
+  ]) assert.strictEqual(betragAus(ein), aus, JSON.stringify(ein) + ' → ' + betragAus(ein));
+  for (const ein of ['', 'abc', '12,3,4', '1.2.3', '--5', '5-', null, undefined, '1e5', '0x10']) {
+    assert.ok(Number.isNaN(betragAus(ein)), JSON.stringify(ein) + ' ergab ' + betragAus(ein));
+  }
+}
+
+// Verschieben im Raster: nach links landet die Kachel vor dem Ziel, nach rechts
+// dahinter — sonst bleibt sie beim Ziehen nach rechts auf ihrem Platz.
+function testVerschiebe() {
+  const { verschiebe } = require('../public/app/kern.js');
+  const L = ['a', 'b', 'c', 'd'];
+  assert.deepStrictEqual(verschiebe(L, 'c', 'a'), ['c', 'a', 'b', 'd'], 'nach links');
+  assert.deepStrictEqual(verschiebe(L, 'a', 'b'), ['b', 'a', 'c', 'd'], 'Nachbar rechts');
+  assert.deepStrictEqual(verschiebe(L, 'a', 'd'), ['b', 'c', 'd', 'a'], 'ganz nach rechts');
+  assert.deepStrictEqual(verschiebe(L, 'b', null), ['a', 'c', 'd', 'b'], 'ans Ende (+-Kachel)');
+  assert.deepStrictEqual(verschiebe(L, 'x', 'b'), ['a', 'x', 'b', 'c', 'd'], 'aus dem Katalog vor das Ziel');
+  assert.deepStrictEqual(verschiebe(L, 'b', 'b'), L, 'auf sich selbst');
+  assert.deepStrictEqual(L, ['a', 'b', 'c', 'd'], 'Eingabe veraendert');
+}
+
+// Kennzahlen des Zeitraums (Hub): Summe ueber Vorgaenge und ticketlose Arbeit,
+// gerechnet mit derselben mehrwert()-Formel wie je Vorgang. Abgerechnet und
+// offen teilen den Arbeitswert ohne Rest auf.
+function testKennzahlenZeitraum() {
+  const config = require('../config.json');
+  const aboKurs = String(config.aboWaehrung).toUpperCase() === 'EUR' ? 1 : config.usdToEur;
+  const merk = { s: config.selbstkostenStunde, z: config.zielmargeProzent };
+  try {
+    config.selbstkostenStunde = 50;
+    config.zielmargeProzent = 32;
+    const zeilen = [
+      { ticket: 'A-1', arbeitswert: 600, active_hours: 6, agent_hours: 9, api_gegenwert_usd: 0, abo_anteil_usd: 60 / aboKurs },
+      { ticket: 'A-2', arbeitswert: 300, active_hours: 3, agent_hours: 4, api_gegenwert_usd: 0, abo_anteil_usd: 30 / aboKurs },
+      { gruppe: 'Projekt X', arbeitswert: 100, active_hours: 1, agent_hours: 2, api_gegenwert_usd: 0, abo_anteil_usd: 10 / aboKurs },
+    ];
+    const abrechnung = Object.create(null);
+    abrechnung['A-1'] = { betrag_eur: 999, nummern: ['2026-0001'] };
+    const k = metrics.kennzahlen(zeilen, abrechnung);
+
+    // Gesamt wie ein einziger Vorgang mit den Summen.
+    const ref = metrics.mehrwert({ arbeitswert: 1000, active_hours: 10, api_gegenwert_usd: 0, abo_anteil_usd: 100 / aboKurs }, 0);
+    assert.ok(Math.abs(k.wert.marge - ref.marge) < 1e-9, 'Marge ' + k.wert.marge + ' ≠ ' + ref.marge);
+    // 1000 − 100 Abo − 10 h × 50 = 400 → 40 %
+    assert.ok(Math.abs(k.wert.marge - 400) < 1e-6, 'Marge muss 400 sein: ' + k.wert.marge);
+    assert.ok(Math.abs(k.wert.marge_prozent - 40) < 1e-6);
+    // Der Rechnungsbetrag (999) ersetzt NICHT den Arbeitswert im Zeitraum:
+    // die Rechnung kann Zeit ausserhalb des Zeitraums enthalten.
+    assert.strictEqual(k.wert.erloes_ist_rechnung, false);
+    // Abgerechnet = Arbeitswert der Vorgaenge mit Rechnung; offen = Rest.
+    assert.strictEqual(k.abgerechnet_eur, 600);
+    assert.strictEqual(k.offen_eur, 400);
+    assert.strictEqual(k.offen_vorgaenge, 1, 'nur A-2 ist ein offener Vorgang (Projekt X hat keinen)');
+    assert.strictEqual(k.abgerechnet_vorgaenge, 1, 'nur A-1 ist abgerechnet');
+    // "Offen" teilt sich in Vorgaenge und ticketlose Arbeit (Status-Bereich).
+    assert.strictEqual(k.offen_vorgang_eur, 300, 'offen auf Vorgaengen');
+    assert.strictEqual(k.ohne_vorgang_eur, 100, 'ohne Vorgang');
+    assert.strictEqual(k.offen_vorgang_eur + k.ohne_vorgang_eur, k.offen_eur, 'Teile ergeben offen');
+    assert.strictEqual(k.aktive_stunden, 10);
+    assert.strictEqual(k.agent_stunden, 15);
+
+    // Ein Vorgang namens __proto__ ist ein normaler Schluessel, kein Treffer.
+    const k2 = metrics.kennzahlen([{ ticket: '__proto__', arbeitswert: 5, active_hours: 0 }], {});
+    assert.strictEqual(k2.abgerechnet_eur, 0);
+    // Ohne Zeilen: Nullen statt NaN.
+    const leer = metrics.kennzahlen([], Object.create(null));
+    assert.strictEqual(leer.offen_eur, 0);
+    assert.strictEqual(leer.wert.marge, null, 'ohne Erlös keine Marge');
+  } finally {
+    config.selbstkostenStunde = merk.s;
+    config.zielmargeProzent = merk.z;
+  }
+}
+
+// Live-Strom (Hub, Seitenleiste, Live): Tokens je Minute der letzten Stunde,
+// aelteste zuerst, die laufende Minute zuletzt.
+function testLiveMinuten() {
+  const jetzt = Date.now();
+  const { db, zeile } = zeitDb(jetzt - 60 * 60000);
+  zeile('s1', 60, 'P', null);         // laufende Minute
+  zeile('s1', 55, 'P', null);         // vor 5 Minuten
+  zeile('s2', 55, 'P', null);         // gleiche Minute, zweite Sitzung
+  zeile('s1', -30, 'P', null);        // vor 90 Minuten: ausserhalb
+  const m = metrics.live(db, { minutes: 60 }).minuten;
+  assert.strictEqual(m.length, 60, 'nicht 60 Minuten: ' + m.length);
+  assert.strictEqual(m[59], 20, 'laufende Minute ' + m[59] + ' statt 20 Tokens');
+  assert.strictEqual(m[54], 40, 'vor 5 Min ' + m[54] + ' statt 40 Tokens');
+  assert.strictEqual(m.reduce((a, b) => a + b, 0), 60, 'Summe enthaelt Requests ausserhalb der Stunde');
+  db.close();
+}
+
+// Cache-Ersparnis: was die gelesenen Cache-Tokens als normale Eingabe gekostet
+// haetten, minus was sie als Cache-Lesen kosten. Je Modell mit dessen Preis.
+function testCacheErsparnis() {
+  const voll = pricing.costOf('claude-opus-5', { input_tokens: 1e6 });
+  const cache = pricing.costOf('claude-opus-5', { cache_read: 1e6 });
+  const e = metrics.cacheErsparnis([{ model: 'claude-opus-5', cache_read_tokens: 1e6 }]);
+  assert.ok(Math.abs(e - (voll - cache)) < 1e-9, 'Ersparnis ' + e + ' ≠ ' + (voll - cache));
+  assert.ok(e > 0 && e < voll, 'Ersparnis unplausibel: ' + e);
+  assert.strictEqual(metrics.cacheErsparnis([]), 0);
+}
+
+// Spuren je Sitzung (Live): abrechenbare Fenster um eigene Eingaben und
+// Agentenzeit, in Minuten seit Beginn der letzten Stunde.
+function testLiveSpuren() {
+  mitZeitmodell(5, 'eingaben', () => {
+    const jetzt = Date.now();
+    const { db, zeile, aktiv } = zeitDb(jetzt - 60 * 60000);
+    zeile('s1', 30, 'P', null, 1);        // Eingabe bei Minute 30 -> Fenster 27,5..32,5
+    aktiv('s1', 31, 'P', null, 0);        // Agent arbeitet weiter (keine Eingabe)
+    aktiv('s1', 34, 'P', null, 0);
+    aktiv('s1', 50, 'P', null, 0);        // nach 16 Min Pause: neue Spanne
+    const s = metrics.live(db, { minutes: 60 }).sessions.find((x) => x.session_id === 's1');
+    const f = s.spur.fenster, a = s.spur.agent;
+    assert.strictEqual(f.length, 1, 'Fenster: ' + JSON.stringify(f));
+    assert.ok(Math.abs(f[0][0] - 27.5) < 0.05 && Math.abs(f[0][1] - 32.5) < 0.05, 'Fenster ' + JSON.stringify(f));
+    assert.strictEqual(a.length, 2, 'Agentenspannen: ' + JSON.stringify(a));
+    assert.ok(Math.abs(a[0][0] - 30) < 0.05 && Math.abs(a[0][1] - 34) < 0.05, 'Agent ' + JSON.stringify(a));
+    db.close();
+  });
+}
+
+// Cache-Schreiben 5m/1h getrennt bis in die Auswertung: kostet unterschiedlich
+// und wird im Detail je Zeile mit Preis gezeigt.
+function testCacheGetrenntJeModell() {
+  const { db } = zeitDb();
+  db.prepare(`INSERT INTO events (request_id, ts, session_id, project, branch, ticket, model,
+    input_tokens, output_tokens, cache_w_5m, cache_w_1h, cache_read, web_search, cost_usd, is_sidechain, day)
+    VALUES ('c1','2026-08-18T10:00:00Z','s','P','main','ABC-1','claude-opus-5',0,0,700,300,0,0,0,0,'2026-08-18')`).run();
+  const m = metrics.byModel(db, { ticket: 'ABC-1' })[0];
+  assert.strictEqual(m.cache_w_5m, 700, '5m ' + m.cache_w_5m);
+  assert.strictEqual(m.cache_w_1h, 300, '1h ' + m.cache_w_1h);
+  assert.strictEqual(m.cache_write_tokens, 1000, 'Summe ' + m.cache_write_tokens);
+  db.close();
+}
+
+// Tokens im Detail: Betrag je Art aus der Preisliste des jeweiligen Modells.
+// Weicht die Summe von der erfassten ab (Preis geaendert, Modell ohne Preis),
+// steht die Differenz offen da statt hochskaliert zu werden.
+function testTokenArten() {
+  const opus = pricing.priceFor('claude-opus-5');
+  const z = metrics.tokenArten([
+    { model: 'claude-opus-5', input_tokens: 1e6, output_tokens: 0, cache_w_5m: 1e6, cache_w_1h: 1e6, cache_read_tokens: 0,
+      cost_usd: 1e6 * (opus.in + opus.cw5m + opus.cw1h) + 2 },
+    { model: 'gibt-es-nicht-xyz', input_tokens: 5, output_tokens: 0, cache_w_5m: 0, cache_w_1h: 0, cache_read_tokens: 0, cost_usd: 0 },
+  ]);
+  const je = Object.fromEntries(z.zeilen.map((r) => [r.art, r]));
+  assert.deepStrictEqual(z.zeilen.map((r) => r.art), ['input', 'output', 'cache_5m', 'cache_1h', 'cache_lesen']);
+  assert.ok(Math.abs(je.cache_5m.usd - 1e6 * opus.cw5m) < 1e-9, '5m ' + je.cache_5m.usd);
+  assert.ok(Math.abs(je.cache_1h.usd - 1e6 * opus.cw1h) < 1e-9, '1h ' + je.cache_1h.usd);
+  assert.ok(je.cache_1h.usd > je.cache_5m.usd, '1h muss teurer sein als 5m');
+  assert.strictEqual(je.input.tokens, 1e6 + 5);
+  assert.strictEqual(z.tokens, 3e6 + 5);
+  assert.ok(Math.abs(z.abweichung_usd - 2) < 1e-9, 'Abweichung ' + z.abweichung_usd);
+  assert.ok(Math.abs(z.usd + z.abweichung_usd - z.erfasst_usd) < 1e-9, 'Summe + Abweichung ≠ erfasst');
+  assert.deepStrictEqual(metrics.tokenArten([]).zeilen.map((r) => r.usd), [0, 0, 0, 0, 0]);
+}
+
+// Sitzungsliste im Detail: Zeit und Dollar je Sitzung ergeben in Summe genau
+// die Werte des Vorgangs — sonst zeigt die Liste etwas anderes als der Kopf.
+function testSitzungenJeVorgang() {
+  mitZeitmodell(5, 'aktivitaet', () => {
+    const { db, zeile } = zeitDb();
+    zeile('s1', 0, 'P', 'ABC-1'); zeile('s1', 3, 'P', 'ABC-1');
+    zeile('s2', 60, 'P', 'ABC-1'); zeile('s2', 64, 'P', 'ABC-1');
+    zeile('s3', 0, 'P', 'XYZ-9'); zeile('s3', 2, 'P', 'XYZ-9');      // fremder Vorgang, parallel zu s1
+    db.prepare("UPDATE events SET is_sidechain = 1, web_search = 2 WHERE session_id = 's2'").run();
+    const liste = metrics.sitzungenJeVorgang(db, 'ABC-1');
+    const row = metrics.byTicket(db, { ticket: 'ABC-1' })[0];
+    assert.deepStrictEqual(liste.map((s) => s.session_id), ['s1', 's2']);
+    assert.ok(row.active_seconds > 0, 'Vorgang ohne Zeit — Test sagt nichts');
+    assert.strictEqual(liste.reduce((a, s) => a + s.active_seconds, 0), row.active_seconds, 'Zeit-Summe');
+    assert.ok(Math.abs(liste.reduce((a, s) => a + s.cost_usd, 0) - row.cost_usd) < 1e-9, 'USD-Summe');
+    assert.strictEqual(liste[0].subagent, false);
+    assert.strictEqual(liste[1].subagent, true);
+    assert.strictEqual(liste[1].web_suchen, 4);
+    assert.deepStrictEqual(liste[0].modelle, ['claude-opus-5']);
+    // Sitzung nur mit Aktivitaet (kein Request auf dem Vorgang): Start und
+    // Branch kommen aus der Aktivitaet, sonst stuende sie undatiert ganz oben.
+    const aktiv = (s, min) => db.prepare('INSERT INTO activity (session_id, ts, project, branch, ticket, day, eingabe) VALUES (?,?,?,?,?,?,?)')
+      .run(s, new Date(Date.UTC(2026, 7, 18, 10, 0, 0) + min * 60000).toISOString(), 'P', 'feature/ABC-1', 'ABC-1', '2026-08-18', null);
+    aktiv('s4', 120); aktiv('s4', 123);
+    const mitAktiv = metrics.sitzungenJeVorgang(db, 'ABC-1');
+    const s4 = mitAktiv.find((s) => s.session_id === 's4');
+    assert.ok(s4 && s4.active_seconds > 0, 's4 fehlt oder ohne Zeit');
+    assert.strictEqual(s4.start, '2026-08-18T12:00:00.000Z', 'Start aus Aktivitaet: ' + (s4 && s4.start));
+    assert.strictEqual(s4.branch, 'feature/ABC-1');
+    assert.deepStrictEqual(mitAktiv.map((s) => s.session_id), ['s1', 's2', 's4'], 'Reihenfolge nach Start');
+    db.close();
+  });
+}
+
+// Sparkline der Vorgangstabelle: Dollar je Tag und Vorgang, Summe = Vorgang.
+function testVerlaufJeVorgang() {
+  const { db, zeile } = zeitDb();
+  zeile('s1', 0, 'P', 'ABC-1'); zeile('s1', 24 * 60, 'P', 'ABC-1'); zeile('s2', 0, 'P', 'XYZ-9');
+  const v = metrics.verlaufJeVorgang(db, {});
+  assert.deepStrictEqual(v['ABC-1'].map((x) => x[0]), ['2026-08-18', '2026-08-19']);
+  const row = metrics.byTicket(db, { ticket: 'ABC-1' })[0];
+  assert.ok(Math.abs(v['ABC-1'].reduce((a, x) => a + x[1], 0) - row.cost_usd) < 1e-9, 'Summe');
+  assert.strictEqual(metrics.verlaufJeVorgang(db, { from: '2026-08-19' })['XYZ-9'], undefined, 'Zeitfilter');
+  db.close();
+}
+
+// Ein Request mit frei waehlbarem Modell und Betrag (Analyse-Tests).
+function ereignis(db, id, ts, { model = 'claude-opus-5', ticket = null, project = 'P', usd = 1 } = {}) {
+  db.prepare(`INSERT INTO events (request_id, ts, session_id, project, branch, ticket, model,
+    input_tokens, output_tokens, cache_w_5m, cache_w_1h, cache_read, web_search, cost_usd, is_sidechain, day)
+    VALUES (?,?,?,?,?,?,?,10,10,0,0,0,0,?,0,?)`).run(id, ts, 's-' + id, project, 'main', ticket, model, usd, ts.slice(0, 10));
+}
+
+// Perioden mit aktiver Zeit, aber ohne Request fehlten in days/weeks/months.
+function testByPeriodNurZeit() {
+  mitZeitmodell(5, 'aktivitaet', () => {
+    const { db, zeile, aktiv } = zeitDb();
+    zeile('s1', 0, 'P', 'ABC-1'); zeile('s1', 2, 'P', 'ABC-1');            // 18.08. mit Request
+    aktiv('s2', 24 * 60, 'P', 'ABC-1'); aktiv('s2', 24 * 60 + 3, 'P', 'ABC-1');   // 19.08. nur Aktivitaet
+    const tage = metrics.byPeriod(db, {}, 'tag');
+    const t19 = tage.find((t) => t.day === '2026-08-19');
+    assert.ok(t19, '19.08. fehlt: ' + JSON.stringify(tage.map((t) => t.day)));
+    assert.strictEqual(t19.cost_usd, 0);
+    assert.ok(t19.active_seconds > 0);
+    assert.deepStrictEqual(tage.map((t) => t.day), ['2026-08-18', '2026-08-19'], 'Reihenfolge');
+    assert.strictEqual(tage.reduce((a, t) => a + t.active_seconds, 0), metrics.summary(db, {}).active_seconds, 'Zeit-Summe');
+    const w = metrics.byPeriod(db, {}, 'woche')[0];
+    assert.ok(w.usd_je_stunde > 0 && Math.abs(w.usd_je_stunde - w.cost_usd / (w.active_seconds / 3600)) < 1e-9, 'usd_je_stunde ' + w.usd_je_stunde);
+    assert.strictEqual(t19.usd_je_stunde, 0, 'Tag ohne Kosten: 0 USD je Stunde');
+    db.close();
+  });
+}
+
+// Verlauf je Modell: je Periode ergeben die Modellreihen die Periodensumme,
+// ab dem fuenften Modell wird zu "andere" zusammengefasst.
+function testVerlaufJeModell() {
+  const { db } = zeitDb();
+  const modelle = ['claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5-20251001', 'claude-fable-5', 'claude-opus-4-1', 'gibt-es-nicht-xyz'];
+  modelle.forEach((m, i) => {
+    ereignis(db, 'a' + i, '2026-08-18T10:0' + i + ':00Z', { model: m, usd: 10 - i });
+    ereignis(db, 'b' + i, '2026-08-19T10:0' + i + ':00Z', { model: m, usd: 1 });
+  });
+  const v = metrics.verlaufJeModell(db, {}, 'tag');
+  assert.deepStrictEqual(v.perioden, ['2026-08-18', '2026-08-19']);
+  assert.strictEqual(v.modelle.length, 5, 'vier Modelle + andere: ' + v.modelle.length);
+  assert.strictEqual(v.modelle[4].model, null, 'Rest heisst nicht null');
+  assert.strictEqual(v.modelle[0].model, 'claude-opus-5', 'nicht nach Kosten sortiert');
+  const tage = metrics.byPeriod(db, {}, 'tag');
+  v.perioden.forEach((d, i) => {
+    const s = v.modelle.reduce((a, m) => a + m.werte[i], 0);
+    assert.ok(Math.abs(s - tage[i].cost_usd) < 1e-9 && Math.abs(v.summe[i] - s) < 1e-9, d + ': ' + s + ' ≠ ' + tage[i].cost_usd);
+  });
+  assert.ok(Math.abs(v.summe.reduce((a, x) => a + x, 0) - metrics.summary(db, {}).cost_usd) < 1e-9, 'Gesamtsumme');
+  db.close();
+}
+
+// Sankey: Modell -> Projekt -> Vorgang. Jede Spalte traegt dieselbe Summe,
+// Werkzeugbetrieb faellt heraus, ticketlose Arbeit landet bei "ohne Vorgang".
+function testFluss() {
+  const { db } = zeitDb();
+  ereignis(db, 'f1', '2026-08-18T10:00:00Z', { ticket: 'ABC-1', usd: 5 });
+  ereignis(db, 'f2', '2026-08-18T10:01:00Z', { ticket: null, usd: 3 });
+  ereignis(db, 'f3', '2026-08-18T10:02:00Z', { project: '(lokal)', model: 'claude-sonnet-5', usd: 7 });
+  const f = metrics.fluss(db, {});
+  const summe = (praefix) => f.links.filter((l) => l.s.startsWith(praefix)).reduce((a, l) => a + l.v, 0);
+  assert.ok(Math.abs(f.summe_usd - 8) < 1e-9, 'Summe ' + f.summe_usd);
+  assert.ok(Math.abs(summe('m:') - 8) < 1e-9 && Math.abs(summe('p:') - 8) < 1e-9, 'Spalten ' + summe('m:') + '/' + summe('p:'));
+  assert.ok(Math.abs(f.summe_usd - metrics.splitOverhead(db, {}).arbeit.cost_usd) < 1e-9, '≠ Projektarbeit');
+  assert.ok(!f.links.some((l) => /lokal|sonnet/.test(l.s + l.t)), 'Werkzeugbetrieb im Fluss');
+  assert.ok(f.links.some((l) => l.s === 'p:P' && l.t === 'v:ohne:P' && Math.abs(l.v - 3) < 1e-9), 'ticketlos fehlt');
+  db.close();
+}
+
+// Marge je Woche: dieselbe Formel wie die Hub-Kennzahlen, Woche Mo–So.
+function testMargeJeWoche() {
+  const { db } = zeitDb();
+  ereignis(db, 'w1', '2026-08-18T10:00:00Z', { ticket: 'ABC-1', usd: 5 });   // Di, Woche 17.08.
+  ereignis(db, 'w2', '2026-08-23T10:00:00Z', { ticket: 'ABC-1', usd: 2 });   // So, Woche 17.08.
+  ereignis(db, 'w3', '2026-08-24T10:00:00Z', { ticket: 'XYZ-9', usd: 4 });   // Mo, Woche 24.08.
+  // Nur abgeschlossene Wochen (Owner 06.10., Variante A): am Mittwoch 26.08.
+  // endet die Reihe mit der Woche 17.08.; am Sonntag 30.08. ist 24.08. dabei.
+  assert.deepStrictEqual(metrics.margeJeWoche(db, { bis: '2026-08-26', wochen: 3 }, {}).map((w) => w.montag),
+    ['2026-08-03', '2026-08-10', '2026-08-17'], 'angebrochene Woche gezeigt');
+  assert.deepStrictEqual(metrics.margeJeWoche(db, { bis: '2026-08-29', wochen: 1 }, {}).map((w) => w.montag), ['2026-08-17'], 'Samstag');
+  const W = metrics.margeJeWoche(db, { bis: '2026-08-30', wochen: 3 }, {});
+  assert.deepStrictEqual(W.map((w) => w.montag), ['2026-08-10', '2026-08-17', '2026-08-24'], 'Sonntag schliesst die Woche ab');
+  const erwartet = (von, bis) => {
+    const o = { from: von, to: bis };
+    return metrics.kennzahlen(metrics.byTicket(db, o).concat(metrics.ohneTicket(db, o)), {});
+  };
+  assert.deepStrictEqual(W[1].kennzahlen, erwartet('2026-08-17', '2026-08-23'), 'Woche 17.08.');
+  assert.deepStrictEqual(W[2].kennzahlen, erwartet('2026-08-24', '2026-08-30'), 'Woche 24.08.');
+  assert.ok(Math.abs(W[1].kennzahlen.wert.api_gegenwert - metrics.usdToEur(7)) < 1e-9, 'Sonntag fehlt in der Woche');
+  assert.strictEqual(W[0].kennzahlen.wert.marge_prozent, null, 'leere Woche muss null sein, nicht 0');
+  db.close();
+}
+
+// --- Zahlungen (Block 4a, Owner 06.10.: Free) --------------------------------
+// Eine Zahlung ist kein Dokument: sie haengt an der Rechnung, aendert deren
+// Abschrift nie und darf geloescht werden. Was auf dem Konto ankam, bestimmt
+// den Status — deshalb wird jede Zahlung an der Rechnung gegengeprueft.
+function heuteLokal() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+function testZahlungen() {
+  rechnungsUmgebung(() => {
+    const rechnung = require('../rechnung');
+    const db = rechnungsDb();
+    const daten = { from: '2026-08-01', to: '2026-08-31', tickets: ['PROJ-500'], empfaenger: { name: 'Kunde' } };
+    const inv = rechnung.erstelle(db, daten);
+    const heute = heuteLokal();
+    const brutto = inv.brutto_eur;
+    assert.ok(brutto > 20, 'Testrechnung zu klein: ' + brutto);
+    const anzahlRechnungen = rechnung.liste(db).length;
+
+    const z1 = rechnung.bucheZahlung(db, { nr: inv.nr, datum: heute, betrag_eur: 10.005, notiz: 'Anzahlung' });
+    assert.strictEqual(z1.betrag_eur, 10.01, 'Betrag nicht auf Cent gerundet: ' + z1.betrag_eur);
+    assert.ok(Number.isInteger(z1.id) && z1.id > 0, 'Zahlung ohne Id');
+    assert.strictEqual(rechnung.zahlungenZu(db, inv.nr).length, 1);
+
+    // Ungueltige Eingaben prallen ab und hinterlassen nichts.
+    const fehlschlag = [
+      [{ betrag_eur: 0 }, 'Betrag 0'],
+      [{ betrag_eur: -5 }, 'negativer Betrag'],
+      [{ betrag_eur: 'viel' }, 'Text als Betrag'],
+      [{ betrag_eur: NaN }, 'NaN'],
+      [{ betrag_eur: brutto }, 'Ueberzahlung (Rest ist kleiner)'],
+      [{ datum: '2026-13-45' }, 'kein Kalendertag'],
+      [{ datum: '06.10.2026' }, 'falsches Format'],
+      [{ datum: '2020-01-01' }, 'vor dem Rechnungsdatum'],
+      [{ datum: '2999-01-01' }, 'in der Zukunft'],
+      [{ notiz: 'x'.repeat(201) }, 'Notiz zu lang'],
+      [{ notiz: {} }, 'Notiz kein Text'],
+      [{ nr: '../../x' }, 'Nummer mit Pfadanteilen'],
+      [{ nr: '1999-9999' }, 'unbekannte Rechnung'],
+      [{ nr: [inv.nr] }, 'Nummer als Array (String(["…"]) passt auf die Regex)'],
+    ];
+    for (const [abw, grund] of fehlschlag) {
+      assert.throws(() => rechnung.bucheZahlung(db, { nr: inv.nr, datum: heute, betrag_eur: 5, ...abw }),
+        'angenommen: ' + grund);
+    }
+    assert.strictEqual(rechnung.zahlungenZu(db, inv.nr).length, 1, 'abgelehnte Zahlung wurde trotzdem gespeichert');
+    // Nur Text ist eine Nummer: String(["2026-0001"]) passt sonst auf die Regex.
+    let geladen;
+    try { geladen = rechnung.lade(db, [inv.nr]); } catch (e) { geladen = 'warf: ' + e.message; }
+    assert.strictEqual(geladen, null, 'Nummer als Array nicht sauber abgewiesen');
+
+    // Genau der Rest geht, ein Cent Toleranz fuer Rundung auch.
+    const rest = Math.round((brutto - 10.01) * 100) / 100;
+    rechnung.bucheZahlung(db, { nr: inv.nr, datum: heute, betrag_eur: rest + 0.01 });
+    assert.throws(() => rechnung.bucheZahlung(db, { nr: inv.nr, datum: heute, betrag_eur: 0.01 }),
+      'Zahlung auf bezahlte Rechnung angenommen');
+
+    // Loeschen: nur bekannte Id, und danach ist der Rest wieder offen.
+    const alle = rechnung.zahlungenZu(db, inv.nr);
+    rechnung.loescheZahlung(db, alle[1].id);
+    assert.strictEqual(rechnung.zahlungenZu(db, inv.nr).length, 1, 'Zahlung nicht geloescht');
+    for (const id of [alle[1].id, 99999, 'abc', -1, 1.5]) {
+      assert.throws(() => rechnung.loescheZahlung(db, id), 'unbekannte Zahlung geloescht: ' + id);
+    }
+
+    // Stornierte Rechnung und Gegenrechnung nehmen keine Zahlung an.
+    const storno = rechnung.storniere(db, inv.nr);
+    assert.throws(() => rechnung.bucheZahlung(db, { nr: inv.nr, datum: heute, betrag_eur: 1 }), 'Zahlung auf stornierte Rechnung');
+    assert.throws(() => rechnung.bucheZahlung(db, { nr: storno.nr, datum: heute, betrag_eur: 1 }), 'Zahlung auf Gegenrechnung');
+
+    // Die Abschrift bleibt unberuehrt, der Nummernkreis auch.
+    assert.strictEqual(rechnung.lade(db, inv.nr).brutto_eur, brutto, 'Zahlung hat die Rechnung veraendert');
+    assert.strictEqual(rechnung.liste(db).length, anzahlRechnungen + 1, 'Zahlung hat eine Rechnungsnummer verbraucht');
+    db.close();
+  });
+}
+
+function testStatusAusZahlungen() {
+  const { statusOf } = require('../rechnung');
+  const r = (status, brutto) => ({ status, brutto_eur: brutto });
+  assert.strictEqual(statusOf(r('erstellt', 100), 0), 'offen');
+  assert.strictEqual(statusOf(r('erstellt', 100), 40), 'teilbezahlt');
+  assert.strictEqual(statusOf(r('erstellt', 100), 100), 'bezahlt');
+  assert.strictEqual(statusOf(r('erstellt', 100), 99.995), 'bezahlt', 'Rundungscent kippt nicht auf bezahlt');
+  assert.strictEqual(statusOf(r('erstellt', 100), 99.98), 'teilbezahlt', 'zwei Cent Rest gelten als bezahlt');
+  assert.strictEqual(statusOf(r('storniert', 100), 0), 'storniert');
+  assert.strictEqual(statusOf(r('storniert', 100), 100), 'storniert', 'bezahlte, dann stornierte Rechnung steht als bezahlt');
+  assert.strictEqual(statusOf(r('storno', -100), 0), 'storno');
+  // Ohne Zahlungsdaten (alte Aufrufer) ist eine gestellte Rechnung offen.
+  assert.strictEqual(statusOf(r('erstellt', 100)), 'offen');
+}
+
+function testRechnungsListe() {
+  rechnungsUmgebung(() => {
+    const rechnung = require('../rechnung');
+    const db = rechnungsDb();
+    const daten = { from: '2026-08-01', to: '2026-08-31', tickets: ['PROJ-500'], empfaenger: { name: 'Kunde' } };
+    const a = rechnung.erstelle(db, daten);
+    const b = rechnung.erstelle(db, daten);
+    rechnung.bucheZahlung(db, { nr: a.nr, datum: heuteLokal(), betrag_eur: 20 });
+    rechnung.bucheZahlung(db, { nr: a.nr, datum: heuteLokal(), betrag_eur: 5.5 });
+    const st = rechnung.storniere(db, b.nr);
+    // Alte Rechnung ohne gespeicherte Faelligkeit (vor 1.3): wird wie frueher gerechnet.
+    db.prepare('UPDATE invoices SET faellig_am = NULL WHERE nr = ?').run(b.nr);
+
+    const L = rechnung.liste(db);
+    const zeile = (nr) => L.find((x) => x.nr === nr);
+    const za = zeile(a.nr), zb = zeile(b.nr), zs = zeile(st.nr);
+    // Felder der 1.4-Liste bleiben (alte Oberflaeche liest sie bis zum Cutover).
+    for (const f of ['nr', 'erstellt_am', 'empfaenger', 'brutto_eur', 'status', 'hat_pdf']) {
+      assert.ok(f in za, 'Feld fehlt: ' + f);
+    }
+    assert.strictEqual(za.faellig_am, a.faellig_am);
+    assert.strictEqual(zb.faellig_am, rechnung.faelligAm({ ...b, faellig_am: null }), 'Faelligkeit alter Rechnung fehlt');
+    assert.strictEqual(za.leistung_von, '2026-08-01');
+    assert.strictEqual(za.leistung_bis, '2026-08-31');
+    assert.strictEqual(za.netto_eur, a.netto_eur);
+    assert.strictEqual(za.gezahlt_eur, 25.5, 'Summe der Zahlungen falsch: ' + za.gezahlt_eur);
+    assert.strictEqual(za.rest_eur, Math.round((a.brutto_eur - 25.5) * 100) / 100, 'Rest falsch');
+    assert.strictEqual(za.status_abgeleitet, 'teilbezahlt');
+    assert.strictEqual(zb.status_abgeleitet, 'storniert');
+    assert.strictEqual(zb.rest_eur, 0, 'stornierte Rechnung hat offenen Rest');
+    assert.strictEqual(zs.status_abgeleitet, 'storno');
+    assert.strictEqual(zs.storno_von, b.nr);
+    assert.strictEqual(zs.rest_eur, 0, 'Gegenrechnung hat offenen Rest');
+    db.close();
+  });
+}
+
+function testBelegKennzahlen() {
+  rechnungsUmgebung(() => {
+    const rechnung = require('../rechnung');
+    const db = rechnungsDb();
+    const daten = { from: '2026-08-01', to: '2026-08-31', tickets: ['PROJ-500'], empfaenger: { name: 'Kunde' } };
+    const a = rechnung.erstelle(db, daten);   // wird voll bezahlt
+    const b = rechnung.erstelle(db, daten);   // teilbezahlt
+    const c = rechnung.erstelle(db, daten);   // offen
+    const d = rechnung.erstelle(db, daten);   // storniert
+    const heute = heuteLokal();
+    rechnung.bucheZahlung(db, { nr: a.nr, datum: heute, betrag_eur: a.brutto_eur });
+    rechnung.bucheZahlung(db, { nr: b.nr, datum: heute, betrag_eur: 10 });
+    rechnung.storniere(db, d.nr);
+    // a ist laut Abschrift 3 Tage vor der Zahlung gestellt worden.
+    const vor3 = new Date(Date.now() - 3 * 86400000).toISOString();
+    db.prepare('UPDATE invoices SET erstellt_am = ? WHERE nr = ?').run(vor3, a.nr);
+
+    const K = rechnung.kennzahlen(db, { from: '2000-01-01', to: '2999-12-31' });
+    const r2 = (n) => Math.round(n * 100) / 100;
+    assert.strictEqual(K.gestellt_anzahl, 3, 'Gestellt zaehlt Storno oder Stornierte mit: ' + K.gestellt_anzahl);
+    assert.strictEqual(K.gestellt_brutto, r2(a.brutto_eur + b.brutto_eur + c.brutto_eur), 'Gestellt brutto');
+    assert.strictEqual(K.offen_eur, r2(b.brutto_eur - 10 + c.brutto_eur), 'Offen gesamt');
+    assert.strictEqual(K.bezahlt_eur, r2(a.brutto_eur + 10), 'Bezahlt im Zeitraum');
+    assert.strictEqual(K.zahlungsdauer_tage, 3, 'Zahlungsdauer: ' + K.zahlungsdauer_tage);
+    assert.strictEqual(K.storniert_anzahl, 1);
+    // Plausibel: offen nie negativ und nie groesser als gestellt.
+    assert.ok(K.offen_eur >= 0 && K.offen_eur <= K.gestellt_brutto, 'Offen ausserhalb der Grenzen');
+
+    // Zeitraum: Zahlungen nach ihrem Datum, Rechnungen nach dem Tag der Ausstellung.
+    // Zeitstempel als Grenze: der Tag selbst gehoert dazu.
+    const tag = heuteLokal();
+    assert.strictEqual(rechnung.kennzahlen(db, { from: tag + 'T00:00:00', to: tag + 'T00:00:00' }).bezahlt_eur, r2(a.brutto_eur + 10),
+      'Zeitstempel als Grenze laesst den Tag fallen');
+    const leer = rechnung.kennzahlen(db, { from: '2000-01-01', to: '2000-12-31' });
+    assert.strictEqual(leer.gestellt_anzahl, 0);
+    assert.strictEqual(leer.bezahlt_eur, 0);
+    assert.strictEqual(leer.zahlungsdauer_tage, null, 'ohne bezahlte Rechnung muss die Dauer leer sein, nicht 0');
+    assert.strictEqual(leer.offen_eur, K.offen_eur, 'Offene Posten sind ein Bestand und haengen nicht am Zeitraum');
+    db.close();
+  });
+}
+
+async function testRechnungEinzelabruf() {
+  const srv = require('../server');
+  const rechnung = require('../rechnung');
+  rechnungsUmgebung(() => {
+    const db = rechnungsDb();
+    const inv = rechnung.erstelle(db, { from: '2026-08-01', to: '2026-08-31', tickets: ['PROJ-500'], empfaenger: { name: 'Kunde' } });
+    rechnung.bucheZahlung(db, { nr: inv.nr, datum: heuteLokal(), betrag_eur: 12 });
+    const d = rechnung.detail(db, inv.nr);
+    assert.strictEqual(d.nr, inv.nr);
+    assert.ok(Array.isArray(d.positionen) && d.positionen.length > 0, 'Positionen fehlen');
+    assert.strictEqual(d.zahlungen.length, 1);
+    assert.strictEqual(d.gezahlt_eur, 12);
+    assert.strictEqual(d.status_abgeleitet, 'teilbezahlt');
+    for (const boese of ['../../config', '1999-9999', '', 'abcd-efgh']) {
+      assert.strictEqual(rechnung.detail(db, boese), null, '"' + boese + '" geliefert');
+    }
+    db.close();
+  });
+  const lauscht = srv.server.listening;
+  if (!lauscht) await new Promise((ok) => srv.server.listen(0, '127.0.0.1', ok));
+  const port = srv.server.address().port;
+  try {
+    for (const pfad of ['9999-9998', '..%2f..%2fconfig.json', 'abcd-efgh', '%E0%A4%A']) {
+      const r = await fetch(`http://127.0.0.1:${port}/api/rechnung/${pfad}`);
+      assert.strictEqual(r.status, 404, 'Pfad "' + pfad + '" liefert ' + r.status + ' statt 404');
+      // Unbekannte /api/-Pfade antworten auch mit JSON 404 ("Unbekannter
+      // Endpunkt") — nur der Text der Route beweist, dass sie geantwortet hat.
+      assert.strictEqual((await r.json()).error, 'Rechnung nicht gefunden.', 'Route fehlt oder warf: "' + pfad + '"');
+    }
+  } finally {
+    if (!lauscht) await new Promise((ok) => srv.server.close(ok));
+  }
+}
+
+// Die Route laeuft gegen die Datenbank des Servers — deshalb hier nur die
+// Ablehnungen; der Erfolgsweg ist oben am Modul geprueft (In-Memory).
+async function testVorschauRoute() {
+  const srv = require('../server');
+  const config = require('../config.json');
+  const merk = config.rechnung;
+  const lauscht = srv.server.listening;
+  if (!lauscht) await new Promise((ok) => srv.server.listen(0, '127.0.0.1', ok));
+  const port = srv.server.address().port;
+  const post = async (body) => {
+    const r = await fetch(`http://127.0.0.1:${port}/api/beleg-vorschau`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+    });
+    return { status: r.status, d: await r.json() };
+  };
+  try {
+    let a = await post({ art: 'storno' });
+    assert.deepStrictEqual([a.status, a.d.error], [400, 'Belegart unbekannt.'], 'unbekannte Belegart: ' + JSON.stringify(a));
+    config.rechnung = { ...merk, aussteller: { name: 'Testfirma' } };
+    a = await post({ art: 'rechnung' });
+    assert.strictEqual(a.status, 422, 'fehlende Stammdaten: ' + a.status);
+    assert.ok(Array.isArray(a.d.fehlt) && a.d.fehlt.length === 2, 'fehlt nennt nicht beide Angaben: ' + JSON.stringify(a.d));
+    config.rechnung = { ...merk, aussteller: { name: 'Testfirma', anschrift: ['Weg 1'], steuernummer: '1/2/3' } };
+    a = await post({ art: 'rechnung', from: '2026-08-01', to: '2026-08-31', empfaenger: { name: 'K' }, posten: [] });
+    assert.deepStrictEqual([a.status, a.d.error], [400, 'Keine Vorgaenge oder Positionen gewaehlt.'], 'leere Rechnung: ' + JSON.stringify(a));
+    // Gueltige Posten, nur der Kontaktverweis ist kaputt: ohne Pruefung kaeme 200.
+    a = await post({ art: 'rechnung', kontaktId: 'x', from: '2026-08-01', to: '2026-08-31',
+      empfaenger: { name: 'K' }, posten: [{ bezeichnung: 'X', stunden: 1 }] });
+    assert.strictEqual(a.status, 400, 'kaputter Kontaktverweis angenommen: ' + JSON.stringify(a));
+  } finally {
+    config.rechnung = merk;
+    if (!lauscht) await new Promise((ok) => srv.server.close(ok));
+  }
+}
+
+function testAngebotStatusAbgeleitet() {
+  rechnungsUmgebung(() => {
+    const angebot = require('../angebot');
+    const db = rechnungsDb();
+    const empf = { name: 'Kunde' };
+    const p = [{ bezeichnung: 'X', stunden: 1, satz: 100 }];
+    const offen = angebot.erstelle(db, { posten: p, empfaenger: empf });
+    const alt = angebot.erstelle(db, { posten: p, empfaenger: empf });
+    const gerade = angebot.erstelle(db, { posten: p, empfaenger: empf });
+    const abger = angebot.erstelle(db, { posten: p, empfaenger: empf });
+    const abgel = angebot.erstelle(db, { posten: p, empfaenger: empf });
+    db.prepare('UPDATE angebote SET gueltig_bis = ? WHERE nr = ?').run(new Date(Date.now() - 60000).toISOString(), alt.nr);
+    db.prepare('UPDATE angebote SET gueltig_bis = ? WHERE nr = ?').run(new Date(Date.now() + 60000).toISOString(), gerade.nr);
+    angebot.inRechnung(db, abger.nr);
+    angebot.setzeStatus(db, abgel.nr, 'abgelehnt');
+    const L = angebot.liste(db);
+    const s = (nr) => L.find((x) => x.nr === nr).status_abgeleitet;
+    assert.strictEqual(s(offen.nr), 'offen');
+    assert.strictEqual(s(alt.nr), 'abgelaufen');
+    assert.strictEqual(s(gerade.nr), 'offen', 'Angebot vor Ablauf schon abgelaufen');
+    assert.strictEqual(s(abger.nr), 'abgerechnet');
+    assert.strictEqual(s(abgel.nr), 'abgelehnt');
+    // Ein abgerechnetes Angebot laeuft nicht mehr ab.
+    db.prepare('UPDATE angebote SET gueltig_bis = ? WHERE nr = ?').run(new Date(Date.now() - 60000).toISOString(), abger.nr);
+    assert.strictEqual(angebot.liste(db).find((x) => x.nr === abger.nr).status_abgeleitet, 'abgerechnet');
+    // Das alte Feld bleibt fuer die alte Oberflaeche wie es war.
+    assert.strictEqual(L.find((x) => x.nr === abger.nr).status, 'angenommen');
+    // Kontaktverweis fuer Kundenfilter und Lead-Kennzeichen.
+    const k = require('../kontakte').speichere(db, { firma: 'Kunde' });
+    const mitKontakt = angebot.erstelle(db, { posten: p, empfaenger: empf, kontaktId: k.id });
+    assert.strictEqual(angebot.liste(db).find((x) => x.nr === mitKontakt.nr).kontakt_id, k.id, 'kontakt_id fehlt in der Liste');
+    db.close();
+  });
+}
+
+// --- Beleg-Editor (Block 4b) ---------------------------------------------------
+// baue() ist der Unterbau von erstelle() und der Vorschau. Dieselben Positionen
+// in beiden Wegen, sonst zeigt die Vorschau etwas anderes als das Dokument.
+const zaehleBelege = (db) => db.prepare(
+  'SELECT (SELECT COUNT(*) FROM invoices) + (SELECT COUNT(*) FROM angebote) AS n').get().n;
+
+function testBaue() {
+  rechnungsUmgebung(() => {
+    const rechnung = require('../rechnung');
+    const metrics = require('../metrics');
+    const db = rechnungsDb();
+    // Sieben Minuten an einem zweiten Vorgang: Stunden und Betrag haben dann
+    // mehr als zwei Nachkommastellen, die Rundung wird sichtbar.
+    const t = (min) => new Date(Date.UTC(2026, 7, 19, 9, min, 0)).toISOString();
+    const insAkt = db.prepare('INSERT INTO activity (session_id, ts, project, branch, ticket, day) VALUES (?,?,?,?,?,?)');
+    for (let m = 0; m <= 7; m++) insAkt.run('s-u', t(m), 'Beispiel - App', 'feature/PROJ-501', 'PROJ-501', '2026-08-19');
+    db.prepare(`INSERT INTO events (request_id, ts, session_id, project, branch, ticket, model,
+      input_tokens, output_tokens, cache_w_5m, cache_w_1h, cache_read, web_search, cost_usd, is_sidechain, day)
+      VALUES ('r-u',?,'s-u','Beispiel - App','feature/PROJ-501','PROJ-501','claude-opus-5',10,10,0,0,0,0,0.1,0,'2026-08-19')`).run(t(0));
+    const daten = { from: '2026-08-01', to: '2026-08-31', tickets: ['PROJ-500', 'PROJ-501'], empfaenger: { name: 'Kunde' } };
+    const roh = metrics.byTicket(db, { from: daten.from, to: daten.to }).find((r) => r.ticket === 'PROJ-501');
+    assert.ok(roh && Math.round(roh.arbeitswert * 100) / 100 !== roh.arbeitswert,
+      'Testdaten zeigen keine Rundung: ' + (roh && roh.arbeitswert));
+
+    const pos = rechnung.baue(db, daten);
+    assert.strictEqual(zaehleBelege(db), 0, 'baue() hat geschrieben');
+    assert.strictEqual(pos.length, 2, 'Positionen fehlen');
+    const zweiStellen = (n) => n == null || Math.round(n * 100) / 100 === n;
+    for (const p of pos) {
+      for (const f of ['stunden', 'satz', 'basissatz', 'betrag_eur']) {
+        assert.ok(zweiStellen(p[f]), `${p.ticket}.${f} ungerundet: ${p[f]}`);
+      }
+    }
+    const inv = rechnung.erstelle(db, daten);
+    assert.deepStrictEqual(rechnung.lade(db, inv.nr).positionen, JSON.parse(JSON.stringify(pos)),
+      'erstelle() schreibt andere Positionen als baue() liefert');
+    db.close();
+  });
+}
+
+function lokalerTag(iso, plus) {
+  const d = new Date(iso);
+  d.setDate(d.getDate() + plus);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+function testRechnungFreiePosten() {
+  rechnungsUmgebung((config) => {
+    const rechnung = require('../rechnung');
+    const db = rechnungsDb();
+    const basis = { from: '2026-08-01', to: '2026-08-31', empfaenger: { name: 'Kunde' } };
+
+    // Gemischt: Vorgang zuerst, freie Posten in der gegebenen Reihenfolge.
+    const inv = rechnung.erstelle(db, {
+      ...basis, tickets: ['PROJ-500'], zahlungszielTage: 30,
+      posten: [
+        { bezeichnung: 'Einrichtung', typ: 'pauschal', betrag_eur: 0.1 },
+        { bezeichnung: 'Schulung', stunden: 0.7, satz: 0.3, rabatt_prozent: 10 },
+        { bezeichnung: 'Doku', typ: 'pauschal', betrag_eur: 0.2 },
+      ],
+    });
+    const p = inv.positionen;
+    assert.strictEqual(p.length, 4, 'Positionen fehlen');
+    assert.strictEqual(p[0].ticket, 'PROJ-500', 'Vorgang steht nicht vorn');
+    assert.deepStrictEqual([p[1].typ, p[1].stunden, p[1].betrag_eur], ['pauschal', null, 0.1], 'Pauschale falsch');
+    assert.deepStrictEqual([p[2].basissatz, p[2].rabatt_prozent, p[2].satz, p[2].betrag_eur], [0.3, 10, 0.27, 0.19],
+      'Rabatt je Position falsch');
+    assert.strictEqual(inv.netto_eur, Math.round(p.reduce((s, x) => s + x.betrag_eur, 0) * 100) / 100,
+      'Netto ist nicht die Summe der Positionen');
+    assert.strictEqual(Math.round(inv.netto_eur * 100) / 100, inv.netto_eur, 'Netto ungerundet: ' + inv.netto_eur);
+    assert.strictEqual(inv.faellig_am, lokalerTag(inv.erstellt_am, 30), 'Zahlungsziel je Beleg greift nicht');
+
+    // Von Hand eingetragene Stunden sind nicht "erfasst": keine Vergleichsangabe.
+    const merkFaktor = config.vergleichsFaktor;
+    config.vergleichsFaktor = 1.5;
+    try {
+      const mitFaktor = rechnung.baue(db, { ...basis, posten: [{ bezeichnung: 'Schulung', stunden: 2, satz: 50 }] });
+      assert.strictEqual(mitFaktor[0].vergleich_stunden, null, 'freie Stunden tragen eine Vergleichsangabe');
+    } finally {
+      config.vergleichsFaktor = merkFaktor;
+    }
+
+    // Nur freie Posten, ohne Ziel: Einstellung (14 Tage).
+    const frei = rechnung.erstelle(db, { ...basis, posten: [{ bezeichnung: 'Wartung', typ: 'pauschal', betrag_eur: 99 }] });
+    assert.strictEqual(frei.netto_eur, 99);
+    assert.strictEqual(frei.faellig_am, lokalerTag(frei.erstellt_am, 14), 'ohne Angabe gilt die Einstellung nicht');
+    const sofort = rechnung.erstelle(db, { ...basis, posten: [{ bezeichnung: 'X', stunden: 1, satz: 10 }], zahlungszielTage: 0 });
+    assert.strictEqual(sofort.faellig_am, lokalerTag(sofort.erstellt_am, 0), 'Ziel 0 Tage nicht angenommen');
+
+    // Abgelehnt, und keine Nummer verbraucht.
+    const vorher = zaehleBelege(db);
+    const ok = [{ bezeichnung: 'X', stunden: 1 }];
+    for (const [abw, grund] of [
+      [{ posten: [] }, 'weder Vorgaenge noch Posten'],
+      [{ posten: undefined }, 'gar keine Quelle'],
+      [{ posten: ok, zahlungszielTage: -1 }, 'Ziel negativ'],
+      [{ posten: ok, zahlungszielTage: 121 }, 'Ziel ueber 120'],
+      [{ posten: ok, zahlungszielTage: 1.5 }, 'Ziel kein ganzer Tag'],
+      [{ posten: ok, zahlungszielTage: '30' }, 'Ziel als Text'],
+      [{ posten: [{ bezeichnung: 'X', stunden: 1, rabatt_prozent: 101 }] }, 'Rabatt ueber 100'],
+      [{ posten: [{ bezeichnung: 'X', stunden: 1, rabatt_prozent: -1 }] }, 'Rabatt negativ'],
+      [{ posten: [{ bezeichnung: 'X', stunden: 1, rabatt_prozent: 'viel' }] }, 'Rabatt als Text'],
+      [{ posten: [{ bezeichnung: 'X', typ: 'pauschal', betrag_eur: 50, rabatt_prozent: 10 }] }, 'Rabatt auf Festpreis'],
+      [{ posten: [{ bezeichnung: '', stunden: 1 }] }, 'leere Bezeichnung'],
+      [{ posten: Array.from({ length: 101 }, () => ({ bezeichnung: 'P', stunden: 1 })) }, 'ueber 100 Posten'],
+      [{ posten: 'Wartung' }, 'Posten kein Array'],
+      // Security-Review 4b: Number() machte aus null 0, aus true 1, aus [5] 5.
+      [{ posten: [{ bezeichnung: 'X', stunden: 1, satz: null }] }, 'Satz null (wurde 0 EUR)'],
+      [{ posten: [{ bezeichnung: 'X', stunden: [5] }] }, 'Stunden als Array'],
+      [{ posten: [{ bezeichnung: 'X', stunden: true }] }, 'Stunden als Wahrheitswert'],
+      [{ posten: [{ bezeichnung: 'X', typ: 'pauschal', betrag_eur: true }] }, 'Festpreis als Wahrheitswert'],
+      [{ posten: [{ bezeichnung: 'X', typ: 'pauschal', betrag_eur: null }] }, 'Festpreis null'],
+      // Nach dem Runden nichts mehr uebrig: Zeile mit 0 Std. und 0 EUR.
+      [{ posten: [{ bezeichnung: 'X', stunden: 0.001 }] }, 'Stunden runden auf 0'],
+      [{ posten: [{ bezeichnung: 'X', typ: 'pauschal', betrag_eur: 0.004 }] }, 'Festpreis rundet auf 0'],
+    ]) {
+      assert.throws(() => rechnung.erstelle(db, { ...basis, ...abw }), 'angenommen: ' + grund);
+    }
+    // Eigene Pruefung: ohne Grenze wuerfe es erst spaeter (keine Daten) — die Meldung zeigt, wer abgelehnt hat.
+    assert.throws(() => rechnung.erstelle(db, { ...basis, tickets: Array.from({ length: 201 }, (_, i) => 'T-' + i) }), /200 Vorgaenge/,
+      'ueber 200 Vorgaenge angenommen');
+    assert.strictEqual(zaehleBelege(db), vorher, 'abgelehnte Rechnung hat eine Nummer verbraucht');
+    // Die bisherige Ansicht schickt Feldinhalte als Text — das bleibt erlaubt.
+    const alt = rechnung.baue(db, { ...basis, posten: [{ bezeichnung: 'X', stunden: '2', satz: '50' }, { bezeichnung: 'Y', typ: 'pauschal', betrag_eur: '30' }] });
+    assert.deepStrictEqual(alt.map((p) => p.betrag_eur), [100, 30], 'Zahlen als Text nicht mehr angenommen');
+    db.close();
+  });
+}
+
+// R6/R7: die Vorschau ist dieselbe Funktion wie der Druck, nur ohne Nummer und
+// ohne Schreiben. Byte-gleiche PDFs sind nicht pruefbar (Datum, Metadaten) —
+// gleich sein muss das HTML, sobald die Nummer eingesetzt ist.
+function testBelegVorschau() {
+  rechnungsUmgebung(() => {
+    const rechnung = require('../rechnung');
+    const angebot = require('../angebot');
+    const db = rechnungsDb();
+    const empfaenger = { name: 'Kunde GmbH', anschrift: ['Weg 1', '50667 Koeln'] };
+    const daten = {
+      from: '2026-08-01', to: '2026-08-31', tickets: ['PROJ-500'], empfaenger, zahlungszielTage: 21,
+      posten: [{ bezeichnung: 'Einrichtung', typ: 'pauschal', betrag_eur: 250 }],
+    };
+    const v = rechnung.vorschau(db, daten);
+    const a = angebot.vorschau(db, { posten: daten.posten, empfaenger, gueltigTage: 10 });
+    assert.strictEqual(zaehleBelege(db), 0, 'Vorschau hat einen Beleg geschrieben');
+    assert.ok(v.html.includes('Rechnung ENTWURF'), 'Rechnungsvorschau ohne ENTWURF');
+    assert.ok(a.html.includes('Angebot ENTWURF'), 'Angebotsvorschau ohne ENTWURF');
+
+    const inv = rechnung.erstelle(db, daten);
+    assert.deepStrictEqual([v.netto_eur, v.ust_eur, v.brutto_eur], [inv.netto_eur, inv.ust_eur, inv.brutto_eur],
+      'Summen der Vorschau weichen ab');
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(v.positionen)), inv.positionen, 'Positionen der Vorschau weichen ab');
+    assert.strictEqual(v.html.split('ENTWURF').join(inv.nr), rechnung.renderHtml(rechnung.lade(db, inv.nr)),
+      'Vorschau gleicht der gestellten Rechnung nicht');
+    const ang = angebot.erstelle(db, { posten: daten.posten, empfaenger, gueltigTage: 10 });
+    assert.strictEqual(a.html.split('ENTWURF').join(ang.nr), angebot.renderHtml(angebot.lade(db, ang.nr)),
+      'Vorschau gleicht dem gestellten Angebot nicht');
+
+    // Silent-Failure-Review 4b: gestellt wird nur, was zu sehen war. Weicht der
+    // Betrag inzwischen ab (Zeit laeuft auf), entsteht nichts.
+    const n0 = zaehleBelege(db);
+    const v2 = rechnung.vorschau(db, daten);
+    for (const falsch of [v2.brutto_eur + 0.01, 0, -1]) {
+      assert.throws(() => rechnung.erstelle(db, { ...daten, erwartetBrutto: falsch }), (e) => e.abweichung === true,
+        'abweichender Betrag gestellt: ' + falsch);
+    }
+    assert.throws(() => angebot.erstelle(db, { posten: daten.posten, empfaenger, erwartetBrutto: 1 }), (e) => e.abweichung === true,
+      'abweichendes Angebot gestellt');
+    assert.strictEqual(zaehleBelege(db), n0, 'Abweichung hat geschrieben');
+    assert.strictEqual(rechnung.erstelle(db, { ...daten, erwartetBrutto: v2.brutto_eur }).brutto_eur, v2.brutto_eur);
+    assert.throws(() => rechnung.erstelle(db, { ...daten, erwartetBrutto: String(v2.brutto_eur) }), 'erwartetBrutto als Text angenommen');
+
+    // Ungueltiges prallt ab wie beim Erstellen, und es entsteht nichts.
+    const vorher = zaehleBelege(db);
+    assert.throws(() => rechnung.vorschau(db, { ...daten, tickets: [], posten: [] }), 'leere Vorschau angenommen');
+    assert.throws(() => angebot.vorschau(db, { posten: [], empfaenger }), 'leere Angebotsvorschau angenommen');
+    // Security-Review 4b: Gueltigkeit streng wie das Zahlungsziel, Zeitraum als echter Tag.
+    for (const [abw, grund] of [
+      [{ gueltigTage: 'abc' }, 'Gueltigkeit als Text'], [{ gueltigTage: 0.5 }, 'Gueltigkeit gebrochen'],
+      [{ gueltigTage: 0 }, 'Gueltigkeit 0'], [{ gueltigTage: 366 }, 'Gueltigkeit ueber 365'], [{ gueltigTage: [30] }, 'Gueltigkeit als Array'],
+      [{ tickets: ['PROJ-500'], from: '2026-02-30', to: '2026-08-31' }, 'Zeitraum kein Kalendertag'],
+    ]) {
+      assert.throws(() => angebot.vorschau(db, { posten: daten.posten, empfaenger, ...abw }), 'Angebot angenommen: ' + grund);
+    }
+    assert.ok(angebot.vorschau(db, { posten: daten.posten, empfaenger, gueltigTage: null }).html, 'ohne Gueltigkeit gilt der Standard nicht');
+    assert.strictEqual(zaehleBelege(db), vorher, 'abgelehnte Vorschau hat geschrieben');
+    db.close();
+  });
+}
+
+// R5: Entwuerfe liegen im Browser. Was dort steht, kann jeder aendern — gelesen
+// wird nur, was die feste Form hat.
+function testEntwuerfeAus() {
+  const { entwuerfeAus } = require('../public/app/kern.js');
+  const gut = { id: 'e-1', art: 'rechnung', stand: '2026-10-06T10:00:00.000Z', daten: { posten: [] } };
+  assert.deepStrictEqual(entwuerfeAus([gut]), [gut]);
+  assert.deepStrictEqual(entwuerfeAus([{ ...gut, art: 'angebot' }]).length, 1);
+  for (const roh of [null, undefined, 'x', 3, {}, { length: 1, 0: gut }]) {
+    assert.deepStrictEqual(entwuerfeAus(roh), [], 'kein Array: ' + JSON.stringify(roh));
+  }
+  for (const boes of [
+    { ...gut, art: 'storno' }, { ...gut, id: '<img src=x>' }, { ...gut, id: '' }, { ...gut, id: 5 },
+    { ...gut, stand: 'gestern' }, { ...gut, stand: 5 }, { ...gut, daten: [] }, { ...gut, daten: null },
+    { ...gut, daten: 'x' }, { ...gut, daten: { x: 'y'.repeat(60000) } }, null, 'e-1',
+  ]) {
+    assert.deepStrictEqual(entwuerfeAus([boes, gut]), [gut], 'durchgelassen: ' + JSON.stringify(boes).slice(0, 80));
+  }
+  const viele = Array.from({ length: 25 }, (_, i) => ({ ...gut, id: 'e-' + i }));
+  assert.strictEqual(entwuerfeAus(viele).length, 20, 'mehr als 20 Entwuerfe gelesen');
+}
+
+// --- Kontakte + Einstellungen (Block 4c) ----------------------------------------
+// R11: Ansprechpartner je Kontakt. Die E-Mail am Kontakt bleibt (E-Rechnung
+// liest sie); beim Umstieg wird sie einmal als Ansprechpartner uebernommen.
+function testAnsprechpartner() {
+  const kontakte = require('../kontakte');
+  const db = dbmod.open(':memory:');
+  openDbs.push(db);
+  const a = kontakte.speichere(db, { firma: 'Alpha GmbH', vorname: 'Anna', nachname: 'Berg', email: 'anna@alpha.de' });
+  const b = kontakte.speichere(db, { firma: 'Beta AG' });
+  const c = kontakte.speichere(db, { firma: 'Gamma', email: 'info@gamma.de' });
+  // Bestand wie vor dem Umstieg: die Uebernahme ist noch nicht gelaufen.
+  db.prepare("DELETE FROM meta WHERE key = 'ansprechpartner_uebernommen'").run();
+  db.prepare('DELETE FROM ansprechpartner').run();
+  dbmod.migrate(db);
+  dbmod.migrate(db);
+  const zeilen = db.prepare('SELECT kontakt_id, name, email FROM ansprechpartner ORDER BY kontakt_id').all().map((r) => ({ ...r }));
+  assert.deepStrictEqual(zeilen, [
+    { kontakt_id: a.id, name: 'Anna Berg', email: 'anna@alpha.de' },
+    { kontakt_id: c.id, name: 'Gamma', email: 'info@gamma.de' },
+  ], 'Uebernahme nicht genau einmal je Kontakt mit E-Mail: ' + JSON.stringify(zeilen));
+  // Wer den uebernommenen Eintrag loescht, bekommt ihn beim naechsten Start nicht zurueck.
+  kontakte.loescheAnsprechpartner(db, kontakte.ansprechpartnerVon(db, c.id)[0].id);
+  dbmod.migrate(db);
+  assert.strictEqual(kontakte.ansprechpartnerVon(db, c.id).length, 0, 'geloeschter Ansprechpartner kam zurueck');
+  // Neue Kontakte nach dem Umstieg: ihre E-Mail bleibt am Kontakt, kein Ansprechpartner.
+  const d = kontakte.speichere(db, { firma: 'Delta', email: 'x@delta.de' });
+  dbmod.migrate(db);
+  assert.strictEqual(kontakte.ansprechpartnerVon(db, d.id).length, 0, 'Uebernahme lief erneut');
+
+  const neu = kontakte.speichereAnsprechpartner(db, { kontakt_id: b.id, name: '  Bert Beta ', email: 'bert@beta.de', telefon: '0221 1', rolle: 'Buchhaltung' });
+  assert.deepStrictEqual([neu.name, neu.rolle, neu.kontakt_id], ['Bert Beta', 'Buchhaltung', b.id]);
+  const geaendert = kontakte.speichereAnsprechpartner(db, { id: neu.id, kontakt_id: b.id, name: 'Bert B.', email: '', telefon: '', rolle: '' });
+  assert.strictEqual(geaendert.name, 'Bert B.');
+  assert.strictEqual(kontakte.ansprechpartnerVon(db, b.id).length, 1, 'Aendern hat einen zweiten angelegt');
+  const vorher = db.prepare('SELECT COUNT(*) n FROM ansprechpartner').get().n;
+  for (const [daten, grund] of [
+    [{ kontakt_id: 99999, name: 'X' }, 'unbekannter Kontakt'],
+    [{ kontakt_id: 'abc', name: 'X' }, 'Kontakt kein Wert'],
+    [{ kontakt_id: b.id, name: '' }, 'leerer Name'],
+    [{ kontakt_id: b.id, name: 'x'.repeat(201) }, 'Name zu lang'],
+    [{ kontakt_id: b.id, name: ['a'] }, 'Name kein Text'],
+    [{ kontakt_id: b.id, name: 'X', email: 'keine-mail' }, 'E-Mail ohne @'],
+    [{ kontakt_id: b.id, name: 'X', telefon: '1'.repeat(41) }, 'Telefon zu lang'],
+    [{ kontakt_id: b.id, name: 'X', rolle: 'r'.repeat(81) }, 'Rolle zu lang'],
+    [{ kontakt_id: b.id, name: 'Werftstra�e' }, 'Ersatzzeichen'],
+    [{ id: 99999, kontakt_id: b.id, name: 'X' }, 'unbekannter Ansprechpartner'],
+    [{ id: neu.id, kontakt_id: a.id, name: 'X' }, 'Ansprechpartner eines anderen Kontakts'],
+  ]) {
+    assert.throws(() => kontakte.speichereAnsprechpartner(db, daten), 'angenommen: ' + grund);
+  }
+  assert.strictEqual(db.prepare('SELECT COUNT(*) n FROM ansprechpartner').get().n, vorher, 'Abgelehntes wurde gespeichert');
+  for (const id of [99999, 'x', -1, 1.5]) assert.throws(() => kontakte.loescheAnsprechpartner(db, id), 'geloescht: ' + id);
+  // Ein geloeschter Kontakt nimmt seine Ansprechpartner mit.
+  kontakte.loesche(db, b.id);
+  assert.strictEqual(db.prepare('SELECT COUNT(*) n FROM ansprechpartner WHERE kontakt_id = ?').get(b.id).n, 0, 'Ansprechpartner blieben verwaist');
+  db.close();
+}
+
+// R10: Kennzahlen der Kontakt-Akte, vom Server. Nur gestellte Rechnungen:
+// eine stornierte und ihre Gegenrechnung zaehlen weder als Umsatz noch offen.
+function testKennzahlenJeKontakt() {
+  rechnungsUmgebung(() => {
+    const rechnung = require('../rechnung');
+    const angebot = require('../angebot');
+    const kontakte = require('../kontakte');
+    const db = rechnungsDb();
+    const k1 = kontakte.speichere(db, { firma: 'Eins' });
+    const k2 = kontakte.speichere(db, { firma: 'Zwei' });
+    const basis = { from: '2026-08-01', to: '2026-08-31', empfaenger: { name: 'Eins' } };
+    const pausch = (b) => [{ bezeichnung: 'P', typ: 'pauschal', betrag_eur: b }];
+    const heute = heuteLokal();
+    const r1 = rechnung.erstelle(db, { ...basis, kontaktId: k1.id, posten: pausch(100) });
+    const r2 = rechnung.erstelle(db, { ...basis, kontaktId: k1.id, posten: pausch(50) });
+    rechnung.erstelle(db, { ...basis, kontaktId: k2.id, posten: pausch(200) });
+    rechnung.bucheZahlung(db, { nr: r1.nr, datum: heute, betrag_eur: 60 });
+    rechnung.bucheZahlung(db, { nr: r2.nr, datum: heute, betrag_eur: 20 });
+    rechnung.storniere(db, r2.nr);
+    const p = [{ bezeichnung: 'X', stunden: 1, satz: 100 }];
+    angebot.erstelle(db, { posten: p, empfaenger: { name: 'Eins' }, kontaktId: k1.id });
+    const alt = angebot.erstelle(db, { posten: p, empfaenger: { name: 'Eins' }, kontaktId: k1.id });
+    db.prepare('UPDATE angebote SET gueltig_bis = ? WHERE nr = ?').run(new Date(Date.now() - 60000).toISOString(), alt.nr);
+    const abger = angebot.erstelle(db, { posten: p, empfaenger: { name: 'Eins' }, kontaktId: k1.id });
+    angebot.inRechnung(db, abger.nr);
+
+    let K = rechnung.jeKontakt(db);
+    assert.deepStrictEqual(K.get(k1.id), { umsatz_bezahlt_eur: 60, offen_eur: 140, zahlungsdauer_tage: null, angebote_offen: 1, rechnungen: 2 },
+      'Kontakt 1: ' + JSON.stringify(K.get(k1.id)));
+    assert.deepStrictEqual(K.get(k2.id), { umsatz_bezahlt_eur: 0, offen_eur: 200, zahlungsdauer_tage: null, angebote_offen: 0, rechnungen: 1 });
+    rechnung.bucheZahlung(db, { nr: r1.nr, datum: heute, betrag_eur: 40 });
+    K = rechnung.jeKontakt(db);
+    assert.strictEqual(K.get(k1.id).umsatz_bezahlt_eur, 100);
+    assert.strictEqual(K.get(k1.id).zahlungsdauer_tage, 0, 'Zahlungsdauer der bezahlten Rechnung fehlt');
+    db.close();
+  });
+}
+
+// Routen gegen die Datenbank des Servers: nur Ablehnungen und Lesen.
+async function testAnsprechpartnerRoute() {
+  const srv = require('../server');
+  const lauscht = srv.server.listening;
+  if (!lauscht) await new Promise((ok) => srv.server.listen(0, '127.0.0.1', ok));
+  const port = srv.server.address().port;
+  const url = (p) => `http://127.0.0.1:${port}${p}`;
+  const post = async (p, body) => {
+    const r = await fetch(url(p), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    return { status: r.status, d: await r.json() };
+  };
+  try {
+    let a = await post('/api/ansprechpartner', { kontakt_id: 'x', name: 'X' });
+    assert.deepStrictEqual([a.status, a.d.error], [400, 'Unbekannter Kontakt.'], 'POST: ' + JSON.stringify(a));
+    a = await post('/api/ansprechpartner-loeschen', { id: 'x' });
+    assert.deepStrictEqual([a.status, a.d.error], [400, 'Unbekannter Ansprechpartner.'], 'Loeschen: ' + JSON.stringify(a));
+    const g = await fetch(url('/api/ansprechpartner?kontakt=abc'));
+    assert.deepStrictEqual([g.status, (await g.json()).error], [400, 'Unbekannter Kontakt.'], 'GET mit kaputter Id');
+    const k = await (await fetch(url('/api/kontakte'))).json();
+    assert.ok(k.kontakte.every((x) => x.kennzahlen && typeof x.kennzahlen.offen_eur === 'number'), 'Kennzahlen fehlen in /api/kontakte');
+  } finally {
+    if (!lauscht) await new Promise((ok) => srv.server.close(ok));
+  }
+}
+
+// R16: Ueberfaellig-Ampel frei. Ueberfaellig = gestellt, Rest offen, Faelligkeit
+// vor heute. Gerechnet nur im Server; die Oberflaeche zeigt die Felder an.
+function testUeberfaellig() {
+  rechnungsUmgebung(() => {
+    const rechnung = require('../rechnung');
+    const db = rechnungsDb();
+    const daten = { from: '2026-08-01', to: '2026-08-31', tickets: ['PROJ-500'], empfaenger: { name: 'Kunde' } };
+    const a = rechnung.erstelle(db, daten);   // bezahlt, Faelligkeit vorbei -> nicht ueberfaellig
+    const b = rechnung.erstelle(db, daten);   // teilbezahlt, seit 7 Tagen faellig (aelter als c, steht aber vorn)
+    const c = rechnung.erstelle(db, daten);   // offen, seit 5 Tagen faellig
+    const d = rechnung.erstelle(db, daten);   // storniert, Faelligkeit vorbei
+    const e = rechnung.erstelle(db, daten);   // offen, heute faellig -> noch nicht ueberfaellig
+    const heute = '2026-10-06';
+    rechnung.bucheZahlung(db, { nr: a.nr, datum: heuteLokal(), betrag_eur: a.brutto_eur });
+    rechnung.bucheZahlung(db, { nr: b.nr, datum: heuteLokal(), betrag_eur: 10 });
+    rechnung.storniere(db, d.nr);
+    const setze = (nr, tag) => db.prepare('UPDATE invoices SET faellig_am = ? WHERE nr = ?').run(tag, nr);
+    setze(a.nr, '2026-09-01'); setze(b.nr, '2026-09-29'); setze(c.nr, '2026-10-01'); setze(d.nr, '2026-09-01'); setze(e.nr, heute);
+
+    const r2 = (n) => Math.round(n * 100) / 100;
+    const L = Object.fromEntries(rechnung.liste(db, { heute }).map((r) => [r.nr, r.ueberfaellig_tage]));
+    assert.deepStrictEqual([L[a.nr], L[b.nr], L[c.nr], L[d.nr], L[e.nr]], [0, 7, 5, 0, 0], 'Liste: ' + JSON.stringify(L));
+    assert.strictEqual(rechnung.detail(db, c.nr, { heute }).ueberfaellig_tage, 5, 'Detail');
+
+    const K = rechnung.kennzahlen(db, { from: '2000-01-01', to: '2999-12-31', heute });
+    assert.strictEqual(K.ueberfaellig_anzahl, 2, 'Anzahl: ' + K.ueberfaellig_anzahl);
+    assert.strictEqual(K.ueberfaellig_eur, r2(b.brutto_eur - 10 + c.brutto_eur), 'Betrag = Rest, nicht Brutto');
+    assert.strictEqual(K.ueberfaellig_aeltester_tage, 7, 'aelteste');
+    // Plausibel: Ueberfaelliges ist ein Teil des Offenen, nie mehr.
+    assert.ok(K.ueberfaellig_eur > 0 && K.ueberfaellig_eur < K.offen_eur, 'Ueberfaellig ausserhalb des Offenen');
+    // Bestand, kein Zeitraum: ein anderer Ausschnitt aendert nichts.
+    assert.strictEqual(rechnung.kennzahlen(db, { from: '2000-01-01', to: '2000-12-31', heute }).ueberfaellig_eur, K.ueberfaellig_eur);
+    const nichts = rechnung.kennzahlen(db, { heute: '2026-09-29' });
+    assert.deepStrictEqual([nichts.ueberfaellig_anzahl, nichts.ueberfaellig_eur, nichts.ueberfaellig_aeltester_tage], [0, 0, null], 'vor allen Faelligkeiten');
+    db.close();
+  });
+}
+
+// Gesamtreview 4d: Storno nimmt die Zahlungen aus "bezahlt" (wie jeKontakt),
+// "bezahlt" heisst Rest 0 (Toleranz-Cent), Storno ist alles oder nichts.
+function testStornoUndZahlungen() {
+  rechnungsUmgebung(() => {
+    const rechnung = require('../rechnung');
+    const db = rechnungsDb();
+    const daten = { from: '2026-08-01', to: '2026-08-31', tickets: ['PROJ-500'], empfaenger: { name: 'Kunde' } };
+    const r2 = (n) => Math.round(n * 100) / 100;
+    const voll = rechnung.erstelle(db, daten);
+    const knapp = rechnung.erstelle(db, daten);
+    const heute = heuteLokal();
+    rechnung.bucheZahlung(db, { nr: voll.nr, datum: heute, betrag_eur: voll.brutto_eur });
+    rechnung.bucheZahlung(db, { nr: knapp.nr, datum: heute, betrag_eur: r2(knapp.brutto_eur - 0.01) });
+    const vorher = rechnung.kennzahlen(db, { from: '2000-01-01', to: '2999-12-31' });
+    assert.strictEqual(vorher.bezahlt_eur, r2(voll.brutto_eur * 2 - 0.01), 'bezahlt vor dem Storno');
+    // Toleranz-Cent: Status bezahlt, dann auch kein Rest — sonst stuende 0,01 in "Offen gesamt".
+    const z = rechnung.liste(db).find((x) => x.nr === knapp.nr);
+    assert.deepStrictEqual([z.status_abgeleitet, z.rest_eur], ['bezahlt', 0], 'Toleranz-Cent: ' + JSON.stringify(z));
+    assert.strictEqual(vorher.offen_eur, 0, 'Toleranz-Cent in Offen gesamt');
+
+    rechnung.storniere(db, voll.nr);
+    const K = rechnung.kennzahlen(db, { from: '2000-01-01', to: '2999-12-31' });
+    assert.strictEqual(K.bezahlt_eur, r2(knapp.brutto_eur - 0.01), 'Zahlung der stornierten Rechnung zaehlt noch: ' + K.bezahlt_eur);
+
+    // Storno: scheitert der zweite Schritt, bleibt auch der erste nicht stehen.
+    const dritte = rechnung.erstelle(db, daten);
+    const anzahl = () => db.prepare('SELECT COUNT(*) AS n FROM invoices').get().n;
+    const n0 = anzahl();
+    const prepare = db.prepare.bind(db);
+    db.prepare = (sql) => { if (/UPDATE invoices SET status = 'storniert'/.test(sql)) throw new Error('Platte voll'); return prepare(sql); };
+    try { assert.throws(() => rechnung.storniere(db, dritte.nr), /Platte voll/); }
+    finally { db.prepare = prepare; }
+    assert.strictEqual(anzahl(), n0, 'Gegenrechnung ohne Storno des Originals stehen geblieben');
+    assert.strictEqual(rechnung.lade(db, dritte.nr).status, 'erstellt');
+    db.close();
+  });
+}
+
+// Altrechnungen (vor 1.3) tragen keinen Faelligkeitstag. Er wird einmal
+// festgeschrieben, damit Ampel und Druck nicht mit der Einstellung wandern;
+// Zahlungsziel 0 heisst sofort faellig, nicht 14 Tage.
+function testFaelligAltrechnung() {
+  rechnungsUmgebung((config) => {
+    const rechnung = require('../rechnung');
+    const db = rechnungsDb();
+    const daten = { from: '2026-08-01', to: '2026-08-31', tickets: ['PROJ-500'], empfaenger: { name: 'Kunde' } };
+    const alt = rechnung.erstelle(db, daten);
+    const neu = rechnung.erstelle(db, daten);
+    db.prepare('UPDATE invoices SET faellig_am = NULL, erstellt_am = ? WHERE nr = ?').run('2026-09-01T10:00:00.000Z', alt.nr);
+    config.rechnung.zahlungszielTage = 0;
+    assert.strictEqual(rechnung.faelligAm({ erstellt_am: '2026-09-01T10:00:00.000Z', faellig_am: null }), '2026-09-01', 'Ziel 0 wird zu 14');
+    config.rechnung.zahlungszielTage = 14;
+    assert.strictEqual(rechnung.faelligFestschreiben(db), 1, 'genau die Altrechnung');
+    const tag = db.prepare('SELECT faellig_am FROM invoices WHERE nr = ?').get(alt.nr).faellig_am;
+    assert.strictEqual(tag, '2026-09-15');
+    assert.strictEqual(db.prepare('SELECT faellig_am FROM invoices WHERE nr = ?').get(neu.nr).faellig_am, neu.faellig_am, 'neue Rechnung angefasst');
+    config.rechnung.zahlungszielTage = 30;
+    assert.strictEqual(rechnung.liste(db).find((x) => x.nr === alt.nr).faellig_am, '2026-09-15', 'Faelligkeit wandert mit der Einstellung');
+    assert.strictEqual(rechnung.faelligFestschreiben(db), 0, 'zweiter Lauf schreibt erneut');
+    db.close();
+  });
+}
+
+// Texte, die auf einem Dokument landen: keine Steuerzeichen, keine
+// Bidi-Steuerung (U+202E dreht die Schreibrichtung im PDF), kein U+FFFD.
+// Zeilenwechsel und Tab bleiben erlaubt (Notizen).
+function testTextZeichen() {
+  const kontakte = require('../kontakte');
+  for (const boese of ['A‮B', 'A\u0000B', 'A⁦B', 'A B', 'A�B', 'A\u001bB']) {
+    assert.throws(() => kontakte.ohneErsatzzeichen(boese, 'Feld'), /Feld/, 'durchgelassen: ' + JSON.stringify(boese));
+  }
+  for (const gut of ['Müller & Söhne', 'Zeile 1\nZeile 2', 'a\tb', 'Ελλάδα']) kontakte.ohneErsatzzeichen(gut, 'Feld');
+  const db = dbmod.open(':memory:');
+  openDbs.push(db);
+  const k = kontakte.speichere(db, { firma: 'Echt GmbH' });
+  for (const id of [true, '1e0', [k.id], '0x1', ' ']) {
+    assert.throws(() => kontakte.pruefeId(db, id), /Unbekannter Kontakt/, 'Kontakt-Id angenommen: ' + JSON.stringify(id));
+  }
+  assert.strictEqual(kontakte.pruefeId(db, String(k.id)), k.id);
+  assert.strictEqual(kontakte.pruefeId(db, k.id), k.id);
+}
+
+// Fuer Tests, die abzulehnende Eingaben an Setter schicken: solange die Pruefung
+// fehlt (rot vor dem Fix), wuerden sie in die echte config.json geschrieben.
+// Datei und Speicherstand werden deshalb vorher gesichert und danach
+// zurueckgesetzt, gleich wie der Test ausgeht.
+function configGeschuetzt(fn) {
+  const pfad = path.join(__dirname, '..', 'config.json');
+  const datei = fs.readFileSync(pfad, 'utf8');
+  const cfg = require('../config.json');
+  const speicher = JSON.parse(JSON.stringify(cfg));
+  try {
+    return fn();
+  } finally {
+    fs.writeFileSync(pfad, datei, 'utf8');
+    for (const k of Object.keys(cfg)) delete cfg[k];
+    Object.assign(cfg, speicher);
+  }
+}
+
+// Zahlen aus dem Netz: Number(' '), Number([]) und Number(true) ergaeben 0 bzw. 1
+// und laegen in jeder Grenze.
+function testEchteZahlen() {
+  configGeschuetzt(echteZahlen);
+}
+function echteZahlen() {
+  const srv = require('../server');
+  const db = dbmod.open(':memory:');
+  openDbs.push(db);
+  for (const boese of [' ', [], [5], true, false, {}, '1e', '12,5', '0x10', '1e3', 'Infinity']) {
+    const t = JSON.stringify(boese);
+    assert.throws(() => srv.setzeEinstellungen({ stundensatz: boese }), /keine gueltige Zahl/, 'Einstellung nimmt ' + t);
+    assert.throws(() => srv.setzeStammdaten({ zahlungszielTage: boese }), /keine gueltige Zahl/, 'Stammdaten nehmen ' + t);
+    assert.throws(() => srv.setzeSatz({ projekt: 'P', satz: boese }), /Stundensatz/, 'Satz nimmt ' + t);
+    assert.throws(() => srv.setzeSatz({ projekt: 'P', rabatt: boese }), /Rabatt/, 'Rabatt nimmt ' + t);
+    assert.throws(() => srv.setzeVorlage(db, { bezeichnung: 'V', satz: boese }), /Stundensatz/, 'Vorlage nimmt ' + t);
+  }
+  // Zahl und Zahltext bleiben gueltig.
+  assert.strictEqual(srv.setzeVorlage(db, { bezeichnung: 'V', satz: ' 12.5 ' }).satz, 12.5);
+  assert.strictEqual(srv.setzeVorlage(db, { bezeichnung: 'W', satz: 80 }).satz, 80);
+}
+
+// Stammdaten landen auf jeder Rechnung: ein Steuerzeichen oder das Ersatzzeichen
+// U+FFFD (kaputte Kodierung beim Einfuegen) stuende sonst im Dokument.
+function testStammdatenSteuerzeichen() {
+  configGeschuetzt(stammdatenSteuerzeichen);
+}
+function stammdatenSteuerzeichen() {
+  const { setzeStammdaten } = require('../server');
+  for (const [feld, wert] of [['name', 'Firma\u0007 GmbH'], ['name', 'M�ller'], ['bank', 'Bank\u0000'],
+    ['anschrift', 'Weg 1\nK\u0001ln'], ['anschrift', ['Weg 1', '50667 K�ln']], ['email', 'a\u001b@b.de']]) {
+    assert.throws(() => setzeStammdaten({ [feld]: wert }), /Steuerzeichen|Ersatzzeichen/, feld + ' nimmt ' + JSON.stringify(wert));
+  }
+  // Kein Text wird nicht zu Text gemacht: sonst stuende [object Object] auf jeder Rechnung.
+  for (const wert of [{ a: 1 }, ['a', 'b'], 5, true]) {
+    assert.throws(() => setzeStammdaten({ name: wert }), /Text erwartet/, 'name nimmt ' + JSON.stringify(wert));
+  }
+}
+
+// Sicherheits-Header: nosniff ueberall, CSP auf der Seite. Das eine Inline-Skript
+// der Seite ist per Hash erlaubt — aendert es sich, muss der Hash mit.
+async function testSicherheitsHeader() {
+  const srv = require('../server');
+  const lauscht = srv.server.listening;
+  if (!lauscht) await new Promise((ok) => srv.server.listen(0, '127.0.0.1', ok));
+  const url = (p) => `http://127.0.0.1:${srv.server.address().port}${p}`;
+  try {
+    const seite = await fetch(url('/'));
+    const html = await seite.text();
+    assert.strictEqual(seite.headers.get('x-content-type-options'), 'nosniff', 'Seite ohne nosniff');
+    const csp = seite.headers.get('content-security-policy') || '';
+    assert.ok(/script-src 'self'/.test(csp) && /object-src 'none'/.test(csp), 'CSP fehlt oder zu weit: ' + csp);
+    assert.ok(!/unsafe-(inline|eval)'[^;]*;?/.test((csp.match(/script-src[^;]*/) || [''])[0]), 'script-src erlaubt Inline/Eval');
+    const inline = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+    assert.ok(inline.length >= 1, 'kein Inline-Skript gefunden, Muster kaputt?');
+    for (const code of inline) {
+      const h = "'sha256-" + require('crypto').createHash('sha256').update(code).digest('base64') + "'";
+      assert.ok(csp.includes(h), 'Inline-Skript nicht in der CSP erlaubt: ' + code.slice(0, 40));
+    }
+    // Fremde Stylesheets der Seite (Schriften) muessen erlaubt sein, sonst faellt die Schrift still weg.
+    const styleSrc = (csp.match(/style-src[^;]*/) || [''])[0];
+    for (const [, href] of html.matchAll(/<link rel="stylesheet" href="(https:[^"]+)"/g)) {
+      assert.ok(styleSrc.includes(new URL(href).origin), 'Stylesheet von der CSP blockiert: ' + new URL(href).origin);
+    }
+    if (/fonts\.googleapis\.com/.test(html)) assert.ok(/font-src[^;]*https:\/\/fonts\.gstatic\.com/.test(csp), 'Schriftdateien blockiert');
+    assert.strictEqual((await fetch(url('/api/kontakte'))).headers.get('x-content-type-options'), 'nosniff', 'API ohne nosniff');
+    // POST einer fremden Seite: Browser ohne Sec-Fetch-Site schicken trotzdem Origin.
+    const post = (p, body, origin) => fetch(url(p), { method: 'POST', headers: { 'content-type': 'text/plain', ...(origin ? { origin } : {}) }, body });
+    let a = await post('/api/rechnung-storno', '{"nr":"2099-0001"}', 'http://evil.example');
+    assert.strictEqual(a.status, 403, 'fremde Herkunft durchgelassen: ' + a.status);
+    a = await post('/api/rechnung-storno', 'null', 'http://127.0.0.1:' + srv.server.address().port);
+    const ad = await a.json();
+    assert.ok(a.status === 400 && !/Cannot read/.test(ad.error), 'eigene Herkunft / null-Koerper: ' + a.status + ' ' + ad.error);
+    // Alter Einstieg (R15): Lesezeichen auf /app.html landen auf /.
+    const alt = await fetch(url('/app.html?x=1'), { redirect: 'manual' });
+    assert.deepStrictEqual([alt.status, alt.headers.get('location')], [301, '/'], 'app.html leitet nicht um');
+  } finally {
+    if (!lauscht) await new Promise((ok) => srv.server.close(ok));
+  }
+}
+
+// R13: "Bewegung reduzieren" aus dem Browser-Speicher nur als on/off.
+function testBewegung() {
+  const { bewegungAus } = require('../public/app/kern.js');
+  assert.strictEqual(bewegungAus('off'), 'off');
+  for (const roh of ['on', null, undefined, '', 'OFF', ' off', '<img>', 1, {}, ['off']]) {
+    assert.strictEqual(bewegungAus(roh), 'on', 'durchgelassen: ' + JSON.stringify(roh));
+  }
+}
+
+// --- Zeiterfassung (Block Z1) ----------------------------------------------
+// Manuelle Zeit ist eine zweite Zeitquelle neben Claude. Sie geht in den
+// Arbeitswert, nie in die Claude-Stunden, und nie unbemerkt auf einen Beleg.
+
+// Setzt die Standard-Rundung fuer die Dauer eines Tests.
+function mitRundung(minuten, fn) {
+  const cfg = require('../config.json');
+  const vorher = cfg.rundungMinuten;
+  cfg.rundungMinuten = minuten;
+  try {
+    return fn();
+  } finally {
+    if (vorher === undefined) delete cfg.rundungMinuten; else cfg.rundungMinuten = vorher;
+  }
+}
+
+// Oberste Config-Werte fuer die Dauer eines Tests — kein Test verlaesst sich
+// auf das, was zufaellig in der eigenen config.json steht.
+function mitConfig(werte, fn) {
+  const cfg = require('../config.json');
+  const vorher = Object.fromEntries(Object.keys(werte).map((k) => [k, [Object.hasOwn(cfg, k), cfg[k]]]));
+  Object.assign(cfg, werte);
+  try {
+    return fn();
+  } finally {
+    for (const [k, [hatte, w]] of Object.entries(vorher)) if (hatte) cfg[k] = w; else delete cfg[k];
+  }
+}
+
+// Ein Projekteintrag in config.projektSaetze nur fuer die Dauer eines Tests.
+function mitProjektSatz(projekt, eintrag, fn) {
+  const cfg = require('../config.json');
+  if (!cfg.projektSaetze) cfg.projektSaetze = {};
+  const hatte = Object.hasOwn(cfg.projektSaetze, projekt);
+  const vorher = cfg.projektSaetze[projekt];
+  cfg.projektSaetze[projekt] = eintrag;
+  try {
+    return fn();
+  } finally {
+    if (hatte) cfg.projektSaetze[projekt] = vorher; else delete cfg.projektSaetze[projekt];
+  }
+}
+
+// Ein Eintrag mit sinnvollen Vorgaben; Tests ueberschreiben nur, was sie pruefen.
+function eintrag(db, d = {}) {
+  const zeit = require('../zeit');
+  return zeit.speichere(db, {
+    ziel_art: 'vorgang', ziel_schluessel: 'PROJ-1',
+    start: '2026-08-18T14:00:00.000Z', ende: '2026-08-18T15:30:00.000Z',
+    pause_min: 0, taetigkeit: 'Entwicklung', notiz: '', abrechenbar: true, ...d,
+  });
+}
+
+function testZeitRundung() {
+  mitRundung(5, () => {
+    const { db } = zeitDb();
+    // 14:00–15:00 mit 13 Min Pause = 47 Min roh; auf 5 Min aufgerundet 50.
+    const e = eintrag(db, { ende: '2026-08-18T15:00:00.000Z', pause_min: 13 });
+    assert.strictEqual(e.rohzeit_min, 47, 'Rohzeit ' + e.rohzeit_min + ' statt 47 (Pause nicht abgezogen?)');
+    assert.strictEqual(e.gezaehlt_min, 50, 'gezaehlt ' + e.gezaehlt_min + ' statt 50 (Rundung fehlt?)');
+    // Genau auf dem Raster bleibt es, wie es ist.
+    assert.strictEqual(eintrag(db, { ende: '2026-08-18T15:00:00.000Z' }).gezaehlt_min, 60);
+    // Feste Dauer zaehlt ab Beginn, das Ende folgt daraus.
+    const f = eintrag(db, { ende: undefined, dauer_fest_min: 90 });
+    assert.strictEqual(f.rohzeit_min, 90);
+    assert.strictEqual(f.ende, '2026-08-18T15:30:00.000Z', 'Ende aus fester Dauer falsch: ' + f.ende);
+    // Projekt-Rundung schlaegt den Standard: 47 Min auf 15 Min = 60.
+    mitProjektSatz('Projekt R', { rundung: 15 }, () => {
+      const p = eintrag(db, { ziel_art: 'projekt', ziel_schluessel: 'Projekt R', ende: '2026-08-18T15:00:00.000Z', pause_min: 13 });
+      assert.strictEqual(p.gezaehlt_min, 60, 'Projekt-Rundung ignoriert: ' + p.gezaehlt_min);
+    });
+  });
+  // Rundung 1 laesst die Rohzeit stehen.
+  mitRundung(1, () => {
+    const { db } = zeitDb();
+    assert.strictEqual(eintrag(db, { ende: '2026-08-18T15:00:00.000Z', pause_min: 13 }).gezaehlt_min, 47);
+  });
+}
+
+function testZeitGrenzen() {
+  const zeit = require('../zeit');
+  const { db } = zeitDb();
+  const fall = (d, muster, was) => assert.throws(() => eintrag(db, d), muster, was + ' angenommen');
+  fall({ ziel_art: 'xx' }, /Zielart unbekannt/, 'fremde Zielart');
+  fall({ ziel_schluessel: ' ' }, /Ziel fehlt/, 'leeres Ziel');
+  fall({ ziel_schluessel: 'PROJ 1' }, /Vorgang:/, 'Vorgang mit Leerzeichen');
+  fall({ ziel_art: 'projekt', ziel_schluessel: '__proto__' }, /nicht zulaessig/, 'Projekt __proto__');
+  fall({ ziel_art: 'intern', ziel_schluessel: 'Urlaub' }, /Interne Tätigkeit/, 'unbekannte interne Tätigkeit');
+  fall({ ziel_art: 'kunde', ziel_schluessel: '999' }, /Unbekannter Kontakt/, 'unbekannter Kunde');
+  fall({ ende: '2026-08-18T13:00:00.000Z' }, /Ende liegt vor/, 'Ende vor Start');
+  fall({ start: 'gestern' }, /Zeitpunkt/, 'Start ohne Datum');
+  fall({ pause_min: 120 }, /Pause/, 'Pause laenger als Eintrag');
+  fall({ pause_min: -5 }, /Pause/, 'negative Pause');
+  fall({ taetigkeit: 'Kaffee' }, /Tätigkeit unbekannt/, 'unbekannte Tätigkeit');
+  fall({ notiz: 'x'.repeat(501) }, /Notiz/, 'Notiz zu lang');
+  fall({ notiz: 'a\u0007b' }, /Steuerzeichen/, 'Steuerzeichen in der Notiz');
+  fall({ ende: '2026-08-19T15:00:00.000Z' }, /24 Stunden/, 'Eintrag ueber 24 h');
+  const morgen = new Date(Date.now() + 2 * 3600e3).toISOString();
+  fall({ start: morgen, ende: undefined, dauer_fest_min: 30 }, /Zukunft/, 'Beginn in der Zukunft');
+  for (const boese of [true, '1e2', [30], ' ', 'abc']) {
+    fall({ pause_min: boese }, /Pause/, 'Pause ' + JSON.stringify(boese));
+  }
+  // Ohne Zeitzone haengt der Tag an der Server-Uhr; unsinnige Jahre sind Tippfehler.
+  fall({ start: '2026-08-18T14:00:00', ende: '2026-08-18T15:00:00' }, /Zeitpunkt/, 'Zeitpunkt ohne Zeitzone');
+  fall({ start: '1999-08-18T14:00:00.000Z', ende: '1999-08-18T15:00:00.000Z' }, /Zeitpunkt/, 'Jahr 1999');
+  assert.strictEqual(eintrag(db, { start: '2026-08-18T16:00:00+02:00', ende: '2026-08-18T17:00:00+02:00' }).start,
+    '2026-08-18T14:00:00.000Z', 'Zeitpunkt mit Versatz falsch umgerechnet');
+  // Namen landen auf Belegen: kein Zeilenwechsel, keine unsichtbaren Zeichen.
+  // (Ein BOM am Rand entfernt trim() schon; geprueft wird das mitten im Namen.)
+  for (const name of ['Acme\nIBAN DE00', 'Acme\tB', 'Ac​me', 'Acme‎', 'Ac﻿me']) {
+    fall({ ziel_art: 'projekt', ziel_schluessel: name }, /Zeichen/, 'Projektname ' + JSON.stringify(name));
+    assert.throws(() => zeit.setzeTaetigkeit(db, { name }), /Zeichen/, 'Tätigkeit ' + JSON.stringify(name));
+  }
+  // Ein Projekt namens toString bekommt den Standardsatz, keinen geerbten Funktionswert.
+  assert.strictEqual(metrics.satzFuerProjekt('toString').quelle, 'standard', 'geerbter Schluessel als Projektsatz');
+  assert.strictEqual(metrics.satzFuerProjekt('hasOwnProperty').satz, require('../config.json').stundensatz);
+  // Intern ist nie abrechenbar, gleich was mitgeschickt wird.
+  const i = eintrag(db, { ziel_art: 'intern', ziel_schluessel: 'Planung', abrechenbar: true });
+  assert.strictEqual(i.abrechenbar, 0, 'interner Eintrag abrechenbar');
+  // Kunde ueber die Kontakt-Id.
+  const k = require('../kontakte').speichere(db, { firma: 'Kunde GmbH' });
+  assert.strictEqual(eintrag(db, { ziel_art: 'kunde', ziel_schluessel: String(k.id) }).ziel_schluessel, String(k.id));
+  // Vorgaenge werden gross geschrieben wie beim Buchen.
+  assert.strictEqual(eintrag(db, { ziel_schluessel: 'proj-9' }).ziel_schluessel, 'PROJ-9');
+  // Aendern und Loeschen.
+  const e = eintrag(db);
+  const g = zeit.speichere(db, { ...e, notiz: 'neu' }, e.id);
+  assert.strictEqual(g.id, e.id);
+  assert.strictEqual(g.notiz, 'neu');
+  zeit.loesche(db, e.id);
+  assert.throws(() => zeit.loesche(db, e.id), /nicht gefunden/, 'Loeschen eines fehlenden Eintrags still');
+}
+
+// CSV-Export: der Arbeitswert enthaelt manuelle Zeit, also muss die CSV sie
+// zeigen — sonst geht Stunden x Satz beim Nachrechnen nicht auf. Neue Spalten
+// am Ende, damit bestehende Auswertungen nicht verrutschen.
+function testCsvManuelleZeit() {
+  const { csvExport } = require('../server');
+  mitZeitmodell(5, 'aktivitaet', () => mitRundung(5, () => {
+    const { db, zeile } = zeitDb();
+    for (let min = 0; min <= 60; min += 2) zeile('s1', min, 'Projekt A', 'PROJ-1');
+    eintrag(db);
+    eintrag(db, { start: '2026-08-18T16:00:00.000Z', ende: '2026-08-18T17:00:00.000Z', abrechenbar: false });
+    const t = metrics.byTicket(db, {})[0];
+    const [kopf, werte] = csvExport([t], () => '').map((l) => l.split(';'));
+    const zahl = (name) => {
+      const i = kopf.findIndex((k) => k.startsWith(name));
+      assert.ok(i >= 0, 'CSV-Spalte fehlt: ' + name);
+      return Number(werte[i].replace(',', '.'));
+    };
+    assert.strictEqual(zahl('Manuelle Stunden'), 1.5, 'Manuelle Stunden ohne die nicht abrechenbare Stunde');
+    assert.ok(Math.abs(zahl('davon Arbeitswert manuell') - t.arbeitswert_manuell) < 0.01, 'davon Arbeitswert manuell');
+    assert.ok(t.arbeitswert_manuell > 0 && zahl('davon Arbeitswert manuell') < zahl('Arbeitswert'), 'manueller Anteil nicht kleiner als der Arbeitswert');
+    assert.ok(kopf.indexOf('Abo-Anteil USD') < kopf.findIndex((k) => k.startsWith('Manuelle Stunden')), 'neue Spalten nicht am Ende');
+  }));
+}
+
+// 60 Min Claude auf PROJ-1, dazu 90 Min manuell (nicht ueberlappend): der
+// Arbeitswert waechst um 1,5 h x Satz, die Claude-Stunden bleiben.
+function testManuellImArbeitswert() {
+  mitConfig({ selbstkostenStunde: 40, vergleichsFaktor: 1.2 }, () => mitZeitmodell(5, 'aktivitaet', () => mitRundung(5, () => {
+    const { db, zeile } = zeitDb();
+    for (let min = 0; min <= 60; min += 2) zeile('s1', min, 'Projekt A', 'PROJ-1');
+    const vorher = metrics.byTicket(db, {})[0];
+    eintrag(db);
+    eintrag(db, { start: '2026-08-18T16:00:00.000Z', ende: '2026-08-18T17:00:00.000Z', abrechenbar: false });
+    const t = metrics.byTicket(db, {})[0];
+    assert.strictEqual(t.active_seconds, vorher.active_seconds, 'Claude-Zeit veraendert');
+    assert.strictEqual(t.manuell_hours, 1.5, 'manuell_hours ' + t.manuell_hours);
+    assert.strictEqual(t.manuell_nicht_hours, 1, 'nicht abrechenbare Stunden ' + t.manuell_nicht_hours);
+    assert.ok(Math.abs(t.arbeitswert_claude - vorher.arbeitswert) < 1e-9, 'Claude-Anteil veraendert');
+    assert.ok(Math.abs(t.arbeitswert - (vorher.arbeitswert + 1.5 * t.stundensatz)) < 1e-9,
+      'Arbeitswert ' + t.arbeitswert + ' statt Claude + 1,5 h (nicht abrechenbare Zeit mitgezaehlt?)');
+    // Eigene Zeit fuer die Marge: Claude + manuell + nicht abrechenbar.
+    const w = metrics.mehrwert(t, 0);
+    assert.ok(Math.abs(w.zeitkosten - (t.active_hours + 1.5 + 1) * 40) < 1e-9, 'Zeitkosten ohne manuelle Zeit: ' + w.zeitkosten);
+    // Vergleichsaufwand bleibt bei der KI-Zeit.
+    assert.ok(Math.abs(w.vergleich_stunden - t.active_hours * 1.2) < 1e-9, 'Vergleichsaufwand zaehlt manuelle Zeit');
+    // Projekt-Sicht zaehlt die Vorgangszeit ihres Projekts mit.
+    const p = metrics.byProject(db, {}).find((r) => r.project === 'Projekt A');
+    assert.strictEqual(p.manuell_hours, 1.5, 'Projekt ohne manuelle Vorgangszeit');
+    assert.ok(Math.abs(p.arbeitswert - t.arbeitswert) < 1e-9);
+    // Hub: Summe wie je Vorgang, manuelle Stunden getrennt ausgewiesen.
+    const k = metrics.kennzahlen(metrics.byTicket(db, {}).concat(metrics.ohneTicket(db, {})), {});
+    assert.ok(Math.abs(k.wert.arbeitswert - t.arbeitswert) < 1e-9, 'Hub-Arbeitswert ohne manuelle Zeit');
+    assert.strictEqual(k.manuell_stunden, 1.5);
+    assert.strictEqual(k.aktive_stunden, t.active_hours, 'aktive Stunden enthalten manuelle Zeit');
+    // Gestellte Rechnung: nur der Claude-Anteil ist abgerechnet, die manuelle Zeit bleibt offen.
+    const ka = metrics.kennzahlen(metrics.byTicket(db, {}), { 'PROJ-1': { betrag_eur: 1, nummern: ['2026-0001'] } });
+    assert.ok(Math.abs(ka.abgerechnet_eur - t.arbeitswert_claude) < 1e-9, 'manuelle Zeit gilt als abgerechnet');
+    assert.ok(Math.abs(ka.offen_eur - 1.5 * t.stundensatz) < 1e-9, 'offen ohne manuelle Zeit');
+    // Zeitraum ausserhalb: nichts.
+    assert.strictEqual(metrics.byTicket(db, { from: '2026-09-01', to: '2026-09-30' }).length, 0, 'Eintrag ausserhalb des Zeitraums gezaehlt');
+    // Modellfilter: manuelle Zeit gehoert keinem Modell, auch nicht der vorhandenen Zeile.
+    assert.strictEqual(metrics.byTicket(db, { model: 'claude-opus-5' })[0].manuell_hours, 0, 'manuelle Zeit unter Modellfilter');
+    // Jira: neuer Eintrag aendert den Fingerabdruck, ohne Eintrag bleibt er wie bisher.
+    const jira = require('../jira-sync');
+    assert.notStrictEqual(jira.fingerprint(t), jira.fingerprint(vorher), 'Jira sieht manuelle Zeit nicht');
+    assert.ok(!jira.fingerprint(vorher).endsWith('|0|0'), 'Fingerabdruck ohne Eintrag veraendert');
+  })));
+}
+
+// Ziele ohne einen Claude-Request erscheinen trotzdem: Vorgang, Projekt, Kunde.
+// Interne Zeit erscheint nirgends als Wert, nur als Kosten.
+function testManuellOhneEvents() {
+  mitConfig({ selbstkostenStunde: 40 }, () => mitRundung(5, () => {
+    const { db } = zeitDb();
+    const cfg = require('../config.json');
+    eintrag(db, { ziel_schluessel: 'NEU-1' });
+    eintrag(db, { ziel_art: 'projekt', ziel_schluessel: 'Nur Manuell' });
+    const k = require('../kontakte').speichere(db, { firma: 'Kunde GmbH' });
+    eintrag(db, { ziel_art: 'kunde', ziel_schluessel: String(k.id), ende: '2026-08-18T15:00:00.000Z' });
+    eintrag(db, { ziel_art: 'intern', ziel_schluessel: 'Planung', ende: '2026-08-18T16:00:00.000Z' });
+    const t = metrics.byTicket(db, {});
+    assert.deepStrictEqual(t.map((r) => r.ticket), ['NEU-1'], 'Vorgang nur mit manueller Zeit fehlt');
+    assert.strictEqual(t[0].manuell_hours, 1.5);
+    assert.strictEqual(t[0].sessions, 0);
+    assert.strictEqual(t[0].first_day, '2026-08-18');
+    assert.ok(Math.abs(t[0].arbeitswert - 1.5 * cfg.stundensatz) < 1e-9);
+    assert.ok(Number.isFinite(t[0].abo_anteil_usd) && t[0].abo_anteil_usd === 0, 'Abo-Anteil NaN');
+    const o = metrics.ohneTicket(db, {});
+    const proj = o.find((r) => r.gruppe === 'Nur Manuell');
+    assert.ok(proj && proj.art === 'projekt' && proj.manuell_hours === 1.5, 'Projekt nur mit manueller Zeit fehlt');
+    const kun = o.find((r) => r.art === 'kunde');
+    assert.ok(kun && kun.gruppe === 'Kunde GmbH' && kun.kunde_id === k.id && kun.manuell_hours === 1, 'Kundenzeile fehlt');
+    assert.ok(Math.abs(kun.arbeitswert - cfg.stundensatz) < 1e-9, 'Kunde ohne Projekt nicht zum Standardsatz');
+    assert.ok(!o.some((r) => r.gruppe === 'Planung'), 'interne Zeit als Zeile');
+    const kz = metrics.kennzahlen(t.concat(o), {}, require('../zeit').kennzahlenZusatz(db, {}));
+    assert.strictEqual(kz.intern_stunden, 2, 'interne Stunden ' + kz.intern_stunden);
+    assert.ok(Math.abs(kz.wert.arbeitswert - (1.5 + 1.5 + 1) * cfg.stundensatz) < 1e-9, 'interne Zeit im Arbeitswert');
+    assert.ok(Math.abs(kz.wert.zeitkosten - (1.5 + 1.5 + 1 + 2) * 40) < 1e-9, 'interne Zeit fehlt in den Zeitkosten: ' + kz.wert.zeitkosten);
+    // Modellfilter: manuelle Zeit gehoert keinem Modell, keine erfundenen Zeilen.
+    assert.strictEqual(metrics.byTicket(db, { model: 'claude-opus-5' }).length, 0);
+    // Interne Zeit gehoert keinem Projekt: eine gefilterte Sicht zaehlt sie nicht.
+    assert.strictEqual(require('../zeit').kennzahlenZusatz(db, { project: 'Nur Manuell' }).intern_stunden, 0, 'interne Zeit in der Projektsicht');
+    // Werkzeugbetrieb ist keine Arbeit: eine Buchung dort verschwaende still.
+    assert.throws(() => eintrag(db, { ziel_art: 'projekt', ziel_schluessel: '(lokal)' }), /Werkzeug/, 'Werkzeugprojekt als Ziel angenommen');
+  }));
+}
+
+// Ohne einen einzigen Eintrag bleibt jede Zahl, wie sie war.
+function testOhneEintraegeUnveraendert() {
+  mitZeitmodell(5, 'eingaben', () => {
+    const { db, zeile } = zeitDb();
+    for (let min = 0; min <= 30; min += 2) zeile('s1', min, 'Projekt A', 'PROJ-1', 1);
+    for (let min = 40; min <= 70; min += 2) zeile('s2', min, 'Projekt B', null, 1);
+    for (const r of metrics.byTicket(db, {}).concat(metrics.ohneTicket(db, {}), metrics.byProject(db, {}))) {
+      assert.strictEqual(r.manuell_hours, 0, 'manuell_hours ohne Eintrag');
+      assert.strictEqual(r.arbeitswert, r.arbeitswert_claude, 'Arbeitswert weicht ohne Eintrag ab');
+      assert.ok(Math.abs(r.arbeitswert - (r.active_seconds / 3600) * r.stundensatz) < 1e-9, 'Arbeitswert nicht mehr Zeit x Satz');
+    }
+    assert.strictEqual(metrics.byTicket(db, {}).length, 1);
+    assert.strictEqual(metrics.ohneTicket(db, {}).length, 1);
+  });
+}
+
+function testZeitTimer() {
+  const zeit = require('../zeit');
+  mitRundung(5, () => {
+    const { db } = zeitDb();
+    const t0 = Date.parse('2026-08-18T09:00:00.000Z');
+    assert.strictEqual(zeit.timerAktuell(db, t0), null);
+    assert.throws(() => zeit.timerStop(db, t0), /Kein Timer/);
+    assert.throws(() => zeit.timerStart(db, { ziel_art: 'xx', ziel_schluessel: 'A', taetigkeit: 'Entwicklung' }, t0), /Zielart/, 'Timer ohne gueltiges Ziel');
+    const a = zeit.timerStart(db, { ziel_art: 'vorgang', ziel_schluessel: 'PROJ-1', taetigkeit: 'Entwicklung', notiz: 'A' }, t0);
+    assert.strictEqual(a.gebucht, null);
+    assert.strictEqual(zeit.timerAktuell(db, t0 + 12 * 60e3).laeuft_min, 12);
+    // Zweiter Start bucht den laufenden zuerst.
+    const b = zeit.timerStart(db, { ziel_art: 'projekt', ziel_schluessel: 'Projekt B', taetigkeit: 'Review' }, t0 + 32 * 60e3);
+    assert.ok(b.gebucht, 'laufender Timer nicht gebucht');
+    assert.strictEqual(b.gebucht.rohzeit_min, 32);
+    assert.strictEqual(b.gebucht.gezaehlt_min, 35, 'Timer-Buchung nicht gerundet');
+    assert.strictEqual(b.gebucht.notiz, 'A');
+    assert.strictEqual(zeit.timerAktuell(db, t0 + 33 * 60e3).ziel_schluessel, 'Projekt B');
+    // Unter einer Minute: verworfen, kein Eintrag.
+    const n = db.prepare('SELECT COUNT(*) n FROM zeit_eintrag').get().n;
+    assert.deepStrictEqual(zeit.timerStop(db, t0 + 32 * 60e3 + 30e3), { verworfen: true });
+    assert.strictEqual(db.prepare('SELECT COUNT(*) n FROM zeit_eintrag').get().n, n, 'verworfener Timer hat gebucht');
+    assert.strictEqual(zeit.timerAktuell(db, t0), null);
+    // Stop mit Buchung, danach leer.
+    zeit.timerStart(db, { ziel_art: 'vorgang', ziel_schluessel: 'PROJ-1', taetigkeit: 'Entwicklung' }, t0 + 40 * 60e3);
+    const s = zeit.timerStop(db, t0 + 50 * 60e3);
+    assert.strictEqual(s.eintrag.gezaehlt_min, 10);
+    // Verwerfen ohne Buchung.
+    zeit.timerStart(db, { ziel_art: 'vorgang', ziel_schluessel: 'PROJ-1', taetigkeit: 'Entwicklung' }, t0 + 60 * 60e3);
+    zeit.timerVerwerfen(db);
+    assert.strictEqual(zeit.timerAktuell(db, t0), null);
+    assert.strictEqual(db.prepare('SELECT COUNT(*) n FROM zeit_eintrag').get().n, n + 1);
+    // Kaputte meta-Zeile: kein Absturz, kein Timer.
+    for (const roh of ['null', '{}', '[]', '{"start":"gestern"}', 'kein json']) {
+      dbmod.setMeta(db, 'timer', roh);
+      assert.strictEqual(zeit.timerAktuell(db, t0), null, 'kaputter Timer ' + roh + ' gilt als laufend');
+    }
+    // Ein laufender Timer, der sich nicht mehr buchen laesst (ueber 24 h), blockiert
+    // den naechsten Start mit einem Hinweis aufs Verwerfen — er wird nicht still geloescht.
+    zeit.timerVerwerfen(db);
+    zeit.timerStart(db, { ziel_art: 'vorgang', ziel_schluessel: 'PROJ-1', taetigkeit: 'Entwicklung' }, t0);
+    assert.throws(() => zeit.timerStart(db, { ziel_art: 'vorgang', ziel_schluessel: 'PROJ-2', taetigkeit: 'Entwicklung' }, t0 + 25 * 3600e3),
+      /verwerfen/, 'Hinweis aufs Verwerfen fehlt');
+    assert.strictEqual(zeit.timerAktuell(db, t0 + 25 * 3600e3).ziel_schluessel, 'PROJ-1', 'alter Timer still verloren');
+    zeit.timerVerwerfen(db);
+  });
+}
+
+function testTaetigkeitsarten() {
+  const zeit = require('../zeit');
+  const { db } = zeitDb();
+  assert.deepStrictEqual(zeit.taetigkeiten(db).map((t) => t.name),
+    ['Begleiten', 'Entwicklung', 'Konzept', 'Meeting', 'Review', 'Support']);
+  assert.strictEqual(zeit.taetigkeiten(db).find((t) => t.name === 'Meeting').parallel, 1, 'Meeting nicht parallel');
+  // Geloeschte Saat kommt beim naechsten Start nicht zurueck.
+  zeit.loescheTaetigkeit(db, 'Support');
+  dbmod.migrate(db);
+  assert.ok(!zeit.taetigkeiten(db).some((t) => t.name === 'Support'), 'Saat kam zurueck');
+  // Eigener Satz: leer = Projektsatz, Zahl wird uebernommen, Unsinn prallt ab.
+  assert.strictEqual(zeit.setzeTaetigkeit(db, { name: 'Beratung', satz: ' 120 ' }).satz, 120);
+  assert.strictEqual(zeit.setzeTaetigkeit(db, { name: 'Doku', satz: '' }).satz, null);
+  for (const boese of [true, [5], '1e3', -1, 10001]) {
+    assert.throws(() => zeit.setzeTaetigkeit(db, { name: 'X', satz: boese }), /Satz/, 'Satz ' + JSON.stringify(boese));
+  }
+  assert.throws(() => zeit.setzeTaetigkeit(db, { name: ' ' }), /Name fehlt/);
+  assert.throws(() => zeit.setzeTaetigkeit(db, { name: 'x'.repeat(41) }), /Name/);
+  // Eigener Satz gilt im Arbeitswert statt des Projektsatzes.
+  mitRundung(5, () => {
+    eintrag(db, { ziel_schluessel: 'NEU-2', taetigkeit: 'Beratung' });
+    const t = metrics.byTicket(db, {}).find((r) => r.ticket === 'NEU-2');
+    assert.ok(Math.abs(t.arbeitswert - 1.5 * 120) < 1e-9, 'Tätigkeitssatz ignoriert: ' + t.arbeitswert);
+  });
+  assert.throws(() => zeit.loescheTaetigkeit(db, 'Beratung'), /verwendet/, 'verwendete Tätigkeit geloescht');
+}
+
+// Einstellungen und Projektsatz: Grenzen fuer die Rundung und das Tagessoll.
+function testZeitEinstellungen() {
+  configGeschuetzt(() => {
+    const srv = require('../server');
+    const zeit = require('../zeit');
+    assert.throws(() => srv.setzeEinstellungen({ rundungMinuten: 0 }), /Rundung/);
+    assert.throws(() => srv.setzeEinstellungen({ rundungMinuten: 61 }), /Rundung/);
+    for (const halb of [7.5, '7.5']) {
+      assert.throws(() => srv.setzeEinstellungen({ rundungMinuten: halb }), /ganze Zahl/, 'Rundung ' + halb + ' angenommen');
+    }
+    // Standard bewusst anders als die Projekt-Rundung unten, sonst sieht die
+    // Pruefung "Rundung bleibt stehen" keinen Unterschied.
+    assert.strictEqual(srv.setzeEinstellungen({ rundungMinuten: 10 }).rundungMinuten, 10);
+    assert.throws(() => srv.setzeEinstellungen({ tagessollStunden: 25 }), /Tagessoll/);
+    assert.throws(() => srv.setzeSatz({ projekt: 'Projekt R', rundung: 61 }), /Rundung/);
+    assert.throws(() => srv.setzeSatz({ projekt: 'Projekt R', rundung: '7,5' }), /Rundung/);
+    srv.setzeSatz({ projekt: 'Projekt R', rundung: 15 });
+    const { db } = zeitDb();
+    assert.strictEqual(zeit.rundungFuer(db, 'projekt', 'Projekt R'), 15);
+    // Satzaenderung ohne Rundungsfeld laesst die Rundung stehen.
+    srv.setzeSatz({ projekt: 'Projekt R', satz: 90 });
+    assert.strictEqual(zeit.rundungFuer(db, 'projekt', 'Projekt R'), 15, 'Satzaenderung loescht die Rundung');
+    srv.setzeSatz({ projekt: 'Projekt R', satz: 90, rundung: '' });
+    assert.strictEqual(zeit.rundungFuer(db, 'projekt', 'Projekt R'), zeit.rundungFuer(db, 'kunde', '1'), 'leere Rundung nicht zurueckgesetzt');
+  });
+}
+
+// Belege: die Vorgangsposition bleibt Claude-Zeit x Satz. Manuelle Zeit kommt
+// erst als eigene Position (Block Z3) — bis dahin nie versteckt im Betrag.
+function testBelegOhneManuelleZeit() {
+  const rechnung = require('../rechnung');
+  rechnungsUmgebung(() => {
+    const db = rechnungsDb();
+    mitRundung(5, () => eintrag(db, { ziel_schluessel: 'PROJ-500', start: '2026-08-10T14:00:00.000Z', ende: '2026-08-10T16:00:00.000Z' }));
+    const pos = rechnung.baue(db, { from: '2026-08-01', to: '2026-08-31', tickets: ['PROJ-500'] })
+      .find((p) => p.ticket === 'PROJ-500');
+    assert.ok(Math.abs(pos.betrag_eur - Math.round(pos.stunden * pos.satz * 100) / 100) < 0.011,
+      'Position: ' + pos.stunden + ' h x ' + pos.satz + ' ergibt nicht ' + pos.betrag_eur + ' (manuelle Zeit im Betrag?)');
+    db.close();
+  });
+}
+
+// Routen: Ablehnungen kommen als 400 mit deutschem Text, nicht als 404.
+// Nur Ablehnungen — der Testserver haengt an der echten Datenbank.
+// --- Kalender (Block Z6a): ICS/CalDAV lesen, Termine in der Woche ----------
+const kalender = require('../kalender');
+const KAL_ICS = fs.readFileSync(path.join(__dirname, 'fixtures', 'kalender.ics'), 'utf8');
+// Horizont des Fixtures: 13.08. bis 17.09.2026 (heute = 20.08. 12:00 UTC).
+const KAL_JETZT = Date.UTC(2026, 7, 20, 12, 0, 0);
+const lokal = (...a) => new Date(2026, ...a).toISOString();  // TZID-Zeiten gelten als Ortszeit des Servers
+
+function testIcsParser() {
+  for (const [art, text] of [['LF', KAL_ICS], ['CRLF', KAL_ICS.replace(/\r?\n/g, '\r\n')]]) {
+    const ev = kalender.parseIcs(text);
+    const v = kalender.vorkommen(ev, Date.UTC(2026, 7, 13), Date.UTC(2026, 8, 18));
+    const je = (uid) => v.filter((x) => x.uid.split('#')[0] === uid);
+    // Faltung und Escapes: die Folgezeile verliert genau ein Leerzeichen.
+    // Gegenprobe: Faltung ohne Entfernen des Leerzeichens -> "mit  langem".
+    assert.strictEqual(je('einzel-1')[0].titel, 'PROJ-12 Review, Teil 1 mit langem Titel', art + ': Titel ' + JSON.stringify(je('einzel-1')[0].titel));
+    assert.deepStrictEqual([je('einzel-1')[0].start, je('einzel-1')[0].ende], ['2026-08-18T08:00:00.000Z', '2026-08-18T09:00:00.000Z'], art + ': UTC-Zeit');
+    // Ganztaegig: Datum ohne Uhrzeit, ganztag = 1.
+    const g = je('ganz-1')[0];
+    assert.deepStrictEqual([g.ganztag, g.start.slice(0, 10), g.ende.slice(0, 10)], [1, '2026-08-19', '2026-08-20'], art + ': ganztaegig ' + JSON.stringify(g));
+    // WEEKLY BYDAY=MO,WE COUNT=4 minus EXDATE am 19.08. -> Mo 17., Mo 24., Mi 26.
+    // Gegenprobe: EXDATE ignorieren -> 4 Vorkommen.
+    assert.deepStrictEqual(je('serie-1').map((x) => x.start), [lokal(7, 17, 10), lokal(7, 24, 10), lokal(7, 26, 10)], art + ': Serie ' + JSON.stringify(je('serie-1').map((x) => x.start)));
+    assert.strictEqual(je('serie-1')[0].ende, lokal(7, 17, 10, 30), art + ': Serienende');
+    // Andere FREQ: ein Vorkommen und ein Hinweis.
+    assert.deepStrictEqual([je('monat-1').length, je('monat-1')[0].rrule_ignoriert], [1, true], art + ': MONTHLY');
+    assert.strictEqual(je('abgesagt-1').length, 0, art + ': abgesagter Termin bleibt drin');
+    // DAILY INTERVAL=2 UNTIL 26.08. -> 20., 22., 24., 26.; der 22. ist verschoben (RECURRENCE-ID).
+    assert.deepStrictEqual(je('serie-2').map((x) => x.start), ['2026-08-20T07:00:00.000Z', '2026-08-22T09:00:00.000Z', '2026-08-24T07:00:00.000Z', '2026-08-26T07:00:00.000Z'],
+      art + ': Tagesserie ' + JSON.stringify(je('serie-2').map((x) => x.start)));
+    assert.strictEqual(je('serie-2')[1].titel, 'Standup verschoben', art + ': Ausnahme der Serie');
+    // VALARM ist verschachtelt: sein SUMMARY ueberschreibt nicht den Termin.
+    assert.deepStrictEqual([je('alarm-1')[0].titel, je('alarm-1')[0].art], ['Fokus Beispielprojekt', 'blocker'], art + ': VALARM/Blocker');
+    assert.strictEqual(je('einzel-1')[0].art, 'meeting', art + ': ohne Blocker-Wort ein Meeting');
+    // Eindeutige Schluessel je Vorkommen (Primaerschluessel der Tabelle).
+    assert.strictEqual(new Set(v.map((x) => x.uid)).size, v.length, art + ': doppelte uid');
+  }
+  // Horizont: nichts ausserhalb.
+  const v = kalender.vorkommen(kalender.parseIcs(KAL_ICS), Date.UTC(2026, 7, 25), Date.UTC(2026, 7, 26));
+  assert.deepStrictEqual(v.map((x) => x.uid.split('#')[0]).sort(), ['alarm-1'], 'Horizont 25.08.: ' + JSON.stringify(v.map((x) => x.uid)));
+}
+
+function testRateZiel() {
+  const ctx = { projekte: ['Beispielprojekt', 'Beispiel'], kunden: [{ id: 7, firma: 'Beispielkunde' }] };
+  const r = (t) => kalender.rateZiel(t, ctx);
+  assert.deepStrictEqual(r('PROJ-12 Review'), { ziel_art: 'vorgang', ziel_schluessel: 'PROJ-12' });
+  // Gegenprobe: Treffer ohne Wortgrenze -> PROJ-12 statt PROJ-123.
+  assert.deepStrictEqual(r('Sync zu PROJ-123'), { ziel_art: 'vorgang', ziel_schluessel: 'PROJ-123' });
+  // Laengster Projektname gewinnt, nur als ganzes Wort.
+  assert.deepStrictEqual(r('Beispielprojekt Sync'), { ziel_art: 'projekt', ziel_schluessel: 'Beispielprojekt' });
+  assert.deepStrictEqual(r('Jour fixe Beispielkunde'), { ziel_art: 'kunde', ziel_schluessel: '7' });
+  assert.strictEqual(r('Beispielprojekte planen'), null, 'Teilwort als Projekt erkannt');
+  // Gegenprobe: Wortanfang nicht pruefen -> "Testbeispiel" passt auf Projekt "Beispiel".
+  assert.strictEqual(r('Testbeispiel Sync'), null, 'Wortanfang nicht geprueft');
+  assert.strictEqual(r('Mittagessen'), null);
+  // Mit bekannten Vorgaengen: nur die zaehlen, und nur als ganzes Wort.
+  // Gegenprobe: tickets ignorieren -> "Q3-2026" wird ein Vorgang.
+  const mit = { ...ctx, tickets: new Set(['PROJ-12', 'GHIJKLMNOP-12']) };
+  assert.strictEqual(kalender.rateZiel('Review Q3-2026', mit), null, 'Quartal als Vorgang');
+  assert.strictEqual(kalender.rateZiel('UTF-8 Umstellung', mit), null, 'Zeichensatz als Vorgang');
+  assert.strictEqual(kalender.rateZiel('ABCDEFGHIJKLMNOP-12', mit), null, 'Treffer mitten im Wort');
+  assert.deepStrictEqual(kalender.rateZiel('Q3-2026: PROJ-12 Review', mit), { ziel_art: 'vorgang', ziel_schluessel: 'PROJ-12' });
+}
+
+async function testKalenderSync() {
+  const db = dbmod.open(':memory:');
+  openDbs.push(db);
+  db.prepare("INSERT INTO kontakte (firma, status, erstellt_am) VALUES ('Beispielkunde', 'kunde', '2026-08-01')").run();
+  // PROJ-12 ist ein bekannter Vorgang (nur bekannte werden aus Titeln geraten).
+  db.prepare(`INSERT INTO events (request_id, ts, session_id, project, ticket, model, input_tokens, output_tokens, cache_w_5m, cache_w_1h, cache_read, web_search, cost_usd, is_sidechain, day)
+    VALUES ('k1', '2026-08-19T10:00:00.000Z', 's-k', 'Testprojekt', 'PROJ-12', 'claude-opus-5', 1, 1, 0, 0, 0, 0, 0, 0, '2026-08-19')`).run();
+  const konto = { id: 'privat', name: 'Privat', art: 'ics', url: 'https://kalender.invalid/geheim.ics' };
+  const holen = (text) => async () => kalender.parseIcs(text);
+  kalender.speichereTermin(db, { titel: 'Eigener Blocker', art: 'blocker', start: '2026-08-21T08:00:00.000Z', ende: '2026-08-21T09:00:00.000Z' });
+
+  let e = await kalender.sync(db, konto, { jetzt: KAL_JETZT, holen: holen(KAL_ICS) });
+  assert.deepStrictEqual([e.ok, e.anzahl, e.rrule_ignoriert], [true, 11, 1], 'erster Abgleich ' + JSON.stringify(e));
+  const zeile = (uid) => db.prepare("SELECT * FROM termin WHERE kalender_id = 'privat' AND uid = ?").get(uid);
+  assert.deepStrictEqual([zeile('einzel-1').ziel_art, zeile('einzel-1').ziel_schluessel, zeile('einzel-1').quelle], ['vorgang', 'PROJ-12', 'kalender']);
+  const kunde = db.prepare("SELECT ziel_art, ziel_schluessel FROM termin WHERE uid LIKE 'serie-1#%' LIMIT 1").get();
+  assert.deepStrictEqual([kunde.ziel_art, kunde.ziel_schluessel], ['kunde', '1'], 'Kunde aus den Kontakten');
+
+  // Von Hand zugeordnet: bleibt beim naechsten Abgleich stehen.
+  kalender.setzeZiel(db, { kalender_id: 'privat', uid: 'ganz-1', ziel_art: 'projekt', ziel_schluessel: 'Urlaubsprojekt' });
+  // Termin aus dem Kalender geloescht -> verschwindet hier; der lokale bleibt.
+  // Gegenprobe: Loesch-Abgleich weglassen -> einzel-1 bleibt, Test rot.
+  // \r?: unter Windows checkt git (autocrlf) diese Datei mit CRLF aus.
+  const ohne = KAL_ICS.replace(/BEGIN:VEVENT\r?\nUID:einzel-1[\s\S]*?END:VEVENT\r?\n/, '');
+  e = await kalender.sync(db, konto, { jetzt: KAL_JETZT, holen: holen(ohne) });
+  assert.strictEqual(e.anzahl, 10, 'zweiter Abgleich ' + JSON.stringify(e));
+  assert.strictEqual(zeile('einzel-1'), undefined, 'geloeschter Kalendertermin bleibt stehen');
+  assert.deepStrictEqual([zeile('ganz-1').ziel_art, zeile('ganz-1').ziel_schluessel], ['projekt', 'Urlaubsprojekt'], 'Zuordnung von Hand ueberschrieben');
+  assert.strictEqual(db.prepare("SELECT COUNT(*) AS n FROM termin WHERE quelle = 'lokal'").get().n, 1, 'lokaler Termin vom Abgleich geloescht');
+
+  // Fehler beim Holen: nichts loeschen, Status mit Fehler und ohne URL.
+  const okAm = e.at;
+  e = await kalender.sync(db, konto, { jetzt: KAL_JETZT, holen: async () => { throw new kalender.KalenderFehler('HTTP 503'); } });
+  assert.deepStrictEqual([e.ok, /503/.test(e.fehler)], [false, true], 'Fehler ' + JSON.stringify(e));
+  assert.strictEqual(db.prepare("SELECT COUNT(*) AS n FROM termin WHERE kalender_id = 'privat'").get().n, 10, 'Fehler hat Termine geloescht');
+  const st = kalender.status(db, [konto]);
+  assert.deepStrictEqual([st[0].id, st[0].ok, st[0].anzahl, st[0].letzter_ok], ['privat', false, 10, okAm], 'Status ' + JSON.stringify(st));
+  assert.ok(!JSON.stringify(st).includes('geheim'), 'Status verraet die Kalenderadresse');
+  assert.strictEqual(st[0].host, 'kalender.invalid');
+  // Fremder Fehler (Programm, Datenbank): kein Rohtext nach aussen, Adresse schon gar nicht.
+  e = await kalender.sync(db, konto, { jetzt: KAL_JETZT, holen: async () => { throw new Error('intern https://kalender.invalid/geheim.ics'); } });
+  assert.deepStrictEqual([e.ok, e.fehler], [false, 'Abgleich fehlgeschlagen (Details im Serverprotokoll).'], 'interner Fehler ' + JSON.stringify(e));
+  // Status gilt nur fuer dieselbe Konfiguration: andere Adresse = noch nicht abgeglichen.
+  assert.strictEqual(kalender.status(db, [{ ...konto, url: 'https://anders.invalid/x.ics' }])[0].ok, null, 'Status einer alten Adresse');
+  // Konto aus der Konfiguration genommen: Termine sind verwaist und werden gemeldet.
+  assert.deepStrictEqual(kalender.verwaist(db, []), [{ kalender_id: 'privat', anzahl: 10 }]);
+
+  // Serie zeitlich verschoben (10:00 -> 11:00): die uid haengt am Tag, die Zuordnung von Hand bleibt.
+  const s24 = db.prepare("SELECT uid FROM termin WHERE uid LIKE 'serie-1#%' ORDER BY start LIMIT 1 OFFSET 1").get().uid;
+  kalender.setzeZiel(db, { kalender_id: 'privat', uid: s24, ziel_art: 'projekt', ziel_schluessel: 'Verschoben' });
+  e = await kalender.sync(db, konto, { jetzt: KAL_JETZT, holen: holen(ohne.replace(/T100000/g, 'T110000').replace('T103000', 'T113000')) });
+  const z24 = zeile(s24);
+  // Gegenprobe: uid mit Uhrzeit -> Zeile neu angelegt, Zuordnung weg.
+  assert.ok(z24 && z24.ziel_schluessel === 'Verschoben' && z24.start === lokal(7, 24, 11), 'Zuordnung nach Zeitverschiebung ' + JSON.stringify(z24));
+
+  // Leere Antwort: erst beim zweiten Mal in Folge gilt "leer" als gewollt.
+  // Gegenprobe: Leerschutz weglassen -> beim ersten Mal alles weg.
+  e = await kalender.sync(db, konto, { jetzt: KAL_JETZT, holen: async () => [] });
+  assert.deepStrictEqual([e.ok, e.leer, db.prepare("SELECT COUNT(*) AS n FROM termin WHERE kalender_id = 'privat'").get().n], [false, true, 10], 'erste leere Antwort ' + JSON.stringify(e));
+  e = await kalender.sync(db, konto, { jetzt: KAL_JETZT, holen: async () => [] });
+  assert.deepStrictEqual([e.ok, db.prepare("SELECT COUNT(*) AS n FROM termin WHERE kalender_id = 'privat'").get().n], [true, 0], 'zweite leere Antwort ' + JSON.stringify(e));
+}
+
+// Was eine praeparierte Einladung oder ein kaputter Feed anrichten koennte.
+function testIcsHaertung() {
+  const kal = (...ev) => 'BEGIN:VCALENDAR\r\n' + ev.map((x) => 'BEGIN:VEVENT\r\n' + x.join('\r\n') + '\r\nEND:VEVENT\r\n').join('') + 'END:VCALENDAR\r\n';
+  const H = [Date.UTC(2026, 9, 1), Date.UTC(2026, 9, 15)];
+  // Login-Seite mit HTTP 200 ist kein Kalender. Gegenprobe: Pruefung weg -> [] und der Abgleich loescht.
+  assert.throws(() => kalender.alsIcs('<html><body>Bitte anmelden</body></html>'), /kein Kalender/);
+  assert.strictEqual(kalender.alsIcs('\u{FEFF}' + kal(['UID:a', 'DTSTART:20261002T080000Z'])).length, 1, 'BOM vor BEGIN:VCALENDAR');
+  // EXDATE als Datum gegen eine Serie mit Uhrzeit.
+  let v = kalender.vorkommen(kalender.parseIcs(kal(['UID:x', 'DTSTART:20261005T090000Z', 'DTEND:20261005T100000Z', 'RRULE:FREQ=DAILY;COUNT=3', 'EXDATE;VALUE=DATE:20261006'])), ...H);
+  assert.deepStrictEqual(v.map((x) => x.start.slice(0, 10)), ['2026-10-05', '2026-10-07'], 'EXDATE als Datum ' + JSON.stringify(v.map((x) => x.start)));
+  // DAILY mit BYDAY: nur die genannten Wochentage, ausgelassene zaehlen nicht in COUNT.
+  v = kalender.vorkommen(kalender.parseIcs(kal(['UID:d', 'DTSTART:20261005T090000Z', 'RRULE:FREQ=DAILY;BYDAY=MO,TU;COUNT=3'])), ...H);
+  assert.deepStrictEqual(v.map((x) => x.start.slice(0, 10)), ['2026-10-05', '2026-10-06', '2026-10-12'], 'DAILY BYDAY ' + JSON.stringify(v.map((x) => x.start)));
+  // Ohne Ende (RFC: Dauer 0) bekommt der Termin 15 Minuten, damit Woche und Abgleich ihn sehen.
+  assert.strictEqual(v[0].ende, '2026-10-05T09:15:00.000Z', 'Termin ohne Ende ' + v[0].ende);
+  // Steuer- und Bidi-Zeichen fliegen aus dem Titel.
+  const t = kalender.parseIcs(kal(['UID:s', 'DTSTART:20261002T080000Z', 'SUMMARY:Re\u{202E}view\x07 \\nTeil 2']))[0].titel;
+  assert.strictEqual(t, 'Re view Teil 2', 'Titel ' + JSON.stringify(t));
+  // Riesige Dauer und Jahr 9999: nur dieser Termin faellt weg, der Rest bleibt.
+  // Gegenprobe: Obergrenze der Dauer weg -> "jahr" (400 Tage) bleibt.
+  const p = kalender.parseIcs(kal(['UID:gross', 'DTSTART:20261002T080000Z', 'DURATION:P999999999999W'], ['UID:jahr', 'DTSTART:20261002T080000Z', 'DURATION:P400D'],
+    ['UID:spaet', 'DTSTART:99991231T080000Z'], ['UID:gut', 'DTSTART:20261002T080000Z']));
+  assert.deepStrictEqual([p.map((x) => x.uid), p.verworfen], [['gut'], 3], 'verworfen ' + JSON.stringify([p.map((x) => x.uid), p.verworfen]));
+  // Serie seit 1990 ohne COUNT: richtige Vorkommen im Horizont, ohne 13 000 Schritte.
+  // Gegenprobe: Sprung zum Horizont um einen Schritt verrechnet -> falscher erster Tag.
+  const t0 = Date.now();
+  v = kalender.vorkommen(kalender.parseIcs(kal(['UID:alt', 'DTSTART:19900101T070000Z', 'RRULE:FREQ=DAILY;INTERVAL=3'])), ...H);
+  const erwartet = [];
+  for (let s = Date.UTC(1990, 0, 1, 7); s < H[1]; s += 3 * 86400000) if (s >= H[0]) erwartet.push(new Date(s).toISOString());
+  assert.deepStrictEqual(v.map((x) => x.start), erwartet, 'alte Tagesserie');
+  // BYDAY tausendfach wiederholt: entdoppelt, schnell.
+  v = kalender.vorkommen(kalender.parseIcs(kal(['UID:w', 'DTSTART:20000103T070000Z', 'RRULE:FREQ=WEEKLY;BYDAY=' + Array(1000).fill('MO').join(',')])), ...H);
+  assert.deepStrictEqual(v.map((x) => x.start.slice(0, 10)), ['2026-10-05', '2026-10-12'], 'BYDAY doppelt ' + JSON.stringify(v.map((x) => x.start)));
+  assert.ok(Date.now() - t0 < 500, 'Serien brauchen ' + (Date.now() - t0) + ' ms');
+  // Monatsserie seit 2020: kein Vorkommen im Horizont, trotzdem als ignoriert gezaehlt.
+  v = kalender.vorkommen(kalender.parseIcs(kal(['UID:m', 'DTSTART:20200110T070000Z', 'RRULE:FREQ=MONTHLY'])), ...H);
+  assert.deepStrictEqual([v.length, v.ignoriert], [0, 1], 'Monatsserie ' + JSON.stringify([v.length, v.ignoriert]));
+  // CalDAV: selbstschliessendes Element, Hex-Zeichen, CDATA, Zeichen ueber U+FFFF.
+  const xml = '<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">' +
+    '<d:response><d:propstat><d:prop><c:calendar-data/></d:prop><d:status>HTTP/1.1 404</d:status></d:propstat></d:response>' +
+    '<d:response><d:propstat><d:prop><c:calendar-data>BEGIN:VCALENDAR&#xD;\nBEGIN:VEVENT&#xD;\nUID:h1&#xD;\nDTSTART:20261002T080000Z&#xD;\nSUMMARY:A &amp; B &#128512;&#xD;\nEND:VEVENT&#xD;\nEND:VCALENDAR</c:calendar-data></d:prop></d:propstat></d:response>' +
+    '<d:response><d:propstat><d:prop><C:calendar-data><![CDATA[BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:h2\nDTSTART:20261003T080000Z\nEND:VEVENT\nEND:VCALENDAR]]></C:calendar-data></d:prop></d:propstat></d:response></d:multistatus>';
+  // Gegenprobe: selbstschliessendes Element als Beginn lesen -> erster Block beginnt mit "</d:prop>".
+  assert.ok(kalender.calendarData(xml).every((b) => b.startsWith('BEGIN:VCALENDAR')), 'Block beginnt nicht mit dem Kalender');
+  const bl = kalender.calendarData(xml).flatMap((b) => kalender.parseIcs(b));
+  assert.deepStrictEqual(bl.map((x) => [x.uid, x.titel]), [['h1', 'A & B \u{1F600}'], ['h2', '(ohne Titel)']], 'CalDAV ' + JSON.stringify(bl.map((x) => [x.uid, x.titel])));
+  // Offenes Element ohne Ende: kein quadratischer Suchlauf.
+  const t1 = Date.now();
+  assert.deepStrictEqual(kalender.calendarData('<c:calendar-data>'.repeat(200000)), []);
+  assert.ok(Date.now() - t1 < 500, 'calendarData braucht ' + (Date.now() - t1) + ' ms');
+}
+
+function testKalenderKonten() {
+  const k = kalender.konten([
+    { id: 'privat', name: 'Privat', art: 'ics', url: 'webcal://kalender.example/x.ics' },
+    { id: 'Privat 2', name: 'x', art: 'ics', url: 'https://a/b' },
+    { id: 'arbeit', name: 'Arbeit', art: 'caldav', url: 'http://nextcloud.example/dav/', benutzer: 'ich', passwortEnvVar: 'KAL_PW' },
+    { id: 'ftp', name: 'x', art: 'ftp', url: 'https://a/b' },
+    { id: 'privat', name: 'doppelt', art: 'ics', url: 'https://a/b' },
+    'kaputt',
+  ]);
+  assert.deepStrictEqual(k.gueltig.map((x) => [x.id, x.url]), [['privat', 'https://kalender.example/x.ics']], 'gueltig ' + JSON.stringify(k.gueltig));
+  // Gegenprobe: CalDAV ueber http zulassen -> 2 gueltige, 4 Fehler.
+  assert.strictEqual(k.fehler.length, 5, 'Fehler ' + JSON.stringify(k.fehler));
+  assert.ok(k.fehler.some((f) => /arbeit.*https/.test(f)), 'CalDAV ohne https nicht abgelehnt');
+  assert.ok(!JSON.stringify(k.fehler).includes('nextcloud.example/dav'), 'Fehlertext verraet die Adresse');
+  assert.deepStrictEqual(kalender.konten(undefined), { gueltig: [], fehler: [] });
+  assert.strictEqual(kalender.konten({}).fehler.length, 1, 'kalender als Objekt nicht gemeldet');
+}
+
+function testWocheTermine() {
+  const zeit = require('../zeit');
+  const db = dbmod.open(':memory:');
+  openDbs.push(db);
+  kalender.speichereTermin(db, { titel: 'Kundentermin', art: 'meeting', start: '2026-08-18T09:00:00.000Z', ende: '2026-08-18T10:00:00.000Z' });
+  db.prepare(`INSERT INTO termin (kalender_id, uid, titel, start, ende, ganztag, art, quelle, aktualisiert_am)
+    VALUES ('privat', 'u1', 'Urlaub', '2026-08-19T00:00:00.000Z', '2026-08-20T00:00:00.000Z', 1, 'meeting', 'kalender', '2026-08-18')`).run();
+  const w = zeit.woche(db, '2026-08-17', Date.UTC(2026, 7, 20, 12));
+  const n = w.tage.map((t) => (t.termine || []).length);
+  // Gegenprobe: termine nicht je Tag filtern -> jeder Tag hat 2.
+  assert.deepStrictEqual(n, [0, 1, 1, 0, 0, 0, 0], 'Termine je Tag ' + JSON.stringify(n));
+  assert.deepStrictEqual([w.tage[1].termine[0].titel, w.tage[1].termine[0].quelle], ['Kundentermin', 'lokal']);
+  // Monat bleibt schlank: keine Terminlisten.
+  assert.ok(!('termine' in zeit.monat(db, { from: '2026-08-01', to: '2026-08-31' }).tage[0]), 'Monat traegt Terminlisten');
+  // Lokal: Pruefungen.
+  assert.throws(() => kalender.speichereTermin(db, { titel: ' ', art: 'meeting', start: '2026-08-18T09:00:00Z', ende: '2026-08-18T10:00:00Z' }), /Titel fehlt/);
+  assert.throws(() => kalender.speichereTermin(db, { titel: 'x', art: 'meeting', start: '2026-08-18T10:00:00Z', ende: '2026-08-18T09:00:00Z' }), /Ende liegt vor Start/);
+  assert.throws(() => kalender.speichereTermin(db, { titel: 'x', art: 'party', start: '2026-08-18T09:00:00Z', ende: '2026-08-18T10:00:00Z' }), /Art: meeting oder blocker/);
+  assert.throws(() => kalender.loescheTermin(db, { kalender_id: 'privat', uid: 'u1' }), /Kalendertermine werden nur gelesen/);
+  assert.throws(() => kalender.speichereTermin(db, { kalender_id: 'privat', uid: 'u1', titel: 'x', art: 'meeting', start: '2026-08-18T09:00:00Z', ende: '2026-08-18T10:00:00Z' }), /Kalendertermine werden nur gelesen/);
+  assert.throws(() => kalender.setzeZiel(db, { kalender_id: 'privat', uid: 'u1', ziel_art: 'xx', ziel_schluessel: 'y' }), /Zielart unbekannt/);
+  // Datum, das es nicht gibt: Fehler statt NaN-Zeitraum.
+  assert.throws(() => kalender.termine(db, { from: '2026-13-45', to: '2026-12-31' }), /from: Datum/);
+  assert.throws(() => kalender.termine(db, { from: '2026-02-01', to: '2026-02-30' }), /to: Datum/);
+  const eigen = db.prepare("SELECT uid FROM termin WHERE quelle = 'lokal'").get().uid;
+  kalender.loescheTermin(db, { kalender_id: 'lokal', uid: eigen });
+  assert.strictEqual(db.prepare("SELECT COUNT(*) AS n FROM termin WHERE quelle = 'lokal'").get().n, 0, 'lokaler Termin nicht geloescht');
+}
+
+async function testKalenderRouten() {
+  const srv = require('../server');
+  const lauscht = srv.server.listening;
+  if (!lauscht) await new Promise((ok) => srv.server.listen(0, '127.0.0.1', ok));
+  const url = (p) => `http://127.0.0.1:${srv.server.address().port}${p}`;
+  const post = async (p, body) => {
+    const r = await fetch(url(p), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    return [r.status, (await r.json()).error];
+  };
+  try {
+    // Nur Ablehnungen: der Server im Selfcheck arbeitet auf der echten Datenbank.
+    for (const [p, body, re] of [
+      ['/api/termin', { titel: '', art: 'meeting', start: '2026-08-18T09:00:00Z', ende: '2026-08-18T10:00:00Z' }, /Titel fehlt/],
+      ['/api/termin', { kalender_id: 'privat', uid: 'x', titel: 'x', art: 'meeting', start: '2026-08-18T09:00:00Z', ende: '2026-08-18T10:00:00Z' }, /nur gelesen/],
+      ['/api/termin-loeschen', { kalender_id: 'privat', uid: 'x' }, /nur gelesen/],
+      ['/api/termin-ziel', { kalender_id: 'lokal', uid: 'gibt-es-nicht', ziel_art: 'projekt', ziel_schluessel: 'X' }, /Termin nicht gefunden/],
+      ['/api/termin-ziel', { kalender_id: 'lokal', uid: 'x', ziel_art: 'xx', ziel_schluessel: 'X' }, /Zielart unbekannt/],
+      ['/api/kalender-sync', { id: 'gibt-es-nicht' }, /Kalender nicht gefunden/],
+    ]) {
+      const [s, e] = await post(p, body);
+      assert.deepStrictEqual([s, re.test(e)], [400, true], p + ': ' + s + ' ' + e);
+    }
+    let r = await fetch(url('/api/termine?from=gestern&to=2026-08-31'));
+    assert.strictEqual(r.status, 400, 'termine mit kaputtem Datum: ' + r.status);
+    r = await fetch(url('/api/termine?from=2026-08-01&to=2026-08-31'));
+    assert.deepStrictEqual([r.status, Array.isArray((await r.json()).termine)], [200, true], 'GET /api/termine');
+    r = await fetch(url('/api/kalender'));
+    const k = await r.json();
+    assert.deepStrictEqual([r.status, Array.isArray(k.konten), Array.isArray(k.fehler)], [200, true, true], 'GET /api/kalender ' + JSON.stringify(k));
+    r = await fetch(url('/api/zeit/woche?montag=2026-08-17'));
+    assert.ok((await r.json()).tage.every((t) => Array.isArray(t.termine)), 'Woche ohne termine');
+  } finally {
+    if (!lauscht) await new Promise((ok) => srv.server.close(ok));
+  }
+}
+
+// Termin direkt in die Tabelle: Erinnerung und Workload lesen nur, woher er kommt ist egal.
+function termin(db, uid, art, start, ende, ziel = [null, null], ganztag = 0) {
+  db.prepare(`INSERT INTO termin (kalender_id, uid, titel, start, ende, ganztag, art, quelle, ziel_art, ziel_schluessel, aktualisiert_am)
+    VALUES ('privat', ?, ?, ?, ?, ?, ?, 'kalender', ?, ?, '2026-08-01')`).run(uid, 'Titel ' + uid, start, ende, ganztag, art, ziel[0], ziel[1]);
+}
+
+function testErinnerungFall() {
+  const basis = Date.UTC(2026, 7, 18, 10, 0, 0);
+  const { db, aktiv, t } = zeitDb(basis);
+  const s = (sek) => new Date(basis + sek * 1000).toISOString();
+  db.prepare("INSERT INTO kontakte (id, firma, erstellt_am) VALUES (7, 'Beispielkunde', '2026-08-01')").run();
+  db.prepare("INSERT INTO projekt_kontakt (projekt, kontakt_id) VALUES ('P4', 7)").run();
+  termin(db, 'a', 'blocker', s(-20), t(60), ['vorgang', 'PROJ-1']);
+  termin(db, 'b', 'blocker', s(-30), t(60), ['projekt', 'P2']);
+  termin(db, 'c', 'blocker', s(-40), t(60), ['vorgang', 'PROJ-9']);
+  termin(db, 'd', 'blocker', s(-50), t(60), ['kunde', '7']);
+  termin(db, 'e', 'blocker', s(-10), t(60));                       // ohne Ziel: nichts vergleichbar
+  termin(db, 'meeting', 'meeting', s(-10), t(60), ['vorgang', 'PROJ-1']);
+  termin(db, 'alt', 'blocker', t(-10), t(60), ['vorgang', 'PROJ-1']);
+  termin(db, 'spaeter', 'blocker', t(1), t(60), ['vorgang', 'PROJ-1']);
+  termin(db, 'ganztag', 'blocker', '2026-08-18T00:00:00.000Z', '2026-08-19T00:00:00.000Z', ['vorgang', 'PROJ-1'], 1);
+  aktiv('s1', -2, 'P1', 'PROJ-1', 1);          // du tippst am selben Vorgang
+  aktiv('s2', -1, 'P2', null);                  // Claude arbeitet allein am Projekt
+  aktiv('s3', -1, 'P3', null, 1);               // Eingaben, aber anderes Projekt
+  aktiv('s4', -10, 'P9', 'PROJ-9', 1);          // zu lange her
+  aktiv('s5', -3, 'P4', null, 1);               // Projekt des Kunden
+  const neu = kalender.erinnerungen(db, { jetzt: basis });
+  const fall = Object.fromEntries(neu.map((h) => [h.termin.uid, h.fall]));
+  // Gegenprobe: Ziel nicht vergleichen -> b wird claude (s3), c/e werden claude.
+  // Gegenprobe: 5-Minuten-Grenze weg -> c wird claude (s4).
+  // Gegenprobe: art nicht pruefen -> meeting erscheint; ganztag nicht pruefen -> ganztag erscheint.
+  assert.deepStrictEqual(fall, { a: 'claude', b: 'begleiten', c: 'manuell', d: 'claude', e: 'manuell' }, 'Faelle ' + JSON.stringify(fall));
+  const hinweise = kalender.hinweise(db, { jetzt: basis });
+  assert.strictEqual(hinweise.length, 5, 'Hinweisliste ' + hinweise.length);
+  assert.ok(hinweise.every((h) => h.seit === new Date(basis).toISOString() && h.termin.kalender_id === 'privat'), 'seit/Schluessel fehlt');
+  // Genau einmal: Gegenprobe "erinnert_am IS NULL" weg -> zweiter Takt erinnert wieder.
+  assert.deepStrictEqual(kalender.erinnerungen(db, { jetzt: basis + 30000 }), [], 'zweiter Takt erinnert erneut');
+  assert.strictEqual(kalender.hinweise(db, { jetzt: basis + 30000 }).length, 5, 'zweiter Takt hat Hinweise verdoppelt');
+  const gesetzt = db.prepare('SELECT uid FROM termin WHERE erinnert_am IS NOT NULL ORDER BY uid').all().map((r) => r.uid);
+  assert.deepStrictEqual(gesetzt, ['a', 'b', 'c', 'd', 'e'], 'erinnert_am ' + JSON.stringify(gesetzt));
+  // Ein geratenes Ziel ist nur ein Vorschlag: nichts gebucht.
+  assert.strictEqual(db.prepare('SELECT COUNT(*) AS n FROM zeit_eintrag').get().n, 0, 'Erinnerung hat gebucht');
+  assert.strictEqual(db.prepare('SELECT COUNT(*) AS n FROM termin WHERE gebucht_eintrag_id IS NOT NULL').get().n, 0, 'gebucht_eintrag_id gesetzt');
+  // Wegklicken nimmt genau einen; zweimal ist kein Fehler (zwei offene Tabs).
+  const schluessel = { kalender_id: hinweise[0].termin.kalender_id, uid: hinweise[0].termin.uid };
+  assert.deepStrictEqual(kalender.hinweisWeg(db, schluessel), { ok: true, weg: true });
+  assert.deepStrictEqual(kalender.hinweisWeg(db, schluessel), { ok: true, weg: false });
+  assert.strictEqual(kalender.hinweise(db, { jetzt: basis }).length, 4, 'Wegklicken');
+  assert.throws(() => kalender.hinweisWeg(db, { uid: 5 }), /Termin nicht gefunden/);
+  // Ein Termin ohne Erinnerung laesst sich nicht wegklicken (kein stilles ok).
+  assert.deepStrictEqual(kalender.hinweisWeg(db, { kalender_id: 'privat', uid: 'spaeter' }), { ok: true, weg: false });
+  // Neustart: der Hinweis haengt am Termin, nicht am Prozess.
+  assert.strictEqual(kalender.hinweise(db, { jetzt: basis + 60000 }).length, 4, 'Hinweise nach Neustart');
+  // Andere Datenbank, eigene Liste (vor dem Aufraeumen, sonst ist jede Liste leer).
+  assert.strictEqual(kalender.hinweise(zeitDb(basis).db, { jetzt: basis }).length, 0, 'Hinweise zwischen Datenbanken geteilt');
+  // Nach dem Terminende bleibt der Hinweis bis zum Wegklicken stehen (sonst geht eine
+  // Erinnerung im Hintergrund-Tab verloren), hoechstens einen Tag.
+  // Gegenprobe: Filter wieder auf "ende > jetzt" -> erste Pruefung rot; ohne Tagesgrenze -> zweite rot.
+  assert.strictEqual(kalender.hinweise(db, { jetzt: basis + 61 * 60000 }).length, 4, 'Hinweis verschwindet mit dem Terminende');
+  assert.strictEqual(kalender.hinweise(db, { jetzt: basis + 86400000 + 1000 }).length, 0, 'Hinweis bleibt laenger als einen Tag');
+  // Ganztaegig beginnt um Mitternacht: auch dann keine Erinnerung (Urlaub ist kein Blocker-Beginn).
+  termin(db, 'ganztag2', 'blocker', '2026-08-19T00:00:00.000Z', '2026-08-20T00:00:00.000Z', ['vorgang', 'PROJ-1'], 1);
+  assert.deepStrictEqual(kalender.erinnerungen(db, { jetzt: Date.UTC(2026, 7, 19, 0, 0, 30) }), [], 'ganztaegiger Blocker erinnert');
+  // Pruefung scheitert (hier: activity fehlt): trotzdem ein Hinweis, Fall manuell,
+  // nie "erinnert" ohne Hinweis. Gegenprobe: Fehler durchreichen -> Test rot.
+  const kaputt = zeitDb(basis).db;
+  termin(kaputt, 'k', 'blocker', s(-5), t(60), ['vorgang', 'PROJ-1']);
+  kaputt.exec('DROP TABLE activity');
+  const fehlerVorher = console.error;
+  console.error = () => {};
+  let h;
+  try { h = kalender.erinnerungen(kaputt, { jetzt: basis }); } finally { console.error = fehlerVorher; }
+  assert.deepStrictEqual(h.map((x) => x.fall), ['manuell'], 'Rueckfall ' + JSON.stringify(h));
+  assert.strictEqual(kalender.hinweise(kaputt, { jetzt: basis }).length, 1, 'Rueckfall ohne gespeicherten Hinweis');
+}
+
+// Ein verschobener Blocker wird zur neuen Zeit wieder erinnert, ein unveraenderter nicht.
+async function testErinnerungVerschoben() {
+  const basis = Date.UTC(2026, 7, 18, 10, 0, 0);
+  const db = dbmod.open(':memory:');
+  openDbs.push(db);
+  const konto = { id: 'privat', name: 'Privat', art: 'ics', url: 'https://kalender.invalid/geheim.ics' };
+  const ics = (beginn) => 'BEGIN:VCALENDAR\nVERSION:2.0\nBEGIN:VEVENT\nUID:fokus-1\nDTSTART:' + beginn +
+    '\nDTEND:20260818T120000Z\nSUMMARY:Fokus\nEND:VEVENT\nEND:VCALENDAR\n';
+  const sync = (beginn, jetzt) => kalender.sync(db, konto, { jetzt, holen: async () => kalender.parseIcs(ics(beginn)) });
+  await sync('20260818T095950Z', basis);
+  const lokal = kalender.speichereTermin(db, { titel: 'Eigener Fokus', art: 'blocker', start: '2026-08-18T09:59:55.000Z', ende: '2026-08-18T12:00:00.000Z' });
+  assert.strictEqual(kalender.erinnerungen(db, { jetzt: basis }).length, 2, 'erste Erinnerung');
+  // Gleicher Beginn: bleibt erinnert. Gegenprobe: immer zuruecksetzen -> zweite Erinnerung.
+  await sync('20260818T095950Z', basis + 30000);
+  kalender.speichereTermin(db, { uid: lokal.uid, titel: 'Eigener Fokus, neu benannt', art: 'blocker', start: lokal.start, ende: lokal.ende });
+  assert.deepStrictEqual(kalender.erinnerungen(db, { jetzt: basis + 30000 }), [], 'unveraenderter Beginn erinnert erneut');
+  // Verschoben: Hinweis weg, zur neuen Zeit wieder da. Gegenprobe: Ruecksetzen fehlt -> keine zweite Erinnerung.
+  await sync('20260818T103000Z', basis + 60000);
+  kalender.speichereTermin(db, { uid: lokal.uid, titel: 'Eigener Fokus', art: 'blocker', start: '2026-08-18T10:30:05.000Z', ende: lokal.ende });
+  assert.strictEqual(kalender.hinweise(db, { jetzt: basis + 60000 }).length, 0, 'Hinweis zum alten Beginn bleibt');
+  const neu = kalender.erinnerungen(db, { jetzt: Date.UTC(2026, 7, 18, 10, 30, 10) });
+  assert.deepStrictEqual(neu.map((h) => h.termin.uid).sort(), ['fokus-1', lokal.uid].sort(), 'zweite Erinnerung ' + JSON.stringify(neu));
+}
+
+// Restkapazitaet heute (Live „Du“): Tagessoll − Arbeitszeit − was an Terminen heute noch ansteht.
+// Vergangene Termine zaehlen nicht mehr (die Zeit steckt schon in der Arbeitszeit oder ist vorbei).
+function testRestkapazitaet() {
+  const zeit = require('../zeit');
+  const jetzt = Date.UTC(2026, 7, 19, 12);
+  const { db } = zeitDb(jetzt);
+  const h = (std, min = 0) => new Date(Date.UTC(2026, 7, 19, std, min)).toISOString();
+  eintrag(db, { start: h(8), ende: h(9) });                          // 60 Min Arbeitszeit
+  termin(db, 'vorbei', 'meeting', h(10), h(11));                     // vorbei: zaehlt nicht
+  termin(db, 'laeuft', 'blocker', h(11, 30), h(12, 30));             // noch 30 Min
+  termin(db, 'spaeter', 'meeting', h(14), h(15, 30));                // 90 Min
+  termin(db, 'doppelt', 'blocker', h(15), h(16));                    // ueberlappt: nur 30 Min mehr
+  termin(db, 'morgen', 'meeting', h(33), h(34));                     // anderer Tag
+  const w = mitConfig({ tagessollStunden: 8 }, () => zeit.workload(db, jetzt));
+  // Gegenprobe: ohne Kappen auf jetzt -> 'vorbei' und die erste halbe Stunde von 'laeuft' zaehlen mit.
+  assert.deepStrictEqual(w.heute, { tag: '2026-08-19', soll_min: 480, arbeitszeit_min: 60, termine_rest_min: 150, rest_min: 270 }, 'heute ' + JSON.stringify(w.heute));
+  // Plausibel: nie negativ, nie ueber dem Soll.
+  const voll = mitConfig({ tagessollStunden: 1 }, () => zeit.workload(db, jetzt));
+  assert.strictEqual(voll.heute.rest_min, 0, 'Restkapazitaet negativ statt 0: ' + JSON.stringify(voll.heute));
+  assert.ok(w.heute.rest_min <= w.heute.soll_min, 'Restkapazitaet ueber dem Soll');
+}
+
+// Schalter "Bei Beginn erinnern": aus = kein Hinweis; beim Aendern ohne Angabe bleibt er stehen.
+function testErinnernSchalter() {
+  const basis = Date.UTC(2026, 7, 18, 10, 0, 0);
+  const { db, t } = zeitDb(basis);
+  const s = (sek) => new Date(basis + sek * 1000).toISOString();
+  const still = kalender.speichereTermin(db, { titel: 'Still', art: 'blocker', start: s(-20), ende: t(60), erinnern: false });
+  const laut = kalender.speichereTermin(db, { titel: 'Laut', art: 'blocker', start: s(-20), ende: t(60) });
+  assert.deepStrictEqual([still.erinnern, laut.erinnern], [0, 1], 'erinnern gespeichert ' + JSON.stringify([still.erinnern, laut.erinnern]));
+  // Gegenprobe: Waechter "erinnern = 1" weg -> beide erinnert.
+  assert.deepStrictEqual(kalender.erinnerungen(db, { jetzt: basis }).map((h) => h.termin.uid), [laut.uid], 'Blocker ohne Erinnern erinnert');
+  // Umbenennen ohne erinnern: bleibt aus. Gegenprobe: Vorgabe 1 beim Aendern -> wieder an.
+  const umbenannt = kalender.speichereTermin(db, { uid: still.uid, titel: 'Still, neu', art: 'blocker', start: still.start, ende: still.ende });
+  assert.strictEqual(umbenannt.erinnern, 0, 'Aendern ohne Angabe schaltet Erinnern wieder ein');
+  assert.throws(() => kalender.speichereTermin(db, { titel: 'X', art: 'blocker', start: t(1), ende: t(60), erinnern: 'ja' }), /Erinnern: ja oder nein/);
+  // Kalendertermine (Abgleich) erinnern wie bisher.
+  termin(db, 'k', 'blocker', s(-10), t(60));
+  assert.strictEqual(db.prepare("SELECT erinnern FROM termin WHERE uid = 'k'").get().erinnern, 1, 'Kalenderblocker ohne Vorgabe');
+}
+
+// "+ buchen" am Termin-Geist: Eintrag und Termin kennen sich, zweimal buchen geht nicht,
+// Loeschen gibt den Termin frei. Nur Meetings bekommen die Parallelregel (kalender_uid).
+function testTerminBuchen() {
+  const zeit = require('../zeit');
+  const { db } = zeitDb();
+  termin(db, 'm', 'meeting', '2026-08-18T14:00:00.000Z', '2026-08-18T15:00:00.000Z');
+  termin(db, 'b', 'blocker', '2026-08-18T16:00:00.000Z', '2026-08-18T17:00:00.000Z');
+  const e = eintrag(db, { ende: '2026-08-18T15:00:00.000Z', termin: { kalender_id: 'privat', uid: 'm' } });
+  const lies = (uid) => db.prepare('SELECT gebucht_eintrag_id FROM termin WHERE uid = ?').get(uid).gebucht_eintrag_id;
+  // Gegenprobe: UPDATE weglassen -> gebucht_eintrag_id bleibt leer.
+  assert.strictEqual(lies('m'), e.id, 'Termin kennt den Eintrag nicht');
+  assert.strictEqual(e.kalender_uid, 'm', 'Meeting ohne kalender_uid');
+  // Gegenprobe: Pruefung auf schon gebucht weg -> zweiter Eintrag entsteht.
+  assert.throws(() => eintrag(db, { ende: '2026-08-18T15:00:00.000Z', termin: { kalender_id: 'privat', uid: 'm' } }), /schon gebucht/);
+  assert.strictEqual(db.prepare('SELECT COUNT(*) AS n FROM zeit_eintrag').get().n, 1, 'zweiter Eintrag trotz Fehler');
+  // Blocker: verknuepft, aber ohne Parallelregel.
+  const b = eintrag(db, { start: '2026-08-18T16:00:00.000Z', ende: '2026-08-18T17:00:00.000Z', termin: { kalender_id: 'privat', uid: 'b' } });
+  assert.deepStrictEqual([lies('b'), b.kalender_uid], [b.id, null], 'Blocker ' + JSON.stringify([lies('b'), b.kalender_uid]));
+  assert.throws(() => eintrag(db, { termin: { kalender_id: 'privat', uid: 'gibts-nicht' } }), /Termin nicht gefunden/);
+  assert.throws(() => eintrag(db, { termin: 'm' }), /Termin nicht gefunden/);
+  assert.throws(() => zeit.speichere(db, { ...e, termin: { kalender_id: 'privat', uid: 'b' } }, e.id), /nur beim Anlegen/);
+  // Vorschau kennt die Parallelregel schon vor dem Buchen.
+  termin(db, 'm2', 'meeting', '2026-08-18T18:00:00.000Z', '2026-08-18T19:00:00.000Z');
+  const v = zeit.vorschau(db, { ziel_art: 'vorgang', ziel_schluessel: 'PROJ-1', start: '2026-08-18T18:00:00.000Z', ende: '2026-08-18T19:00:00.000Z',
+    taetigkeit: 'Entwicklung', termin: { kalender_id: 'privat', uid: 'm2' } });
+  assert.strictEqual(v.kalender_uid, 'm2', 'Vorschau ohne kalender_uid');
+  assert.strictEqual(lies('m2'), null, 'Vorschau hat gebucht');
+  // Loeschen gibt frei; danach laesst sich wieder buchen. Gegenprobe: Freigabe weg -> "schon gebucht" bleibt? Nein:
+  // der Eintrag fehlt dann, deshalb prueft der Test die Spalte direkt.
+  // Verschwindet der Eintrag auf anderem Weg (Rueckgaengig nach Timer-Stopp), gilt der Termin wieder als offen.
+  // Gegenprobe: CASE/EXISTS in woche weg -> Geist bliebe aus; lade() in terminVon weg -> "schon gebucht".
+  db.prepare('DELETE FROM zeit_eintrag WHERE id = ?').run(b.id);
+  const wb = zeit.woche(db, '2026-08-17').tage.find((x) => x.tag === '2026-08-18').termine.find((x) => x.uid === 'b');
+  assert.strictEqual(wb.gebucht_eintrag_id, null, 'verwaiste Buchung gilt als gebucht');
+  assert.ok(eintrag(db, { start: '2026-08-18T16:00:00.000Z', ende: '2026-08-18T17:00:00.000Z', termin: { kalender_id: 'privat', uid: 'b' } }).id, 'verwaister Termin nicht buchbar');
+  zeit.loesche(db, e.id);
+  assert.strictEqual(lies('m'), null, 'Loeschen gibt den Termin nicht frei');
+  assert.ok(eintrag(db, { ende: '2026-08-18T15:00:00.000Z', termin: { kalender_id: 'privat', uid: 'm' } }).id, 'neu buchen nach Loeschen');
+  // Ein Termin, der noch nicht begonnen hat, laesst sich nicht buchen (auch nicht per direktem POST).
+  termin(db, 'spaeter', 'meeting', new Date(Date.now() + 3600e3).toISOString(), new Date(Date.now() + 7200e3).toISOString());
+  assert.throws(() => eintrag(db, { termin: { kalender_id: 'privat', uid: 'spaeter' } }), /noch nicht begonnen/);
+  // Die Woche liefert, was die Geister brauchen.
+  const w = zeit.woche(db, '2026-08-17');
+  const tm = w.tage.find((x) => x.tag === '2026-08-18').termine.find((x) => x.uid === 'm');
+  assert.ok(tm && tm.gebucht_eintrag_id && tm.ziel_von_hand === 0 && tm.erinnern === 1, 'Woche: ' + JSON.stringify(tm));
+}
+
+// Fehlt ein gebuchter Kalendertermin im Feed, loescht der Abgleich ihn nicht: kaeme dieselbe
+// uid zurueck, waere sie sonst wieder buchbar (Doppelabrechnung). Ungebuchte gehen wie bisher.
+async function testAbgleichBehaeltGebuchte() {
+  const { db } = zeitDb();
+  const konto = { id: 'privat', name: 'Privat', art: 'ics', url: 'https://kalender.invalid/geheim.ics' };
+  const ev = (uid, h) => 'BEGIN:VEVENT\nUID:' + uid + '\nDTSTART:20260818T' + h + '0000Z\nDTEND:20260818T' + h + '3000Z\nSUMMARY:T ' + uid + '\nEND:VEVENT\n';
+  const feed = (...e) => async () => kalender.parseIcs('BEGIN:VCALENDAR\nVERSION:2.0\n' + e.join('') + 'END:VCALENDAR\n');
+  const jetzt = Date.UTC(2026, 7, 18, 20);
+  await kalender.sync(db, konto, { jetzt, holen: feed(ev('a', '14'), ev('b', '15'), ev('c', '16')) });
+  eintrag(db, { start: '2026-08-18T14:00:00.000Z', ende: '2026-08-18T14:30:00.000Z', termin: { kalender_id: 'privat', uid: 'a' } });
+  await kalender.sync(db, konto, { jetzt: jetzt + 60000, holen: feed(ev('c', '16')) });
+  const da = db.prepare("SELECT uid FROM termin WHERE kalender_id = 'privat' ORDER BY uid").all().map((r) => r.uid);
+  // Gegenprobe: Waechter "gebucht_eintrag_id IS NULL" weg -> a verschwindet.
+  assert.deepStrictEqual(da, ['a', 'c'], 'nach Abgleich ' + JSON.stringify(da));
+  await kalender.sync(db, konto, { jetzt: jetzt + 120000, holen: feed(ev('a', '14'), ev('c', '16')) });
+  assert.throws(() => eintrag(db, { start: '2026-08-18T14:00:00.000Z', ende: '2026-08-18T14:30:00.000Z', termin: { kalender_id: 'privat', uid: 'a' } }), /schon gebucht/);
+}
+
+// ICS-Kalender aus der Oberflaeche (Owner-Entscheidung 12.10.2026): pruefen, Probe vor
+// dem Speichern, gespeichert wird nur ueber speichern(), die Adresse kommt nie zurueck.
+async function testKalenderVerbinden() {
+  const { db } = zeitDb();
+  const jetzt = Date.UTC(2026, 7, 18, 20);
+  const geheim = 'https://calendar.google.com/calendar/ical/x%40beispiel.de/private-0a1b2c/basic.ics';
+  const feed = async () => kalender.parseIcs('BEGIN:VCALENDAR\nVERSION:2.0\nBEGIN:VEVENT\nUID:t1\nDTSTART:20260819T090000Z\nDTEND:20260819T100000Z\nSUMMARY:Daily\nEND:VEVENT\nEND:VCALENDAR\n');
+  let gespeichert = null;
+  const speichern = async (l) => { gespeichert = l; };
+  const vorher = kalender.KONTEN.gueltig;
+  try {
+    // Eingaben: leer, Leerzeichen, kein Protokoll, zu lang -> abgelehnt, nichts gespeichert.
+    for (const [d, re] of [[{}, /Adresse fehlt/], [{ url: 'https://a b.de/x.ics' }, /keine Kalender-Adresse/], [{ url: 'ftp://x.de/a.ics' }, /https/],
+      [{ url: 'https://x.de/' + 'a'.repeat(2001) }, /keine Kalender-Adresse/], [{ url: geheim, name: 'x'.repeat(81) }, /80 Zeichen/],
+      [{ url: 'http://x.de/a.ics' }, /Nur https/]]) {
+      await assert.rejects(kalender.verbinde(db, d, { roh: [], speichern, holen: feed, jetzt }), re, JSON.stringify(d).slice(0, 60));
+    }
+    // Gescheiterte Probe: nichts gespeichert, Text ohne Adresse. Gegenprobe: Probe weg -> gespeichert.
+    const kaputt = async () => { throw new kalender.KalenderFehler('HTTP 404'); };
+    await assert.rejects(kalender.verbinde(db, { url: geheim }, { roh: [], speichern, holen: kaputt, jetzt }), (e) => /nicht erreichbar: HTTP 404/.test(e.message) && !e.message.includes('private-'));
+    assert.strictEqual(gespeichert, null, 'gescheiterte Probe hat gespeichert');
+    // Erfolg: eine Zeile mehr, id aus dem Host, Termine sofort da.
+    const alt = [{ id: 'nextcloud', name: 'NC', art: 'caldav', url: 'https://cloud.beispiel.de/dav/', benutzer: 'u', passwortEnvVar: 'NC_PW' }];
+    const r = await kalender.verbinde(db, { url: geheim }, { roh: alt, speichern, holen: feed, jetzt });
+    assert.deepStrictEqual(gespeichert.map((k) => k.id), ['nextcloud', 'google'], 'Liste ' + JSON.stringify(gespeichert.map((k) => k.id)));
+    assert.strictEqual(gespeichert[1].url, geheim);
+    assert.strictEqual(db.prepare("SELECT COUNT(*) AS n FROM termin WHERE kalender_id = 'google'").get().n, 1, 'Termine nach dem Verbinden');
+    // Die Adresse geht nie zurueck: weder in der Antwort noch im Status.
+    assert.ok(!JSON.stringify(r).includes('private-') && !JSON.stringify(kalender.status(db)).includes('private-'), 'Adresse in Antwort oder Status');
+    assert.ok(kalender.KONTEN.gueltig.some((k) => k.id === 'google'), 'Konto nicht aktiv ohne Neustart');
+    // Doppelt (auch als webcal://) abgelehnt. Gegenprobe: Pruefung weg -> zweiter Eintrag.
+    await assert.rejects(kalender.verbinde(db, { url: geheim.replace('https://', 'webcal://') }, { roh: gespeichert, speichern, holen: feed, jetzt }), /schon verbunden/);
+    // Trennen: ungebuchte Termine weg, gebuchte bleiben. Gegenprobe: Waechter weg -> gebuchter weg.
+    db.prepare(`INSERT INTO termin (kalender_id, uid, titel, start, ende, ganztag, art, quelle, aktualisiert_am)
+      VALUES ('google', 't2', 'Alt', '2026-08-18T14:00:00.000Z', '2026-08-18T14:30:00.000Z', 0, 'meeting', 'kalender', '2026-08-18T20:00:00.000Z')`).run();
+    eintrag(db, { start: '2026-08-18T14:00:00.000Z', ende: '2026-08-18T14:30:00.000Z', termin: { kalender_id: 'google', uid: 't2' } });
+    const t = await kalender.trenne(db, { id: 'google' }, { roh: gespeichert, speichern });
+    assert.deepStrictEqual(gespeichert.map((k) => k.id), ['nextcloud'], 'nach Trennen');
+    assert.strictEqual(t.termine_entfernt, 1);
+    assert.deepStrictEqual(db.prepare("SELECT uid FROM termin WHERE kalender_id = 'google'").all().map((x) => x.uid), ['t2'], 'gebuchter Termin weg');
+    await assert.rejects(kalender.trenne(db, { id: 'google' }, { roh: gespeichert, speichern }), /nicht gefunden/);
+    // Neue id erbt keine alten Termine: "google" haengt noch an t2 -> "google-2".
+    const r2 = await kalender.verbinde(db, { url: geheim }, { roh: gespeichert, speichern, holen: feed, jetzt });
+    assert.strictEqual(r2.id, 'google-2', 'id ' + r2.id);
+    // Zwei gleichzeitig (zwei Tabs): nacheinander, also verschiedene Kennungen.
+    // Gegenprobe: seriell() weg -> beide bekommen "beispiel".
+    const db2 = zeitDb().db;
+    const langsam = async () => { await new Promise((r) => setTimeout(r, 30)); return feed(); };
+    const [p1, p2] = await Promise.all(['https://beispiel.de/a.ics', 'https://beispiel.de/b.ics']
+      .map((u) => kalender.verbinde(db2, { url: u }, { roh: [], speichern: async () => {}, holen: langsam, jetzt })));
+    assert.notStrictEqual(p1.id, p2.id, 'parallele Kennungen ' + p1.id + '/' + p2.id);
+  } finally {
+    kalender.setzeKonten(require('../config.json').kalender);
+    assert.ok(kalender.KONTEN.gueltig.length === vorher.length, 'KONTEN nicht zurueckgesetzt');
+  }
+}
+
+// "In Google Kalender oeffnen" legt vorlaeufig an (google_offen); kommt der Termin ueber
+// den Abgleich zurueck, wird zusammengefuehrt statt doppelt gezeigt (Owner-Befund 12.10.2026).
+async function testGoogleZusammenfuehren() {
+  const { db } = zeitDb();
+  const konto = { id: 'google', name: 'Google', art: 'ics', url: 'https://kalender.invalid/privat.ics' };
+  const ev = (uid, titel, s, e) => 'BEGIN:VEVENT\nUID:' + uid + '\nDTSTART:' + s + '\nDTEND:' + e + '\nSUMMARY:' + titel + '\nEND:VEVENT\n';
+  const feed = (...x) => async () => kalender.parseIcs('BEGIN:VCALENDAR\nVERSION:2.0\n' + x.join('') + 'END:VCALENDAR\n');
+  const jetzt = Date.UTC(2026, 7, 18, 8);
+  const lokal = (titel, start, ende, extra = {}) => kalender.speichereTermin(db, { titel, art: 'meeting', start, ende, google: true, ...extra }, { kontenDa: true });
+  // Ohne verbundenen Kalender kaeme nie etwas zurueck: dann gewoehnlich lokal.
+  // Gegenprobe: kontenDa ignorieren -> google_offen gesetzt.
+  assert.strictEqual(kalender.speichereTermin(db, { titel: 'Ohne Konto', art: 'meeting', start: '2026-08-21T09:00:00.000Z', ende: '2026-08-21T10:00:00.000Z', google: true }, { kontenDa: false }).google_offen, null, 'ohne Konto vorlaeufig');
+  const a = lokal('Abstimmung PROJ-1', '2026-08-19T06:00:00.000Z', '2026-08-19T07:00:00.000Z', { ziel_art: 'projekt', ziel_schluessel: 'P2', erinnern: false });
+  const b = lokal('Workshop', '2026-08-20T09:00:00.000Z', '2026-08-20T10:00:00.000Z');
+  // Feste uids: der falsche Kandidat (Review A) sortiert zuerst, ohne Titel-Vorrang griffe er.
+  const vorl = db.prepare(`INSERT INTO termin (kalender_id, uid, titel, start, ende, ganztag, art, quelle, ziel_von_hand, google_offen, aktualisiert_am)
+    VALUES ('lokal', ?, ?, '2026-08-20T13:00:00.000Z', '2026-08-20T14:00:00.000Z', 0, 'meeting', 'lokal', 1, ?, ?)`);
+  vorl.run('a-review', 'Review A', new Date().toISOString(), new Date().toISOString());
+  vorl.run('z-review', 'Review B', new Date().toISOString(), new Date().toISOString());
+  const c1 = { uid: 'a-review', start: '2026-08-20T13:00:00.000Z', ende: '2026-08-20T14:00:00.000Z' };
+  const c2 = { uid: 'z-review' };
+  const normal = kalender.speichereTermin(db, { titel: 'Daily', art: 'meeting', start: '2026-08-19T08:00:00.000Z', ende: '2026-08-19T08:15:00.000Z' });
+  assert.ok(a.google_offen && !normal.google_offen, 'google_offen');
+  // b ist gebucht, bevor Google zurueckkommt (Meeting hat begonnen).
+  const e = eintrag(db, { start: '2026-08-20T09:00:00.000Z', ende: '2026-08-20T10:00:00.000Z', termin: { kalender_id: 'lokal', uid: b.uid } });
+  const erg = await kalender.sync(db, konto, { jetzt: Date.UTC(2026, 7, 20, 11), holen: feed(
+    ev('g-a', 'Abstimmung PROJ-1', '20260819T060000Z', '20260819T070000Z'),
+    ev('g-b', 'Workshop Kunde', '20260820T090000Z', '20260820T100000Z'),        // Titel in Google geaendert, Zeit eindeutig
+    ev('g-c', 'Review B', '20260820T130000Z', '20260820T140000Z'),              // zwei Kandidaten: nur der gleichnamige
+    ev('g-d', 'Daily', '20260819T080000Z', '20260819T081500Z')) });             // normaler lokaler Termin bleibt
+  assert.strictEqual(erg.zusammengefuehrt, 3, 'zusammengefuehrt ' + erg.zusammengefuehrt);
+  const lokale = db.prepare("SELECT titel FROM termin WHERE kalender_id = 'lokal' ORDER BY titel").all().map((r) => r.titel);
+  // Gegenprobe: Zusammenfuehren weg -> alle lokal; Titel-Vorrang weg -> Review A statt B weg.
+  assert.deepStrictEqual(lokale, ['Daily', 'Ohne Konto', 'Review A'], 'lokal uebrig ' + JSON.stringify(lokale));
+  const ga = db.prepare("SELECT * FROM termin WHERE kalender_id = 'google' AND uid = 'g-a'").get();
+  assert.deepStrictEqual([ga.ziel_art, ga.ziel_schluessel, ga.ziel_von_hand, ga.erinnern], ['projekt', 'P2', 1, 0], 'Ziel/Erinnern nicht uebernommen');
+  // Die Buchung wandert mit: der Google-Termin ist gebucht, der Eintrag zeigt auf ihn.
+  const gb = db.prepare("SELECT gebucht_eintrag_id FROM termin WHERE kalender_id = 'google' AND uid = 'g-b'").get();
+  assert.strictEqual(gb.gebucht_eintrag_id, e.id, 'Buchung nicht uebernommen');
+  assert.strictEqual(db.prepare('SELECT kalender_uid FROM zeit_eintrag WHERE id = ?').get(e.id).kalender_uid, 'g-b', 'kalender_uid nicht umgehaengt');
+  assert.throws(() => eintrag(db, { start: '2026-08-20T09:00:00.000Z', ende: '2026-08-20T10:00:00.000Z', termin: { kalender_id: 'google', uid: 'g-b' } }), /schon gebucht/);
+  // 24 h ohne Treffer: nicht gefunden — aber nur im Abgleich-Horizont.
+  const spaet = lokal('Weit weg', '2027-06-30T09:00:00.000Z', '2027-06-30T10:00:00.000Z');
+  const ra = db.prepare("SELECT * FROM termin WHERE uid = ?").get(c1.uid);
+  const morgen = Date.parse(ra.google_offen) + 86400000 + 1000;
+  assert.strictEqual(kalender.googleFehlt(ra, Date.parse(ra.google_offen) + 3600000), false, 'nach 1 h schon nicht gefunden');
+  assert.strictEqual(kalender.googleFehlt(ra, morgen), true, 'nach 24 h nicht als fehlend');
+  // Gegenprobe: Horizont-Pruefung weg -> "Weit weg" gilt als fehlend.
+  assert.strictEqual(kalender.googleFehlt(db.prepare("SELECT * FROM termin WHERE uid = ?").get(spaet.uid), morgen), false, 'Termin ausserhalb des Horizonts als fehlend');
+  // Behalten nimmt die Markierung weg.
+  const behalten = kalender.speichereTermin(db, { uid: c1.uid, titel: 'Review A', art: 'meeting', start: c1.start, ende: c1.ende, google: false });
+  assert.strictEqual(behalten.google_offen, null, 'Behalten');
+  void jetzt; void c2;
+}
+
+// Google-Vorlage (R22): UTC-Format, Encoding, Gaeste kommagetrennt, ohne Gaeste kein add.
+function testGoogleVorlageUrl() {
+  const { googleVorlageUrl } = require('../public/app/kern.js');
+  const roh = googleVorlageUrl({ titel: 'Fokus & Review #1', start: '2026-08-18T14:00:00.000Z', ende: '2026-08-18T15:30:00.000Z',
+    details: 'NW-12 · c2invoice', gaeste: ['a@beispiel.de', 'b+x@beispiel.de'] });
+  // Wie encodeURIComponent: Leerzeichen %20, das + der Adresse %2B (Gegenprobe: replace weg -> "+" im Titel).
+  assert.ok(roh.includes('text=Fokus%20%26%20Review%20%231') && roh.includes('b%2Bx%40beispiel.de'), 'Kodierung ' + roh);
+  const u = new URL(roh);
+  assert.strictEqual(u.origin + u.pathname, 'https://calendar.google.com/calendar/render');
+  assert.strictEqual(u.searchParams.get('action'), 'TEMPLATE');
+  assert.strictEqual(u.searchParams.get('text'), 'Fokus & Review #1', 'Titel nicht kodiert');
+  assert.strictEqual(u.searchParams.get('dates'), '20260818T140000Z/20260818T153000Z', 'dates ' + u.searchParams.get('dates'));
+  assert.strictEqual(u.searchParams.get('details'), 'NW-12 · c2invoice');
+  assert.strictEqual(u.searchParams.get('add'), 'a@beispiel.de,b+x@beispiel.de', 'Gaeste ' + u.searchParams.get('add'));
+  const ohne = new URL(googleVorlageUrl({ titel: 'X', start: '2026-08-18T14:00:00.000Z', ende: '2026-08-18T15:00:00.000Z' }));
+  assert.ok(!ohne.searchParams.has('add') && !ohne.searchParams.has('details'), 'leere Parameter ' + ohne.search);
+}
+
+function testWorkload() {
+  const zeit = require('../zeit');
+  const db = dbmod.open(':memory:');
+  openDbs.push(db);
+  const h = (tag, std, min = 0) => new Date(Date.UTC(2026, 7, tag, std, min)).toISOString();
+  termin(db, 'm1', 'meeting', h(19, 9), h(19, 10));
+  termin(db, 'm2', 'meeting', h(19, 9, 30), h(19, 10, 30));      // ueberlappt m1: 90 Min, nicht 120
+  termin(db, 'b1', 'blocker', h(19, 10), h(19, 12));              // 30 Min schon Meeting: Blocker 90
+  termin(db, 'b2', 'blocker', h(20, 8), h(20, 17));               // 9 h: ueberbucht
+  termin(db, 'b3', 'blocker', h(21, 23), h(22, 1));               // ueber Mitternacht: Fr 60, Sa 60
+  termin(db, 'm3', 'meeting', h(22, 10), h(22, 11));              // Samstag
+  termin(db, 'f1', 'fremd', h(24, 9), h(24, 17));                 // fremd zaehlt nicht
+  termin(db, 'g1', 'meeting', h(24, 0), h(25, 0), [null, null], 1); // ganztaegig zaehlt nicht
+  termin(db, 'vor', 'meeting', h(18, 9), h(18, 10));              // vor dem Zeitraum
+  termin(db, 'nach', 'meeting', h(26, 9), h(26, 10));             // nach dem Zeitraum
+  const w = mitConfig({ tagessollStunden: 8 }, () => zeit.workload(db, Date.UTC(2026, 7, 19, 12)));
+  const zeile = (tag) => w.tage.find((t) => t.tag === tag);
+  assert.deepStrictEqual([w.von, w.bis, w.tage.length], ['2026-08-19', '2026-08-25', 7]);
+  // Gegenprobe: Summe statt Vereinigung -> meeting 120, blocker 120.
+  assert.deepStrictEqual([zeile('2026-08-19').meeting_min, zeile('2026-08-19').blocker_min, zeile('2026-08-19').belegt_min], [90, 90, 180], 'Mittwoch ' + JSON.stringify(zeile('2026-08-19')));
+  assert.deepStrictEqual([zeile('2026-08-20').belegt_min, zeile('2026-08-20').ueber_min], [540, 60], 'Donnerstag ' + JSON.stringify(zeile('2026-08-20')));
+  assert.deepStrictEqual([zeile('2026-08-21').blocker_min, zeile('2026-08-22').blocker_min, zeile('2026-08-22').meeting_min], [60, 60, 60], 'Mitternacht');
+  // Wochenende: kein Soll, aber auch nicht schon mit einer Stunde ueberbucht.
+  assert.deepStrictEqual([zeile('2026-08-22').soll_min, zeile('2026-08-22').ueber_min], [0, 0], 'Samstag ' + JSON.stringify(zeile('2026-08-22')));
+  assert.strictEqual(zeile('2026-08-24').belegt_min, 0, 'fremd/ganztaegig gezaehlt');
+  // Gegenprobe: Kapazitaet mit Wochenende -> 3360; belegt ohne Grenzen -> mehr als 900.
+  assert.deepStrictEqual(w.summe, { meeting_min: 150, blocker_min: 750, belegt_min: 900, kapazitaet_min: 2400, frei_min: 1500, ueberbucht_tage: 1, auslastung: 900 / 2400 },
+    'Summe ' + JSON.stringify(w.summe));
+  // Plausibilitaet: Auslastung ist ein Anteil, kein Prozentwert.
+  assert.ok(w.summe.auslastung > 0 && w.summe.auslastung < 1, 'Auslastung ' + w.summe.auslastung);
+  const leer = mitConfig({ tagessollStunden: 0 }, () => zeit.workload(db, Date.UTC(2026, 7, 19, 12)));
+  assert.strictEqual(leer.summe.auslastung, null, 'Tagessoll 0: Auslastung ' + leer.summe.auslastung);
+}
+
+async function testHinweisRouten() {
+  const srv = require('../server');
+  const lauscht = srv.server.listening;
+  if (!lauscht) await new Promise((ok) => srv.server.listen(0, '127.0.0.1', ok));
+  const url = (p) => `http://127.0.0.1:${srv.server.address().port}${p}`;
+  try {
+    let r = await fetch(url('/api/zeit-hinweise'));
+    assert.deepStrictEqual([r.status, Array.isArray((await r.json()).hinweise)], [200, true], 'GET /api/zeit-hinweise');
+    r = await fetch(url('/api/zeit-hinweis-weg'), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ uid: 5 }) });
+    assert.deepStrictEqual([r.status, /Termin nicht gefunden/.test((await r.json()).error)], [400, true], 'hinweis-weg mit Zahl');
+    r = await fetch(url('/api/zeit-hinweis-weg'), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ kalender_id: 'lokal', uid: 'gibt-es-nicht' }) });
+    assert.deepStrictEqual([r.status, (await r.json()).weg], [200, false], 'hinweis-weg unbekannt');
+    r = await fetch(url('/api/zeit/workload'));
+    const w = await r.json();
+    assert.deepStrictEqual([r.status, Array.isArray(w.tage) && w.tage.length, typeof w.summe], [200, 7, 'object'], 'GET /api/zeit/workload');
+  } finally {
+    if (!lauscht) await new Promise((ok) => srv.server.close(ok));
+  }
+}
+
+async function testZeitRouten() {
+  const srv = require('../server');
+  const lauscht = srv.server.listening;
+  if (!lauscht) await new Promise((ok) => srv.server.listen(0, '127.0.0.1', ok));
+  const url = (p) => `http://127.0.0.1:${srv.server.address().port}${p}`;
+  const post = async (p, body) => {
+    const r = await fetch(url(p), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    return [r.status, (await r.json()).error];
+  };
+  try {
+    let [s, e] = await post('/api/zeit', { ziel_art: 'xx' });
+    assert.deepStrictEqual([s, /Zielart unbekannt/.test(e)], [400, true], 'POST /api/zeit: ' + s + ' ' + e);
+    [s, e] = await post('/api/zeit', null);
+    assert.strictEqual(s, 400, 'POST /api/zeit mit null: ' + s);
+    [s, e] = await post('/api/zeit-loeschen', { id: 'abc' });
+    assert.deepStrictEqual([s, /Eintrag/.test(e)], [400, true], 'zeit-loeschen: ' + s + ' ' + e);
+    [s, e] = await post('/api/zeit/timer-start', { ziel_art: 'xx' });
+    assert.deepStrictEqual([s, /Zielart/.test(e)], [400, true], 'timer-start: ' + s + ' ' + e);
+    [s, e] = await post('/api/zeit/timer-wahl', { session_id: 's', wahl: 'halb' });
+    assert.deepStrictEqual([s, /Wahl: beides, claude, meine oder keins/.test(e)], [400, true], 'timer-wahl: ' + s + ' ' + e);
+    [s, e] = await post('/api/taetigkeitsarten', { name: '' });
+    assert.deepStrictEqual([s, /Name fehlt/.test(e)], [400, true], 'taetigkeitsarten: ' + s + ' ' + e);
+    [s, e] = await post('/api/taetigkeitsart-loeschen', { name: 'gibt es nicht' });
+    assert.deepStrictEqual([s, /nicht gefunden/.test(e)], [400, true], 'taetigkeitsart-loeschen: ' + s + ' ' + e);
+    [s, e] = await post('/api/zeit/vorschau', { ziel_art: 'xx' });
+    assert.deepStrictEqual([s, /Zielart unbekannt/.test(e)], [400, true], 'vorschau: ' + s + ' ' + e);
+    [s, e] = await post('/api/zeit/wahl', { eintrag_id: 1, session_id: 's', wahl: 'halb' });
+    assert.deepStrictEqual([s, /Wahl: beides, claude, meine oder keins/.test(e)], [400, true], 'wahl: ' + s + ' ' + e);
+    [s, e] = await post('/api/zeit/wahl', { eintrag_id: 'abc', session_id: 's', wahl: 'meine' });
+    assert.deepStrictEqual([s, /Eintrag nicht gefunden/.test(e)], [400, true], 'wahl ohne Eintrag: ' + s + ' ' + e);
+    let r = await fetch(url('/api/zeit/ueberlappung?id=abc'));
+    assert.strictEqual(r.status, 400, 'ueberlappung mit kaputter id: ' + r.status);
+    for (const pfad of ['/api/zeit/woche?montag=2026-08-18', '/api/zeit/monat?from=2026-01-01&to=2026-12-31',
+      '/api/zeit/ziele-tabelle?from=x&to=2026-08-31', '/api/zeit/analyse']) {
+      r = await fetch(url(pfad));
+      assert.strictEqual(r.status, 400, pfad + ' liefert ' + r.status);
+    }
+    r = await fetch(url('/api/zeit/woche?montag=2026-08-17'));
+    assert.strictEqual(r.status, 200, 'woche mit Montag: ' + r.status);
+    r = await fetch(url('/api/zeit/ziele?q=' + 'x'.repeat(101)));
+    assert.strictEqual(r.status, 400, 'zu lange Suche angenommen');
+    r = await fetch(url('/api/zeit?from=gestern'));
+    assert.strictEqual(r.status, 400, 'GET /api/zeit mit kaputtem Datum: ' + r.status);
+    for (const p of ['/api/zeit/timer', '/api/taetigkeitsarten', '/api/zeit?from=2026-08-01&to=2026-08-31']) {
+      r = await fetch(url(p));
+      assert.strictEqual(r.status, 200, p + ' liefert ' + r.status);
+    }
+  } finally {
+    if (!lauscht) await new Promise((ok) => srv.server.close(ok));
+  }
+}
+
+// --- Zeiterfassung (Block Z2): Ueberlappung mit Claude-Sitzungen -----------
+// Eine Minute zaehlt hoechstens einmal, ausser sie ist ausdruecklich parallel
+// (Meeting, Wahl "beides"). Abzug, Parallel und Kulanz stehen im Eintrag;
+// "meine"/"keins" nehmen der Sitzung genau die ueberlappenden Minuten.
+
+// Sitzung im Modell "eingaben": Fenster liegen eine halbe Pausenschwelle um
+// jede Eingabe. Eingaben im Abstand einer halben Schwelle ergeben genau ein
+// Fenster [vonMin, bisMin].
+function eingabenSitzung(zeile, session, vonMin, bisMin, projekt, ticket, gap = 5) {
+  const halb = gap / 2;
+  for (let m = vonMin + halb; m <= bisMin - halb + 1e-9; m += halb) zeile(session, m, projekt, ticket, 1);
+}
+// Sitzung im Modell "aktivitaet": Zeilen alle 2 Min ergeben den Abschnitt [vonMin, bisMin].
+function aktivSitzung(zeile, session, vonMin, bisMin, projekt, ticket) {
+  for (let m = vonMin; m <= bisMin; m += 2) zeile(session, m, projekt, ticket);
+}
+const VIERZEHN = 240;   // 14:00 bei zeitDb-Basis 10:00 UTC
+const ZWEI_STUNDEN = { start: '2026-08-18T14:00:00.000Z', ende: '2026-08-18T16:00:00.000Z' };
+const sitzungsZeit = (db, s) => metrics.activeSecondsByGroup(db, {}, { groupBy: 'session' })[s] || 0;
+
+// Abnahmefaelle aus dem Plan: Eintrag 14–16 Uhr, Sitzung 14:30–15:00.
+function testUeberlappungRegeln() {
+  mitRundung(5, () => {
+    // Eigene Zeit: der Mensch war am Geraet, die Minuten zaehlen nur einmal —
+    // gleich, ob die Sitzung denselben Vorgang hatte.
+    mitZeitmodell(5, 'eingaben', () => {
+      const { db, zeile } = zeitDb();
+      eingabenSitzung(zeile, 'sA', VIERZEHN + 30, VIERZEHN + 60, 'Projekt A', 'PROJ-1');
+      const e = eintrag(db, ZWEI_STUNDEN);
+      assert.strictEqual(e.abzug_min, 30, 'Abzug ' + e.abzug_min + ' statt 30 (Regel eigene)');
+      assert.strictEqual(e.gezaehlt_min, 90, 'gezaehlt ' + e.gezaehlt_min + ' statt 90');
+      assert.strictEqual(eintrag(db, { ...ZWEI_STUNDEN, ziel_schluessel: 'PROJ-9' }).gezaehlt_min, 90, 'eigene Zeit nur bei gleichem Ziel abgezogen');
+      const u = require('../zeit').ueberlappungVon(db, e.id);
+      assert.deepStrictEqual(u.sitzungen.map((s) => [s.session_id, s.min, s.regel, s.ergebnis]), [['sA', 30, 'eigene', 'abzug']]);
+      // Aus einem Kalendertermin gebucht: Parallelarbeit wie ein Meeting.
+      db.prepare("UPDATE zeit_eintrag SET kalender_uid = 'uid-1' WHERE id = ?").run(e.id);
+      assert.strictEqual(require('../zeit').ueberlappungVon(db, e.id).parallel_min, 30, 'Kalendertermin nicht parallel');
+      // Aendern behaelt die Herkunft: aus parallel wird nicht still ein Abzug.
+      const k = require('../zeit').speichere(db, { ziel_art: 'vorgang', ziel_schluessel: 'PROJ-1', ...ZWEI_STUNDEN, taetigkeit: 'Entwicklung', notiz: 'neu' }, e.id);
+      assert.deepStrictEqual([k.kalender_uid, k.parallel_min, k.gezaehlt_min], ['uid-1', 30, 120], 'Kalenderherkunft beim Aendern verloren');
+      // Meeting ist Parallelarbeit: beides zaehlt, ausgewiesen als parallel.
+      const m = eintrag(db, { ...ZWEI_STUNDEN, taetigkeit: 'Meeting' });
+      assert.deepStrictEqual([m.gezaehlt_min, m.abzug_min, m.parallel_min], [120, 0, 30], 'Meeting: ' + [m.gezaehlt_min, m.abzug_min, m.parallel_min]);
+    });
+    // Aktivitaet: Claude arbeitet allein, der Mensch kann parallel anderes tun.
+    // Nur gleiches Ziel waere doppelt gezaehlt.
+    mitZeitmodell(5, 'aktivitaet', () => {
+      const { db, zeile } = zeitDb();
+      aktivSitzung(zeile, 'sA', VIERZEHN + 30, VIERZEHN + 60, 'Projekt A', 'PROJ-1');
+      const fall = (d) => eintrag(db, { ...ZWEI_STUNDEN, ...d }).gezaehlt_min;
+      assert.strictEqual(fall({}), 90, 'gleicher Vorgang nicht abgezogen');
+      assert.strictEqual(fall({ ziel_art: 'projekt', ziel_schluessel: 'Projekt A' }), 90, 'gleiches Projekt nicht abgezogen');
+      assert.strictEqual(fall({ ziel_schluessel: 'PROJ-2' }), 120, 'anderer Vorgang abgezogen');
+      assert.strictEqual(fall({ ziel_art: 'projekt', ziel_schluessel: 'Projekt B' }), 120, 'anderes Projekt abgezogen');
+      assert.strictEqual(fall({ ziel_art: 'intern', ziel_schluessel: 'Planung' }), 120, 'intern als gleiches Ziel gewertet');
+    });
+    // Werkzeugbetrieb (lokale Modelle, Hintergrundsitzungen) ist keine Arbeit
+    // am Geraet und nimmt dem Eintrag nichts.
+    mitZeitmodell(5, 'eingaben', () => {
+      const { db, zeile } = zeitDb();
+      eingabenSitzung(zeile, 'sW', VIERZEHN + 30, VIERZEHN + 60, '(lokal)', null);
+      assert.strictEqual(eintrag(db, ZWEI_STUNDEN).gezaehlt_min, 120, 'Werkzeugbetrieb abgezogen');
+    });
+  });
+}
+
+// Abzug ist eine Vereinigung: zwei Sitzungen in denselben 30 Min ziehen 30 ab,
+// nicht 60. Rundung kommt nach dem Abzug. Fenster ueber den Rand zaehlen nur innen.
+function testUeberlappungVereinigung() {
+  mitRundung(5, () => {
+    mitZeitmodell(5, 'eingaben', () => {
+      const { db, zeile } = zeitDb();
+      eingabenSitzung(zeile, 'sA', VIERZEHN + 30, VIERZEHN + 60, 'Projekt A', 'PROJ-1');
+      eingabenSitzung(zeile, 'sB', VIERZEHN + 30, VIERZEHN + 60, 'Projekt B', 'PROJ-2');
+      // Ragt ueber das Ende: 15:50–16:20, davon 10 Min im Eintrag.
+      eingabenSitzung(zeile, 'sC', VIERZEHN + 110, VIERZEHN + 140, 'Projekt C', 'PROJ-3');
+      const e = eintrag(db, ZWEI_STUNDEN);
+      assert.strictEqual(e.abzug_min, 40, 'Abzug ' + e.abzug_min + ' statt 40 (Summe statt Vereinigung oder Rand?)');
+      assert.strictEqual(e.gezaehlt_min, 80);
+      // sB parallel, sA zieht dieselben Minuten ab: was der Eintrag abgibt,
+      // ist nicht zusaetzlich parallel.
+      const w = require('../zeit').waehle(db, e.id, 'sB', 'beides').eintrag;
+      assert.deepStrictEqual([w.abzug_min, w.parallel_min], [40, 0], 'parallel trotz Abzug: ' + [w.abzug_min, w.parallel_min]);
+    });
+    // Roh 47, Abzug 3, Schritt 5: erst abziehen, dann runden = 45 (nicht 50 − 3 = 47).
+    mitZeitmodell(3, 'eingaben', () => {
+      const { db, zeile } = zeitDb();
+      zeile('sA', VIERZEHN + 20, 'Projekt A', 'PROJ-1', 1);   // Fenster 14:18:30–14:21:30
+      const e = eintrag(db, { start: '2026-08-18T14:00:00.000Z', ende: '2026-08-18T15:00:00.000Z', pause_min: 13 });
+      assert.deepStrictEqual([e.rohzeit_min, e.abzug_min, e.gezaehlt_min], [47, 3, 45], 'Rundung vor Abzug: ' + [e.rohzeit_min, e.abzug_min, e.gezaehlt_min]);
+    });
+    // Die Pause hat keine Lage: Claude laeuft die ganze Stunde, der Eintrag hat
+    // 40 Min Pause. Abzug hoechstens die Rohzeit, nie mehr als der Eintrag.
+    mitZeitmodell(5, 'eingaben', () => {
+      const { db, zeile } = zeitDb();
+      eingabenSitzung(zeile, 'sA', VIERZEHN, VIERZEHN + 60, 'Projekt A', 'PROJ-1');
+      const e = eintrag(db, { start: '2026-08-18T14:00:00.000Z', ende: '2026-08-18T15:00:00.000Z', pause_min: 40 });
+      assert.deepStrictEqual([e.rohzeit_min, e.abzug_min, e.gezaehlt_min], [20, 20, 0], 'Abzug ueber der Rohzeit: ' + [e.rohzeit_min, e.abzug_min, e.gezaehlt_min]);
+    });
+  });
+}
+
+// metrics.schneide: ohne Abzuege dasselbe Array (Regressionsgarantie), sonst
+// genau die Minuten heraus, nur in der genannten Sitzung.
+function testSchneide() {
+  const a = [{ von: 0, bis: 100, session: 's1', project: 'P' }, { von: 0, bis: 100, session: 's2', project: 'P' }];
+  assert.strictEqual(metrics.schneide(a, []), a, 'leere Abzuege muessen dasselbe Array liefern');
+  const mitte = metrics.schneide(a, [{ session: 's1', von: 30, bis: 60 }]);
+  assert.deepStrictEqual(mitte.map((x) => [x.session, x.von, x.bis]), [['s1', 0, 30], ['s1', 60, 100], ['s2', 0, 100]]);
+  assert.deepStrictEqual(metrics.schneide(a, [{ session: 's1', von: -5, bis: 200 }]).map((x) => x.session), ['s2'], 'ganz ueberdeckt bleibt stehen');
+  assert.deepStrictEqual(metrics.schneide(a, [{ session: 's1', von: 80, bis: 200 }]).map((x) => [x.von, x.bis]), [[0, 80], [0, 100]]);
+  // Zwei Abzuege derselben Sitzung.
+  assert.deepStrictEqual(metrics.schneide(a, [{ session: 's1', von: 10, bis: 20 }, { session: 's1', von: 50, bis: 60 }])
+    .filter((x) => x.session === 's1').map((x) => [x.von, x.bis]), [[0, 10], [20, 50], [60, 100]]);
+  // Felder bleiben erhalten, das Original bleibt unberuehrt.
+  assert.strictEqual(mitte[0].project, 'P');
+  assert.deepStrictEqual([a[0].von, a[0].bis], [0, 100], 'Original veraendert');
+}
+
+// Vierer-Wahl je Paar Eintrag ↔ Sitzung. Sitzung 14:30–15:30 auf PROJ-1
+// (Aktivitaet), Eintrag 14:00–15:00 auf PROJ-2: 30 Min Ueberlappung, ohne Wahl
+// zaehlt beides.
+function testWahl() {
+  const zeit = require('../zeit');
+  mitRundung(5, () => mitZeitmodell(5, 'aktivitaet', () => {
+    const { db, zeile } = zeitDb();
+    aktivSitzung(zeile, 'sA', VIERZEHN + 30, VIERZEHN + 90, 'Projekt A', 'PROJ-1');
+    const e = eintrag(db, { ziel_schluessel: 'PROJ-2', start: '2026-08-18T14:00:00.000Z', ende: '2026-08-18T15:00:00.000Z' });
+    assert.strictEqual(e.gezaehlt_min, 60);
+    assert.strictEqual(sitzungsZeit(db, 'sA'), 3600);
+    const stand = (w) => {
+      const r = zeit.waehle(db, e.id, 'sA', w).eintrag;
+      return [r.gezaehlt_min, r.abzug_min, r.parallel_min, r.kulanz_min, sitzungsZeit(db, 'sA')];
+    };
+    assert.deepStrictEqual(stand('meine'), [60, 0, 0, 0, 1800], 'meine: Eintrag voll, Sitzung genau −30 Min');
+    assert.deepStrictEqual(stand('claude'), [30, 30, 0, 0, 3600], 'claude: Eintrag −30, Sitzung voll');
+    assert.deepStrictEqual(stand('keins'), [30, 30, 0, 30, 1800], 'keins: beide −30, Kulanz 30');
+    assert.deepStrictEqual(stand('beides'), [60, 0, 30, 0, 3600], 'beides: beide voll, parallel 30');
+    assert.strictEqual(metrics.byTicket(db, {}).find((r) => r.ticket === 'PROJ-1').active_seconds, 3600);
+    assert.strictEqual(zeit.ueberlappungVon(db, e.id).sitzungen[0].wahl, 'beides');
+    // Wahl gilt auch fuer den Vorgang, nicht nur die Sitzung.
+    zeit.waehle(db, e.id, 'sA', 'meine');
+    assert.strictEqual(metrics.byTicket(db, {}).find((r) => r.ticket === 'PROJ-1').active_seconds, 1800, 'Vorgang sieht die Wahl nicht');
+    // Grenzen.
+    assert.throws(() => zeit.waehle(db, e.id, 'sA', 'halb'), /Wahl: beides, claude, meine oder keins/);
+    assert.throws(() => zeit.waehle(db, e.id, 'gibts-nicht', 'meine'), /Sitzung/);
+    // Eine echte Sitzung ohne Ueberschneidung bekommt keine Wahl — sonst wirkte
+    // sie unsichtbar, sobald der Eintrag spaeter verschoben wird.
+    aktivSitzung(zeile, 'sZ', VIERZEHN + 240, VIERZEHN + 270, 'Projekt Z', 'PROJ-9');
+    assert.throws(() => zeit.waehle(db, e.id, 'sZ', 'meine'), /Überschneidung/, 'Wahl ohne Ueberlappung angenommen');
+    assert.throws(() => zeit.waehle(db, 99999, 'sA', 'meine'), /Eintrag nicht gefunden/);
+    // Abgerechnet: Wahl gesperrt, Eintrag bleibt.
+    db.prepare("UPDATE zeit_eintrag SET status = 'abgerechnet', rechnung_nr = 'R-1' WHERE id = ?").run(e.id);
+    assert.throws(() => zeit.waehle(db, e.id, 'sA', 'claude'), /gesperrt/);
+    db.prepare("UPDATE zeit_eintrag SET status = 'offen', rechnung_nr = NULL WHERE id = ?").run(e.id);
+    // Loeschen nimmt die Wahl mit: die Sitzung bekommt ihre Zeit zurueck.
+    zeit.loesche(db, e.id);
+    assert.strictEqual(sitzungsZeit(db, 'sA'), 3600, 'Wahl ueberlebt das Loeschen');
+    assert.strictEqual(db.prepare('SELECT COUNT(*) n FROM ueberlappung_wahl').get().n, 0);
+  }));
+  // Abnahmefall: gleicher Vorgang, eigene Zeit, "meine" — Eintrag voll 120,
+  // die Sitzung verliert genau die 30 Minuten.
+  mitRundung(5, () => mitZeitmodell(5, 'eingaben', () => {
+    const { db, zeile } = zeitDb();
+    eingabenSitzung(zeile, 'sA', VIERZEHN + 30, VIERZEHN + 60, 'Projekt A', 'PROJ-1');
+    const vorher = sitzungsZeit(db, 'sA');
+    const e = eintrag(db, ZWEI_STUNDEN);
+    assert.strictEqual(e.gezaehlt_min, 90);
+    assert.strictEqual(zeit.waehle(db, e.id, 'sA', 'meine').eintrag.gezaehlt_min, 120);
+    assert.strictEqual(vorher - sitzungsZeit(db, 'sA'), 1800, 'Sitzung nicht genau −1800 s');
+    // Aendern ohne neue Zeiten behaelt die Wahl.
+    const d = { ziel_art: 'vorgang', ziel_schluessel: 'PROJ-1', ...ZWEI_STUNDEN, taetigkeit: 'Entwicklung', notiz: 'geaendert' };
+    assert.strictEqual(zeit.speichere(db, d, e.id).gezaehlt_min, 120, 'Aendern vergisst die Wahl');
+    // Verschoben ohne Ueberlappung: die Wahl faellt weg, die Sitzung hat ihre Zeit zurueck.
+    zeit.speichere(db, { ...d, start: '2026-08-18T17:00:00.000Z', ende: '2026-08-18T18:00:00.000Z' }, e.id);
+    assert.strictEqual(db.prepare('SELECT COUNT(*) n FROM ueberlappung_wahl').get().n, 0, 'verwaiste Wahl bleibt stehen');
+    assert.strictEqual(sitzungsZeit(db, 'sA'), vorher, 'Sitzung nach dem Verschieben nicht zurueck');
+  }));
+}
+
+// Vorschau rechnet wie Speichern, schreibt aber nichts.
+function testZeitVorschau() {
+  const zeit = require('../zeit');
+  mitRundung(5, () => mitZeitmodell(5, 'eingaben', () => {
+    const { db, zeile } = zeitDb();
+    eingabenSitzung(zeile, 'sA', VIERZEHN + 30, VIERZEHN + 60, 'Projekt A', 'PROJ-1');
+    const d = { ziel_art: 'vorgang', ziel_schluessel: 'PROJ-1', ...ZWEI_STUNDEN, taetigkeit: 'Entwicklung' };
+    const v = zeit.vorschau(db, d);
+    assert.strictEqual(db.prepare('SELECT COUNT(*) n FROM zeit_eintrag').get().n, 0, 'Vorschau hat gespeichert');
+    assert.deepStrictEqual([v.rohzeit_min, v.abzug_min, v.gezaehlt_min, v.rundung], [120, 30, 90, 5]);
+    assert.deepStrictEqual(v.sitzungen.map((s) => s.regel), ['eigene']);
+    const e = zeit.speichere(db, d);
+    assert.strictEqual(e.gezaehlt_min, v.gezaehlt_min);
+    // Mit id gelten die Wahlen dieses Eintrags.
+    zeit.waehle(db, e.id, 'sA', 'beides');
+    assert.strictEqual(zeit.vorschau(db, d, e.id).gezaehlt_min, 120, 'Vorschau ignoriert die Wahl');
+    assert.throws(() => zeit.vorschau(db, { ...d, ziel_art: 'xx' }), /Zielart/);
+  }));
+}
+
+// Logs kommen verzoegert: offene Eintraege der letzten 48 h werden nachgerechnet,
+// aeltere und abgerechnete nicht.
+function testNachrechnen() {
+  const zeit = require('../zeit');
+  mitRundung(5, () => mitZeitmodell(5, 'eingaben', () => {
+    const { db, zeile } = zeitDb();
+    const neu = eintrag(db, ZWEI_STUNDEN);
+    const alt = eintrag(db, { start: '2026-08-15T14:00:00.000Z', ende: '2026-08-15T16:00:00.000Z' });
+    const zu = eintrag(db, { ...ZWEI_STUNDEN, ziel_schluessel: 'PROJ-7' });
+    db.prepare("UPDATE zeit_eintrag SET status = 'abgerechnet', rechnung_nr = 'R-1' WHERE id = ?").run(zu.id);
+    assert.strictEqual(neu.gezaehlt_min, 120);
+    // Die Sitzung kommt erst jetzt ins Log — auch fuer den alten Tag.
+    eingabenSitzung(zeile, 'sA', VIERZEHN + 30, VIERZEHN + 60, 'Projekt A', 'PROJ-1');
+    eingabenSitzung(zeile, 'sB', VIERZEHN + 30 - 3 * 1440, VIERZEHN + 60 - 3 * 1440, 'Projekt A', 'PROJ-1');
+    const jetzt = Date.parse('2026-08-19T10:00:00.000Z');
+    assert.strictEqual(zeit.nachrechnen(db, { seitStunden: 48, jetzt }), 1, 'genau ein Eintrag haette sich aendern muessen');
+    assert.strictEqual(zeit.lade(db, neu.id).gezaehlt_min, 90, 'neuer Eintrag nicht nachgerechnet');
+    assert.strictEqual(zeit.lade(db, alt.id).gezaehlt_min, 120, 'Eintrag aelter als 48 h nachgerechnet');
+    assert.strictEqual(zeit.lade(db, zu.id).gezaehlt_min, 120, 'abgerechneter Eintrag nachgerechnet');
+    // Zweiter Lauf: nichts mehr zu tun.
+    assert.strictEqual(zeit.nachrechnen(db, { seitStunden: 48, jetzt }), 0);
+    // Ohne Grenze (nach Einstellungsaenderung, beim Start): auch der alte, nie der abgerechnete.
+    assert.strictEqual(zeit.nachrechnen(db, { seitStunden: Infinity, jetzt }), 1);
+    assert.strictEqual(zeit.lade(db, alt.id).gezaehlt_min, 90, 'alle offenen nicht nachgerechnet');
+    assert.strictEqual(zeit.lade(db, zu.id).gezaehlt_min, 120);
+    // Ein kaputter Eintrag haelt die anderen nicht auf, faellt aber auf.
+    const ok = eintrag(db, { ...ZWEI_STUNDEN, ziel_schluessel: 'PROJ-8', taetigkeit: 'Meeting' });
+    db.prepare("UPDATE zeit_eintrag SET start = '2026-08-18Tkaputt' WHERE id = ?").run(neu.id);
+    db.prepare("UPDATE zeit_eintrag SET taetigkeit = 'Entwicklung' WHERE id = ?").run(ok.id);
+    assert.throws(() => zeit.nachrechnen(db, { seitStunden: 48, jetzt }), /1 Eintrag/, 'kaputter Eintrag still uebergangen');
+    assert.strictEqual(zeit.lade(db, ok.id).gezaehlt_min, 90, 'Eintrag nach dem kaputten nicht nachgerechnet');
+  }));
+}
+
+// Live: Sitzungszeilen tragen die Ueberlappungen mit Wahl, die Zeit der Sitzung
+// folgt der Wahl.
+function testLiveWahl() {
+  const zeit = require('../zeit');
+  const basis = Math.floor((Date.now() - 50 * 60000) / 60000) * 60000;
+  mitRundung(5, () => mitZeitmodell(5, 'eingaben', () => {
+    const { db, zeile, t } = zeitDb(basis);
+    eingabenSitzung(zeile, 'sL', 10, 40, 'Projekt A', 'PROJ-1');
+    const e = eintrag(db, { start: t(0), ende: t(45), ziel_schluessel: 'PROJ-1' });
+    const zeileL = () => metrics.live(db).sessions.find((s) => s.session_id === 'sL');
+    assert.deepStrictEqual(zeileL().wahl.map((w) => [w.eintrag_id, w.wahl, w.min]), [[e.id, null, 30]], 'Ueberlappung fehlt in live');
+    assert.strictEqual(zeileL().active_seconds, 1800);
+    zeit.waehle(db, e.id, 'sL', 'meine');
+    assert.deepStrictEqual(zeileL().wahl.map((w) => w.wahl), ['meine']);
+    assert.strictEqual(zeileL().active_seconds, 0, 'live-Zeit folgt der Wahl nicht');
+  }));
+}
+
+// Die Spalte "Bei Ueberlappung" nennt den Eintrag mit seiner Zeitspanne —
+// ohne sie sind zwei Eintraege derselben Sitzung nicht auseinanderzuhalten.
+function testLiveWahlZeitspanne() {
+  const basis = Math.floor((Date.now() - 50 * 60000) / 60000) * 60000;
+  mitRundung(5, () => mitZeitmodell(5, 'eingaben', () => {
+    const { db, zeile, t } = zeitDb(basis);
+    eingabenSitzung(zeile, 'sZ', 10, 40, 'Projekt A', 'PROJ-1');
+    const e = eintrag(db, { start: t(0), ende: t(45), ziel_schluessel: 'PROJ-1' });
+    const w = metrics.live(db).sessions.find((s) => s.session_id === 'sZ').wahl;
+    assert.deepStrictEqual(w.map((x) => [x.eintrag_id, x.start, x.ende]), [[e.id, e.start, e.ende]], 'Zeitspanne fehlt: ' + JSON.stringify(w));
+  }));
+}
+
+// Detail: dieselbe Wahl wie in Live, an der Sitzung des Vorgangs. Gegenprobe:
+// ohne Eintrag bleibt die Liste leer, die Sitzung selbst bleibt unveraendert.
+function testVorgangSitzungWahl() {
+  const zeit = require('../zeit');
+  mitRundung(5, () => mitZeitmodell(5, 'eingaben', () => {
+    const { db, zeile, t } = zeitDb();
+    eingabenSitzung(zeile, 'sV', 10, 40, 'Projekt A', 'PROJ-1');
+    const ohne = metrics.sitzungenJeVorgang(db, 'PROJ-1').find((s) => s.session_id === 'sV');
+    assert.deepStrictEqual(ohne.wahl, [], 'Wahl ohne Eintrag');
+    const e = eintrag(db, { start: t(0), ende: t(45), ziel_schluessel: 'PROJ-1' });
+    zeit.waehle(db, e.id, 'sV', 'beides');
+    const s = metrics.sitzungenJeVorgang(db, 'PROJ-1').find((x) => x.session_id === 'sV');
+    assert.deepStrictEqual(s.wahl.map((w) => [w.eintrag_id, w.wahl, w.min, w.start]), [[e.id, 'beides', 30, e.start]], 'Wahl fehlt: ' + JSON.stringify(s.wahl));
+    assert.strictEqual(s.active_seconds, 1800, 'beides kuerzt die Sitzung nicht');
+    // Alter Vorgang: 501 spaetere Eintraege duerfen seinen Eintrag nicht aus der Liste druecken.
+    const spalten = db.prepare('PRAGMA table_info(zeit_eintrag)').all().map((c) => c.name).filter((c) => c !== 'id');
+    const kopie = db.prepare('INSERT INTO zeit_eintrag (' + spalten.join(',') + ') SELECT ' +
+      spalten.map((c) => (c === 'tag' ? '?' : c === 'start' ? '?' : c === 'ende' ? '?' : c)).join(',') + ' FROM zeit_eintrag WHERE id = ?');
+    for (let i = 0; i < 501; i++) kopie.run('2026-09-' + String(1 + (i % 28)).padStart(2, '0'), '2026-09-01T08:00:00.000Z', '2026-09-01T08:30:00.000Z', e.id);
+    const spaeter = metrics.sitzungenJeVorgang(db, 'PROJ-1').find((x) => x.session_id === 'sV');
+    assert.deepStrictEqual(spaeter.wahl.map((w) => w.eintrag_id), [e.id], 'spaetere Eintraege verdraengen den Eintrag des Vorgangs');
+  }));
+}
+
+// "Abrechenbar offen X h · Y EUR": Stunden mit derselben Abgrenzung wie offen_eur —
+// Claude-Zeit nicht abgerechneter Zeilen plus offene manuelle Stunden.
+function testKennzahlenOffeneStunden() {
+  const zeilen = [
+    { ticket: 'A-1', arbeitswert: 600, active_hours: 6, manuell_hours: 1, manuell_offen_hours: 0.5 },
+    { ticket: 'A-2', arbeitswert: 300, active_hours: 3, manuell_hours: 1.5, manuell_offen_hours: 1.5 },
+    { gruppe: 'Projekt X', arbeitswert: 100, active_hours: 1 },
+  ];
+  const abrechnung = Object.create(null);
+  abrechnung['A-1'] = { betrag_eur: 600, nummern: ['2026-0001'] };
+  const k = metrics.kennzahlen(zeilen, abrechnung);
+  // A-1 gestellt: nur seine offene manuelle halbe Stunde. A-2: 3 + 1,5. Projekt X: 1.
+  assert.strictEqual(k.offen_stunden, 6, 'offene Stunden: ' + k.offen_stunden);
+  // Plausibel: nie negativ, nie mehr als alle abrechenbaren Stunden.
+  assert.ok(k.offen_stunden >= 0 && k.offen_stunden <= k.aktive_stunden + k.manuell_stunden, 'offen ausserhalb 0..abrechenbar');
+  assert.strictEqual(metrics.kennzahlen([], Object.create(null)).offen_stunden, 0, 'ohne Zeilen nicht 0');
+  // Der Rechenweg nennt die Stunden hinter "Eigene Zeit" vom Server: Claude 10 + manuell 2,5.
+  assert.strictEqual(k.wert.eigene_stunden, 12.5, 'eigene Stunden: ' + k.wert.eigene_stunden);
+}
+
+// --- Zeiterfassung (Block Z3): Rechnung, Sperre, Kennzahlen, Woche ---------
+// Manuelle Zeit geht als eigene Position auf die Rechnung, nie versteckt in der
+// Vorgangsposition. Gestellte Eintraege sind gesperrt; ein Storno gibt sie frei,
+// ohne die gestellte Abschrift anzufassen.
+
+// rechnungsDb (Sitzung s-r 18.08. 10–12 Uhr auf PROJ-500, Projekt "Beispiel - App")
+// mit festen Saetzen und Regeln. Satz 80, Rabatt 10 % -> 72 je Stunde.
+function zeitRechnung(fn) {
+  return rechnungsUmgebung(() => mitConfig({ stundensatz: 100 }, () => mitRundung(15, () =>
+    mitZeitmodell(5, 'aktivitaet', () => mitProjektSatz('Beispiel - App', { satz: 80, rabatt: 10 }, () => {
+      const db = rechnungsDb();
+      const e = (start, ende, d = {}) => eintrag(db, { ziel_schluessel: 'PROJ-500', start, ende, ...d });
+      const ids = {
+        e1: e('2026-08-20T14:00:00.000Z', '2026-08-20T15:30:00.000Z').id,
+        e2: e('2026-08-21T09:00:00.000Z', '2026-08-21T10:00:00.000Z').id,
+        e3: e('2026-08-21T10:00:00.000Z', '2026-08-21T10:45:00.000Z', { taetigkeit: 'Review' }).id,
+        // Ueberlappt die Sitzung 11–12 Uhr am selben Vorgang: 60 Min Abzug.
+        e5: e('2026-08-18T11:00:00.000Z', '2026-08-18T12:30:00.000Z').id,
+      };
+      return fn(db, ids);
+    })))));
+}
+const EMPF = { name: 'Kunde GmbH', anschrift: ['Weg 1', '50667 Köln'] };
+const AUGUST = { from: '2026-08-01', to: '2026-08-31' };
+
+function testRechnungZeitpositionen() {
+  const rechnung = require('../rechnung');
+  const zeit = require('../zeit');
+  zeitRechnung((db, { e1, e2, e3, e5 }) => {
+    zeit.waehle(db, e5, 's-r', 'keins');   // 30 gezaehlt, 60 Kulanz, Sitzung −60
+    const pos = rechnung.baue(db, { ...AUGUST, eintraege: [e1, e2, e3, e5], gruppierung: 'taetigkeit' });
+    const kurz = pos.map((p) => [p.typ, p.bezeichnung, p.stunden, p.satz, p.betrag_eur]);
+    assert.deepStrictEqual(kurz, [
+      ['zeit', 'Entwicklung – Vorgang PROJ-500', 3, 72, 216],
+      ['zeit', 'Review – Vorgang PROJ-500', 0.75, 72, 54],
+      ['kulanz', 'Kulanz – nicht berechnete Zeit', 1, 0, 0],
+    ], 'Positionen: ' + JSON.stringify(kurz));
+    const ent = pos[0];
+    assert.deepStrictEqual([ent.basissatz, ent.rabatt_prozent, ent.ziel_art, ent.ziel], [80, 10, 'vorgang', 'PROJ-500']);
+    assert.deepStrictEqual(ent.refs, [e5, e1, e2], 'refs');
+    assert.deepStrictEqual(ent.tage, ['2026-08-18', '2026-08-20', '2026-08-21'], 'tage');
+    assert.strictEqual(ent.ticket, undefined, 'Zeitposition traegt ticket — abrechnung() zaehlte sie als Vorgang');
+    assert.deepStrictEqual(pos[2].refs, [e5]);
+    // Je Eintrag: eine Zeile je Eintrag, die Summe bleibt.
+    const je = rechnung.baue(db, { ...AUGUST, eintraege: [e1, e2, e3, e5], gruppierung: 'eintrag' });
+    assert.strictEqual(je.filter((p) => p.typ === 'zeit').length, 4);
+    assert.strictEqual(Math.round(je.reduce((a, p) => a + p.betrag_eur, 0) * 100) / 100, 270);
+    // Mit Vorgang: Claude-Position nimmt nur Claude-Zeit (10–11, die Kulanz-Stunde
+    // 11–12 hat die Sitzung abgegeben) — nie dieselben Minuten zweimal.
+    const beide = rechnung.baue(db, { ...AUGUST, tickets: ['PROJ-500'], eintraege: [e1, e5] });
+    const claude = beide.find((p) => p.ticket === 'PROJ-500');
+    assert.deepStrictEqual([claude.stunden, claude.betrag_eur], [1, 72], 'Claude-Position: ' + [claude.stunden, claude.betrag_eur]);
+    const stunden = beide.filter((p) => p.typ !== 'kulanz').reduce((a, p) => a + p.stunden, 0);
+    assert.ok(stunden <= 1 + 1.5 + 0.5 + 1e-9, 'mehr Stunden abgerechnet als gearbeitet: ' + stunden);
+  });
+}
+
+function testRechnungZeitPruefungen() {
+  const rechnung = require('../rechnung');
+  const zeit = require('../zeit');
+  zeitRechnung((db, { e1, e2 }) => {
+    const nicht = eintrag(db, { ziel_schluessel: 'PROJ-500', start: '2026-08-22T09:00:00.000Z', ende: '2026-08-22T10:00:00.000Z', abrechenbar: false }).id;
+    const intern = eintrag(db, { ziel_art: 'intern', ziel_schluessel: 'Planung', start: '2026-08-22T11:00:00.000Z', ende: '2026-08-22T12:00:00.000Z' }).id;
+    const fall = (d, muster, was) => assert.throws(() => rechnung.baue(db, { ...AUGUST, ...d }), muster, was);
+    fall({ eintraege: [99999] }, /Eintrag #99999 nicht gefunden/, 'unbekannter Eintrag');
+    fall({ eintraege: [nicht] }, new RegExp('Eintrag #' + nicht + ' ist nicht abrechenbar'), 'nicht abrechenbar');
+    fall({ eintraege: [intern] }, /Interne Eintr.ge geh.ren auf keine Rechnung/, 'intern');
+    fall({ eintraege: [e1, e1] }, /doppelt/, 'doppelt');
+    fall({ eintraege: 'e1' }, /Liste/, 'keine Liste');
+    fall({ eintraege: ['abc'] }, /nicht gefunden/, 'keine Zahl');
+    fall({ eintraege: Array.from({ length: 501 }, (_, i) => i + 1) }, /500 Eintr/, 'zu viele');
+    fall({ eintraege: [e1], gruppierung: 'woche' }, /Gruppierung/, 'Gruppierung');
+    fall({ from: '2026-08-01', to: '2026-08-19', eintraege: [e1] }, /ausserhalb des Leistungszeitraums/, 'Eintrag ausserhalb des Zeitraums');
+    // Veralteter gespeicherter Wert: vor dem Stellen frisch gerechnet.
+    db.prepare('UPDATE zeit_eintrag SET gezaehlt_min = 999 WHERE id = ?').run(e2);
+    const p = rechnung.baue(db, { ...AUGUST, eintraege: [e2] })[0];
+    assert.strictEqual(p.stunden, 1, 'gespeicherter statt frisch gerechneter Wert: ' + p.stunden);
+    assert.strictEqual(zeit.lade(db, e2).gezaehlt_min, 60, 'frischer Wert nicht gespeichert');
+    // Vorgang nur mit manueller Zeit: keine Claude-Position mit 0 h.
+    const nur = eintrag(db, { ziel_schluessel: 'PROJ-777', start: '2026-08-23T09:00:00.000Z', ende: '2026-08-23T10:00:00.000Z' }).id;
+    fall({ tickets: ['PROJ-777'] }, /keine Daten/, '0-h-Position');
+    // Gewaehlt, aber ohne Claude-Zeit: nicht still weglassen, sondern sagen.
+    fall({ tickets: ['PROJ-777'], eintraege: [nur] }, /PROJ-777 hat im Zeitraum keine Claude-Zeit/, 'Vorgang still verworfen');
+    assert.deepStrictEqual(rechnung.baue(db, { ...AUGUST, eintraege: [nur] }).map((x) => x.typ), ['zeit']);
+    // Ganz abgezogen (Claude 10–11 am selben Vorgang): nichts abzurechnen,
+    // also auch nicht unsichtbar sperren.
+    const leerE = eintrag(db, { ziel_schluessel: 'PROJ-500', start: '2026-08-18T10:00:00.000Z', ende: '2026-08-18T11:00:00.000Z' });
+    assert.strictEqual(leerE.gezaehlt_min, 0);
+    fall({ eintraege: [leerE.id] }, new RegExp('Eintrag #' + leerE.id + ' hat nach dem Abzug keine abrechenbare Zeit'), 'leerer Eintrag gesperrt');
+    // Kaputter Satz ergibt keine 0-EUR-Position.
+    const ohneSatz = eintrag(db, { ziel_art: 'projekt', ziel_schluessel: 'Ohne Satz', start: '2026-08-24T09:00:00.000Z', ende: '2026-08-24T10:00:00.000Z' }).id;
+    mitConfig({ stundensatz: 'kaputt' }, () => fall({ eintraege: [ohneSatz] }, /Satz/, 'kaputter Satz'));
+  });
+}
+
+function testSperreUndStorno() {
+  const rechnung = require('../rechnung');
+  const zeit = require('../zeit');
+  zeitRechnung((db, { e1, e2, e3 }) => {
+    const daten = { ...AUGUST, eintraege: [e1, e2], empfaenger: EMPF };
+    const inv = rechnung.erstelle(db, daten);
+    for (const id of [e1, e2]) {
+      const e = zeit.lade(db, id);
+      assert.deepStrictEqual([e.status, e.rechnung_nr, e.satz_eingefroren], ['abgerechnet', inv.nr, 72], 'Sperre #' + id);
+    }
+    assert.strictEqual(zeit.lade(db, e3).status, 'offen', 'nicht gewaehlter Eintrag gesperrt');
+    assert.throws(() => zeit.speichere(db, { ziel_art: 'vorgang', ziel_schluessel: 'PROJ-500', start: '2026-08-20T14:00:00.000Z', ende: '2026-08-20T15:00:00.000Z', taetigkeit: 'Entwicklung' }, e1), /gesperrt/);
+    assert.throws(() => rechnung.erstelle(db, daten), new RegExp('Eintrag #' + e1 + ' ist bereits abgerechnet \\(Rechnung ' + inv.nr + '\\)'));
+    assert.throws(() => rechnung.vorschau(db, daten), /bereits abgerechnet/);
+    // Wettlauf: zwischen Vorschau und Schreiben stellt jemand anderes den Eintrag.
+    const d = rechnung.entwurf(db, { ...AUGUST, eintraege: [e3], empfaenger: EMPF });
+    db.prepare("UPDATE zeit_eintrag SET status = 'abgerechnet', rechnung_nr = '2026-9999' WHERE id = ?").run(e3);
+    const vorher = db.prepare('SELECT COUNT(*) n FROM invoices').get().n;
+    assert.throws(() => rechnung.schreibe(db, d), (err) => err.abweichung === true && /inzwischen abgerechnet/.test(err.message));
+    assert.strictEqual(db.prepare('SELECT COUNT(*) n FROM invoices').get().n, vorher, 'Rechnung trotz Wettlauf geschrieben');
+    db.prepare("UPDATE zeit_eintrag SET status = 'offen', rechnung_nr = NULL WHERE id = ?").run(e3);
+    // Storno: Eintraege wieder offen, die Abschrift bleibt Byte fuer Byte.
+    const abschrift = JSON.stringify(rechnung.lade(db, inv.nr).positionen);
+    rechnung.storniere(db, inv.nr);
+    assert.strictEqual(JSON.stringify(rechnung.lade(db, inv.nr).positionen), abschrift, 'Storno aendert die Abschrift');
+    for (const id of [e1, e2]) {
+      const e = zeit.lade(db, id);
+      assert.deepStrictEqual([e.status, e.rechnung_nr, e.satz_eingefroren], ['offen', null, null], 'Freigabe #' + id);
+    }
+    assert.strictEqual(rechnung.erstelle(db, daten).positionen[0].betrag_eur, 180, 'nach Storno nicht wieder stellbar');
+  });
+}
+
+function testAbrechnungZeitpositionen() {
+  const rechnung = require('../rechnung');
+  const metrics = require('../metrics');
+  const zeit = require('../zeit');
+  zeitRechnung((db, { e1, e2, e3 }) => {
+    const o = AUGUST;
+    const k = () => metrics.kennzahlen(metrics.byTicket(db, o).concat(metrics.ohneTicket(db, o)), rechnung.abrechnung(db), zeit.kennzahlenZusatz(db, o));
+    const vorher = k();
+    assert.strictEqual(vorher.abgerechnet_manuell_eur, 0);
+    rechnung.erstelle(db, { ...AUGUST, eintraege: [e1, e2], empfaenger: EMPF });
+    // Zeitpositionen sind keine Vorgangsabrechnung.
+    assert.strictEqual(rechnung.abrechnung(db)['PROJ-500'], undefined, 'Zeitposition als Vorgang gezaehlt');
+    assert.strictEqual(rechnung.abgerechnetFuerVorgang(db, 'PROJ-500'), 180, 'manuell abgerechnet je Vorgang');
+    const nach = k();
+    assert.strictEqual(nach.abgerechnet_manuell_eur, 180);
+    assert.ok(Math.abs(nach.offen_eur - (vorher.offen_eur - 180)) < 1e-9, 'offen nicht um die manuelle Rechnung gesunken');
+    assert.strictEqual(nach.wert.arbeitswert, vorher.wert.arbeitswert, 'Arbeitswert durch Abrechnung veraendert');
+    // Plausibel: offen nie negativ, nie mehr als der Arbeitswert.
+    assert.ok(nach.offen_eur >= -1e-9 && nach.offen_eur <= nach.wert.arbeitswert + 1e-9, 'offen ausserhalb 0..Arbeitswert: ' + nach.offen_eur);
+    // Offen bleiben e3 (45 Min) und e5 (30 Min gezaehlt).
+    const offen = nach.manuell_offen_stunden;
+    assert.strictEqual(offen, 1.25, 'offene manuelle Stunden: ' + offen);
+    // Vorgang nur mit manueller Zeit, ganz gestellt: zaehlt nicht mehr als offen.
+    const nur = eintrag(db, { ziel_schluessel: 'PROJ-888', start: '2026-08-23T09:00:00.000Z', ende: '2026-08-23T10:00:00.000Z' }).id;
+    const vorNur = k().offen_vorgaenge;
+    rechnung.erstelle(db, { ...AUGUST, eintraege: [nur], empfaenger: EMPF });
+    assert.strictEqual(vorNur - k().offen_vorgaenge, 1, 'gestellter Vorgang zaehlt weiter als offen');
+  });
+}
+
+function testDruckUndErechnungZeit() {
+  const rechnung = require('../rechnung');
+  const erechnung = require('../erechnung');
+  const zeit = require('../zeit');
+  zeitRechnung((db, { e1, e5 }) => {
+    zeit.waehle(db, e5, 's-r', 'keins');
+    // Was die E-Rechnung zusaetzlich verlangt (rechnungsUmgebung stellt den Rest zurueck).
+    Object.assign(require('../config.json').rechnung.aussteller, { email: 'test@example.org', telefon: '0221 123' });
+    const inv = rechnung.erstelle(db, { ...AUGUST, eintraege: [e1, e5], empfaenger: { ...EMPF, email: 'kunde@example.org', kaeufer_referenz: 'K-1' } });
+    const html = rechnung.renderHtml(inv);
+    assert.ok(html.includes('18.08., 20.08.'), 'Tage fehlen in der Unterzeile');
+    assert.ok(/Kulanz – nicht berechnete Zeit[\s\S]*?0,00 EUR/.test(html), 'Kulanz ohne 0,00 EUR');
+    const xml = erechnung.alsXml(inv);
+    assert.ok(/<ram:Name>Kulanz – nicht berechnete Zeit<\/ram:Name>[\s\S]*?<ram:ChargeAmount>0\.00<\/ram:ChargeAmount>[\s\S]*?<ram:BilledQuantity unitCode="HUR">1<\/ram:BilledQuantity>/.test(xml),
+      'Kulanz nicht als Stunden zu 0,00 in der E-Rechnung');
+  });
+}
+
+// Woche, Monat, Ziele, Analyse: Arbeitszeit = Vereinigung aus Eintraegen und
+// Claude-Zeit, eine Minute zaehlt einmal. Soll Mo–Fr.
+function testZeitAnsichten() {
+  const zeit = require('../zeit');
+  zeitRechnung((db, { e5 }) => mitConfig({ tagessollStunden: 8 }, () => {
+    // Ohne Wahl laufen Claude (10–12) und Eintrag (11–12:30) eine Stunde
+    // gleichzeitig: Arbeitszeit 10:00–12:30 = 150, nicht 120 + 90.
+    const vorWahl = zeit.woche(db, '2026-08-17').tage[1];
+    assert.deepStrictEqual([vorWahl.claude_min, vorWahl.manuell_min, vorWahl.arbeitszeit_min], [120, 90, 150], 'Arbeitszeit ohne Vereinigung: ' + vorWahl.arbeitszeit_min);
+    zeit.waehle(db, e5, 's-r', 'keins');   // Claude 10–11, Eintrag 11–12:30
+    const w = zeit.woche(db, '2026-08-17');
+    assert.deepStrictEqual(w.tage.map((t) => t.tag), ['2026-08-17', '2026-08-18', '2026-08-19', '2026-08-20', '2026-08-21', '2026-08-22', '2026-08-23']);
+    const di = w.tage[1];
+    assert.deepStrictEqual([di.eintraege.map((e) => e.id), di.claude_min, di.manuell_min, di.arbeitszeit_min, di.soll_min], [[e5], 60, 90, 150, 480],
+      'Dienstag: ' + JSON.stringify([di.eintraege.map((e) => e.id), di.claude_min, di.manuell_min, di.arbeitszeit_min, di.soll_min]));
+    assert.deepStrictEqual(di.claude_fenster.map((f) => [f.session_id, f.von, f.bis]), [['s-r', '2026-08-18T10:00:00.000Z', '2026-08-18T11:00:00.000Z']]);
+    assert.strictEqual(w.tage[5].soll_min, 0, 'Samstag mit Soll');
+    // Do 20.08.: Eintrag 14:00–15:30 = 90.
+    assert.strictEqual(w.tage[3].arbeitszeit_min, 90);
+    assert.strictEqual(w.summe.arbeitszeit_min, 150 + 90 + 60 + 45);
+    assert.throws(() => zeit.woche(db, '2026-08-18'), /Montag/, 'Dienstag als Wochenbeginn');
+    assert.throws(() => zeit.woche(db, 'gestern'), /Montag/);
+    const m = zeit.monat(db, AUGUST);
+    assert.strictEqual(m.tage.length, 31);
+    assert.strictEqual(m.summe.arbeitszeit_min, 345);
+    assert.strictEqual(m.summe.soll_min, 21 * 480, 'Soll August: 21 Werktage');
+    assert.strictEqual(m.summe.saldo_min, 345 - 21 * 480);
+    assert.throws(() => zeit.monat(db, { from: '2026-01-01', to: '2026-12-31' }), /62 Tage/);
+    const z = zeit.zieleTabelle(db, AUGUST);
+    const p = z.find((r) => r.ziel_art === 'vorgang' && r.ziel_schluessel === 'PROJ-500');
+    assert.deepStrictEqual([p.eintraege, p.manuell_min, p.offen_min, p.abgerechnet_min, p.status], [4, 90 + 60 + 45 + 30, 225, 0, 'offen']);
+    assert.ok(Math.abs(p.offen_eur - 225 / 60 * 72) < 1e-9, 'offen_eur ' + p.offen_eur);
+    const a = zeit.analyse(db, AUGUST);
+    assert.deepStrictEqual([a.kpis.kulanz_min, a.kpis.parallel_min], [60, 0]);
+    assert.deepStrictEqual(a.taetigkeiten.map((t) => [t.name, t.min]), [['Entwicklung', 180], ['Review', 45]]);
+    assert.ok(a.wochen.some((x) => x.montag === '2026-08-17' && x.ist_stunden === 345 / 60), 'Woche fehlt in der Analyse');
+  }));
+}
+
+// Analyse-Reiter Arbeitszeit (Z5b): je Woche Claude und manuell abrechenbar neben der
+// Arbeitszeit, je Taetigkeit der Betrag. Summen muessen zu den KPIs und zur Liste passen.
+function testAnalyseWochenTaetigkeiten() {
+  const zeit = require('../zeit');
+  zeitRechnung((db) => mitConfig({ tagessollStunden: 8 }, () => {
+    const a = zeit.analyse(db, AUGUST);
+    const s = (k) => a.wochen.reduce((x, w) => x + w[k], 0);
+    assert.ok(Math.abs(s('claude_stunden') + s('manuell_stunden') - a.kpis.abrechenbar_stunden) < 1e-9, 'Wochen ergeben nicht die abrechenbare Zeit');
+    assert.ok(Math.abs(s('manuell_stunden') - a.kpis.manuell_stunden) < 1e-9, 'manuelle Wochen ≠ KPI');
+    // Woche 17.08. unabhaengig ueber woche(): Claude-Minuten der Tage.
+    const w17 = a.wochen.find((w) => w.montag === '2026-08-17');
+    assert.strictEqual(w17.claude_stunden, zeit.woche(db, '2026-08-17').summe.claude_min / 60, 'Claude der Woche');
+    assert.ok(w17.manuell_stunden > 0 && w17.manuell_stunden <= w17.ist_stunden + w17.claude_stunden, 'manuell der Woche unplausibel');
+    // Betrag je Taetigkeit = Summe der Eintraege dieser Taetigkeit aus der Liste (eine Formel).
+    const liste = zeit.imRahmen(db, AUGUST);
+    for (const t of a.taetigkeiten) {
+      const soll = liste.filter((e) => e.taetigkeit === t.name).reduce((x, e) => x + e.eur, 0);
+      assert.ok(Math.abs(t.eur - soll) < 1e-9 && t.eur > 0, 'Betrag ' + t.name + ': ' + t.eur + ' ≠ ' + soll);
+    }
+  }));
+}
+
+// Pflicht aus Z3: "Nur meine Zeit"/"Keins" kuerzt Claude-Zeit. Ist der Vorgang der
+// Sitzung schon abgerechnet, verschoebe das still "abgerechnet" gegen den Arbeitswert.
+function testWahlAbgerechneterVorgang() {
+  const rechnung = require('../rechnung');
+  const zeit = require('../zeit');
+  zeitRechnung((db, { e5 }) => {
+    rechnung.erstelle(db, { ...AUGUST, tickets: ['PROJ-500'], empfaenger: EMPF });
+    assert.throws(() => zeit.waehle(db, e5, 's-r', 'keins'), /abgerechnet/, 'Keins auf abgerechnete Vorgangszeit angenommen');
+    assert.throws(() => zeit.waehle(db, e5, 's-r', 'meine'), /abgerechnet/, 'Nur meine Zeit auf abgerechnete Vorgangszeit angenommen');
+    // Was Claude-Zeit nicht kuerzt, bleibt moeglich.
+    assert.strictEqual(zeit.waehle(db, e5, 's-r', 'beides').eintrag.id, e5);
+    // Nachtrag mit "Keins" ueber derselben Sitzung: abgelehnt. Timer-Stopp (abgerechneteVerwerfen):
+    // die Wahl faellt weg, gebucht wird nach der Regel — der Timer haengt nicht fest.
+    const daten = { ziel_art: 'vorgang', ziel_schluessel: 'PROJ-777', start: '2026-08-18T10:15:00.000Z', ende: '2026-08-18T10:45:00.000Z', taetigkeit: 'Entwicklung', abrechenbar: true };
+    assert.throws(() => zeit.speichere(db, daten, null, { wahlen: { 's-r': 'keins' } }), /abgerechnet/, 'Nachtrag mit Keins angenommen');
+    const t = zeit.speichere(db, daten, null, { wahlen: { 's-r': 'keins' }, abgerechneteVerwerfen: true });
+    assert.ok(!t.kulanz_min && !zeit.ueberlappungVon(db, t.id).sitzungen.some((s) => s.wahl === 'keins'), 'Timer-Stopp uebernimmt die kuerzende Wahl');
+  });
+}
+
+// --- Zeiterfassung (Block Z4): Wahl am laufenden Timer, Rueckgaengig, Liste ---
+// Gegenprobe: timerStop ohne die Timer-Wahlen bucht 60 statt 30 Minuten.
+function testTimerWahl() {
+  const zeit = require('../zeit');
+  mitRundung(5, () => mitZeitmodell(5, 'aktivitaet', () => {
+    const { db, zeile } = zeitDb();
+    aktivSitzung(zeile, 'sA', VIERZEHN + 30, VIERZEHN + 90, 'Projekt A', 'PROJ-1');
+    const t0 = Date.parse('2026-08-18T14:00:00.000Z');
+    const start = { ziel_art: 'vorgang', ziel_schluessel: 'PROJ-2', taetigkeit: 'Entwicklung' };
+    assert.throws(() => zeit.timerWahl(db, 'sA', 'claude', t0), /Kein Timer/);
+    zeit.timerStart(db, start, t0);
+    assert.strictEqual(zeit.timerVorschau(db, t0 + 30e3), null, 'Vorschau unter einer Minute');
+    const v = zeit.timerVorschau(db, t0 + 60 * 60e3);
+    assert.deepStrictEqual(v.sitzungen.map((s) => [s.session_id, s.regel, s.min]), [['sA', 'anderes_ziel', 30]]);
+    assert.strictEqual(v.gezaehlt_min, 60);
+    assert.throws(() => zeit.timerWahl(db, 'sA', 'halb', t0 + 60 * 60e3), /Wahl: beides, claude, meine oder keins/);
+    assert.throws(() => zeit.timerWahl(db, 'gibts-nicht', 'claude', t0 + 60 * 60e3), /Überschneidung/);
+    // Liste: alle oder keine — eine fremde Sitzung verhindert auch die gueltige.
+    assert.throws(() => zeit.timerWahl(db, ['sA', 'gibts-nicht'], 'keins', t0 + 60 * 60e3), /Überschneidung/);
+    assert.strictEqual(zeit.timerAktuell(db, t0).wahlen, undefined, 'halbe Wahl gespeichert');
+    const w = zeit.timerWahl(db, ['sA'], 'claude', t0 + 60 * 60e3);
+    assert.deepStrictEqual([w.vorschau.abzug_min, w.vorschau.gezaehlt_min, w.vorschau.sitzungen[0].wahl], [30, 30, 'claude']);
+    assert.deepStrictEqual(zeit.timerAktuell(db, t0).wahlen, { sA: 'claude' });
+    const e = zeit.timerStop(db, t0 + 60 * 60e3).eintrag;
+    assert.deepStrictEqual([e.gezaehlt_min, e.abzug_min], [30, 30], 'Wahl am Timer gilt beim Buchen nicht');
+    assert.deepStrictEqual(db.prepare('SELECT session_id, wahl FROM ueberlappung_wahl WHERE eintrag_id = ?').all(e.id)
+      .map((r) => [r.session_id, r.wahl]), [['sA', 'claude']], 'Wahl nicht beim Eintrag gespeichert');
+    // Rueckgaengig: nicht, solange ein anderer Timer laeuft — die Buchung bleibt.
+    zeit.timerStart(db, start, t0 + 61 * 60e3);
+    assert.throws(() => zeit.timerZurueck(db, e.id, t0 + 61 * 60e3), /läuft schon ein Timer/);
+    assert.ok(zeit.lade(db, e.id), 'Buchung trotz Ablehnung geloescht');
+    zeit.timerVerwerfen(db);
+    // Sonst in einem Schritt: Eintrag weg, Timer laeuft mit altem Beginn und alter Wahl weiter.
+    zeit.timerZurueck(db, e.id, t0 + 61 * 60e3);
+    const t = zeit.timerAktuell(db, t0 + 61 * 60e3);
+    assert.deepStrictEqual([t.start, t.laeuft_min, t.wahlen.sA, t.ziel_schluessel], [e.start, 61, 'claude', 'PROJ-2'], 'Timer nicht wiederhergestellt');
+    assert.strictEqual(zeit.lade(db, e.id), null, 'Buchung nach Rueckgaengig noch da');
+    assert.strictEqual(db.prepare('SELECT COUNT(*) n FROM ueberlappung_wahl WHERE eintrag_id = ?').get(e.id).n, 0);
+    assert.strictEqual(zeit.timerVorschau(db, t0 + 60 * 60e3).abzug_min, 30);
+    zeit.timerVerwerfen(db);
+    // Nur direkt nach dem Stopp: kein beliebiger alter oder nachgetragener Eintrag.
+    const e2 = zeit.timerStop(db, (zeit.timerStart(db, start, t0 + 120 * 60e3), t0 + 150 * 60e3)).eintrag;
+    assert.throws(() => zeit.timerZurueck(db, e2.id, t0 + 161 * 60e3), /direkt nach dem Stoppen/, 'Rueckgaengig nach 11 Min angenommen');
+    const mitPause = zeit.speichere(db, { ...start, start: '2026-08-18T06:00:00.000Z', ende: '2026-08-18T07:00:00.000Z', pause_min: 10 }, null, { jetzt: t0 });
+    assert.throws(() => zeit.timerZurueck(db, mitPause.id, t0), /direkt nach dem Stoppen/, 'Eintrag mit Pause zum Timer gemacht');
+    assert.ok(zeit.lade(db, e2.id) && zeit.lade(db, mitPause.id), 'abgelehntes Rueckgaengig hat geloescht');
+    zeit.loesche(db, e2.id);
+    zeit.loesche(db, mitPause.id);
+    // Abgerechnet: kein Rueckgaengig.
+    const g = eintrag(db, { ziel_schluessel: 'PROJ-2', start: '2026-08-18T08:00:00.000Z', ende: '2026-08-18T09:00:00.000Z' });
+    db.prepare("UPDATE zeit_eintrag SET status = 'abgerechnet', rechnung_nr = 'R-1' WHERE id = ?").run(g.id);
+    assert.throws(() => zeit.timerZurueck(db, g.id, t0), /gesperrt/);
+    assert.strictEqual(zeit.timerAktuell(db, t0), null, 'abgelehntes Rueckgaengig hat einen Timer gesetzt');
+    db.prepare('DELETE FROM zeit_eintrag WHERE id = ?').run(g.id);
+    // Laufender Timer zaehlt in die Arbeitszeit des Tages (Vereinigung mit Claude).
+    const montag = '2026-08-17';
+    const ohne = zeit.woche(db, montag, t0).tage.find((x) => x.tag === '2026-08-18').arbeitszeit_min;
+    zeit.timerStart(db, start, t0 - 60 * 60e3);
+    const mit = zeit.woche(db, montag, t0).tage.find((x) => x.tag === '2026-08-18');
+    assert.strictEqual(mit.arbeitszeit_min - ohne, 60, 'laufender Timer fehlt in der Arbeitszeit (13–14 Uhr frei)');
+    assert.strictEqual(mit.claude_fenster[0].modell, 'aktivitaet', 'Claude-Fenster ohne Zeitmodell');
+    zeit.timerVerwerfen(db);
+    // Nachtrag: Wahl in Vorschau und beim Speichern (neu und geaendert), Betrag in der Vorschau.
+    const d = { ...start, start: '2026-08-18T14:00:00.000Z', ende: '2026-08-18T15:00:00.000Z' };
+    const vk = zeit.vorschau(db, { ...d, wahlen: { sA: 'keins' } });
+    assert.deepStrictEqual([vk.kulanz_min, vk.gezaehlt_min], [30, 30], 'Vorschau ohne Wahl');
+    assert.strictEqual(vk.eur, 0.5 * vk.satz, 'Vorschau ohne Betrag');
+    const n1 = zeit.speichere(db, d, null, { wahlen: { sA: 'keins' } });
+    assert.strictEqual(n1.kulanz_min, 30, 'Wahl beim Speichern verloren');
+    const n2 = zeit.speichere(db, d, n1.id, { wahlen: { sA: 'beides' } });
+    assert.deepStrictEqual([n2.kulanz_min, n2.parallel_min, n2.gezaehlt_min], [0, 30, 60], 'Wahl beim Aendern nicht uebernommen');
+    // Gespeichert, nicht nur gerechnet: das Nachrechnen sieht dieselbe Wahl.
+    assert.strictEqual(zeit.ueberlappungVon(db, n1.id).parallel_min, 30, 'Wahl beim Aendern nicht gespeichert');
+    assert.throws(() => zeit.speichere(db, d, null, { wahlen: { sA: 'halb' } }), /Wahl/);
+  }));
+}
+
+// Gegenprobe: liste ohne Anreicherung hat kein eur/name.
+function testZeitListeWert() {
+  const zeit = require('../zeit');
+  mitRundung(5, () => {
+    const { db } = zeitDb();
+    eintrag(db, { ziel_art: 'projekt', ziel_schluessel: 'Projekt A' });
+    eintrag(db, { ziel_art: 'intern', ziel_schluessel: 'Planung', start: '2026-08-18T16:00:00.000Z', ende: '2026-08-18T16:30:00.000Z' });
+    const l = zeit.liste(db, {});
+    const p = l.find((e) => e.ziel_art === 'projekt');
+    const i = l.find((e) => e.ziel_art === 'intern');
+    const satz = metrics.satzFuerProjekt('Projekt A').satz;
+    assert.ok(satz > 0, 'Testsatz fehlt');
+    assert.deepStrictEqual([p.name, p.satz, p.eur], ['Projekt A', satz, 1.5 * satz], 'Projekt-Eintrag ohne Wert');
+    assert.deepStrictEqual([i.name, i.satz, i.eur], ['Planung', null, 0], 'Intern mit Wert');
+    // Eine Formel: dieselben Werte wie in der Auswertung.
+    assert.deepStrictEqual(l.map((e) => e.eur).sort(), zeit.imRahmen(db, {}).map((e) => e.eur).sort());
+  });
+}
+
 async function main() {
   console.log('c2invoice Selbstpruefung\n');
+  test('Zeiterfassung: Rechnung mit Zeitpositionen und Kulanz, keine Doppelabrechnung', testRechnungZeitpositionen);
+  test('Zeiterfassung: Rechnung prueft Eintraege und rechnet sie frisch', testRechnungZeitPruefungen);
+  test('Zeiterfassung: Sperre beim Stellen, Wettlauf, Storno gibt frei', testSperreUndStorno);
+  test('Zeiterfassung: Abrechnung und Kennzahlen kennen die manuelle Zeit', testAbrechnungZeitpositionen);
+  test('Zeiterfassung: Druck und E-Rechnung fuer Zeit und Kulanz', testDruckUndErechnungZeit);
+  test('Zeiterfassung: Woche, Monat, Ziele, Analyse', testZeitAnsichten);
+  test('Analyse: Wochen mit Claude und manueller Zeit, Taetigkeiten mit Betrag', testAnalyseWochenTaetigkeiten);
+  test('Wahl: abgerechnete Vorgangszeit laesst sich nicht kuerzen', testWahlAbgerechneterVorgang);
+  test('Zeiterfassung: Wahl am laufenden Timer gilt beim Buchen', testTimerWahl);
+  test('Zeiterfassung: Liste traegt Betrag und Zielnamen', testZeitListeWert);
+  test('Zeiterfassung: Ueberlappung nach Regel eigene, gleiches Ziel, Meeting, Werkzeug', testUeberlappungRegeln);
+  test('Zeiterfassung: Abzug als Vereinigung, Rundung nach dem Abzug', testUeberlappungVereinigung);
+  test('Zeiterfassung: schneide nimmt genau die gewaehlten Minuten', testSchneide);
+  test('Zeiterfassung: Vierer-Wahl aendert Eintrag und Sitzung', testWahl);
+  test('Zeiterfassung: Vorschau rechnet wie Speichern, ohne zu schreiben', testZeitVorschau);
+  test('Zeiterfassung: Nachrechnen nur offene Eintraege der letzten 48 h', testNachrechnen);
+  test('Zeiterfassung: Live-Sitzungen zeigen Ueberlappung und Wahl', testLiveWahl);
+  test('Live: Ueberlappung je Sitzung traegt die Zeitspanne des Eintrags', testLiveWahlZeitspanne);
+  test('Vorgang: Sitzungen tragen ihre Wahl bei Ueberlappung', testVorgangSitzungWahl);
+  test('Kennzahlen: offene Stunden aus Claude und manueller Zeit', testKennzahlenOffeneStunden);
+  test('Zeiterfassung: Rohzeit, Pause, feste Dauer, Rundung je Projekt', testZeitRundung);
+  test('Zeiterfassung: Eingaben werden geprueft, intern nie abrechenbar', testZeitGrenzen);
+  test('Zeiterfassung: manuelle Zeit im Arbeitswert, nicht in den Claude-Stunden', testManuellImArbeitswert);
+  test('CSV-Export: manuelle Stunden und ihr Arbeitswert als eigene Spalten', testCsvManuelleZeit);
+  test('Zeiterfassung: Ziele ohne Claude erscheinen, interne Zeit nur als Kosten', testManuellOhneEvents);
+  test('Zeiterfassung: ohne Eintraege bleiben alle Zahlen gleich', testOhneEintraegeUnveraendert);
+  test('Zeiterfassung: Timer startet, bucht beim Wechsel, verwirft unter 1 Min', testZeitTimer);
+  test('Zeiterfassung: Tätigkeitsarten mit Saat, eigenem Satz und Grenzen', testTaetigkeitsarten);
+  test('Zeiterfassung: Rundung und Tagessoll mit Grenzen, Rundung je Projekt bleibt', testZeitEinstellungen);
+  test('Zeiterfassung: Vorgangsposition bleibt Claude-Zeit x Satz', testBelegOhneManuelleZeit);
+  test('Analyse: Perioden mit Zeit ohne Request, Kosten je aktive Stunde', testByPeriodNurZeit);
+  test('Analyse: Verlauf je Modell summiert auf den Zeitraum', testVerlaufJeModell);
+  test('Analyse: Fluss Modell → Projekt → Vorgang ohne Werkzeugbetrieb', testFluss);
+  test('Analyse: Marge je Woche rechnet wie kennzahlen()', testMargeJeWoche);
+  test('Detail: Cache-Schreiben bleibt nach 5m/1h getrennt', testCacheGetrenntJeModell);
+  test('Detail: USD je Tokenart, Abweichung zur erfassten Summe offen', testTokenArten);
+  test('Detail: Sitzungen eines Vorgangs ergeben Zeit und Dollar des Vorgangs', testSitzungenJeVorgang);
+  test('Tabelle: Dollar je Tag und Vorgang, Summe = Vorgang', testVerlaufJeVorgang);
+  test('Live: Tokens je Minute der letzten Stunde', testLiveMinuten);
+  test('Live: Spuren je Sitzung — abrechenbare Fenster und Agentenzeit', testLiveSpuren);
+  test('Hub: Cache-Ersparnis je Modell mit dessen Preis', testCacheErsparnis);
+  test('Hub: Kennzahlen des Zeitraums rechnen wie mehrwert(), abgerechnet + offen = Arbeitswert', testKennzahlenZeitraum);
+  test('Oberfläche: Diagramm-Bausteine liefern gültige Pfade ohne NaN', testChartBausteine);
+  test('Oberfläche: Zeitraum und gleich lange Vorperiode', testZeitraum);
+  test('Raster: Kachelgröße aus dem Speicher nur in Grenzen', testKachelGroesse);
+  test('Raster: Verschieben nach links und nach rechts', testVerschiebe);
+  test('Eingabe: Betrag deutsch und englisch, sonst keine Zahl', testBetragAus);
+  test('Analyse: Verlauf je Projekt summiert auf den Zeitraum', testVerlaufJeProjekt);
+  test('Analyse: Kosten je Stunde im Schnitt = Summe USD / Summe Stunden', testUsdJeStunde);
+  test('Diagramme: Marge je Woche gegen das Ziel', testMargeWochenZeichnung);
   test('Dedup: Kopien desselben Requests zaehlen einmal', testDedup);
   test('Cache-Tokens werden nach 5m/1h getrennt und gehen nicht verloren', testUsageSplit);
   test('Ticket wird aus dem Branch gelesen', testTicket);
@@ -3775,6 +6975,18 @@ async function main() {
   test('Abokosten im Zeitraum: volle Monate voll, angeschnittene anteilig', testAboKostenZeitraum);
   test('Werkzeug-Overhead wird von Kundenprojekten getrennt', testOverhead);
   test('Werkzeuge werden dem parallel bearbeiteten Projekt zugeordnet', testWerkzeugZuordnung);
+  test('Kalender: ICS-Parser mit Faltung, ganztaegig, Serien und Ausnahmen', testIcsParser);
+  test('Kalender: rateZiel erkennt Vorgang, Projekt und Kunde', testRateZiel);
+  test('Kalender: Feeds koennen den Server nicht lahmlegen oder Termine loeschen', testIcsHaertung);
+  test('Kalender: Konten aus der Konfiguration werden geprueft', testKalenderKonten);
+  test('Kalender: Termine erscheinen in der Woche', testWocheTermine);
+  test('Kalender: Erinnerung unterscheidet claude, begleiten und manuell', testErinnerungFall);
+  test('Zeit: Workload 7 Tage aus Meetings und Blockern', testWorkload);
+  test('Kalender: Blocker ohne Erinnern bleibt still', testErinnernSchalter);
+  test('Zeit: Termin buchen verknuepft Eintrag und Termin', testTerminBuchen);
+  test('Kern: Google-Vorlage-URL', testGoogleVorlageUrl);
+  test('Kalender: Abgleich behaelt gebuchte Termine', testAbgleichBehaeltGebuchte);
+  test('Zeit: Restkapazitaet heute aus Soll, Arbeitszeit und anstehenden Terminen', testRestkapazitaet);
   test('Ticket rechnet eigene Arbeit plus begleitende Werkzeuge ab', testTicketGesamtsumme);
   test('Vorgaenge ohne Ticket: abrechenbar, ohne Werkzeuge doppelt und ohne byTicket zu aendern',
     () => mitZeitmodell(5, 'eingaben', testOhneTicket));
@@ -3807,6 +7019,24 @@ async function main() {
   test('Vergleich auf der Rechnung: nur Zeit, mit Hinweis, in der Abschrift', testVergleichAufRechnung);
   test('Angebote: eigener Nummernkreis, Grenzen, Uebernahme laesst das Angebot stehen', testAngebote);
   test('Pauschalpositionen: Festpreis ohne Stunden, Druckansicht traegt beide Formen', testPauschalPositionen);
+  test('Zahlungen: buchen, Rest und Grenzen', testZahlungen);
+  test('Rechnungen: Status aus Zahlungen abgeleitet', testStatusAusZahlungen);
+  test('Rechnungen: Liste mit Fälligkeit, Gezahlt und Rest', testRechnungsListe);
+  test('Rechnungen: Kennzahlen offen, bezahlt, Zahlungsdauer', testBelegKennzahlen);
+  test('Überfällig: Kennzahlen und Liste vom Server', testUeberfaellig);
+  test('Einstellungen: nur echte Zahlen', testEchteZahlen);
+  test('Stammdaten: Steuerzeichen abgelehnt', testStammdatenSteuerzeichen);
+  test('Storno: Zahlungen fallen aus bezahlt, Toleranz-Cent, alles oder nichts', testStornoUndZahlungen);
+  test('Fälligkeit: Altrechnungen festgeschrieben, Ziel 0 bleibt 0', testFaelligAltrechnung);
+  test('Texte: Steuer- und Bidi-Zeichen abgelehnt, Kontakt-Id streng', testTextZeichen);
+  test('Angebote: Status abgelaufen und abgerechnet abgeleitet', testAngebotStatusAbgeleitet);
+  test('Rechnungen: baue() liefert die Positionen, die erstelle() schreibt', testBaue);
+  test('Rechnungen: freie Posten, Pauschale, Rabatt und Zahlungsziel', testRechnungFreiePosten);
+  test('Belege: Vorschau schreibt nichts und gleicht dem gestellten Dokument', testBelegVorschau);
+  test('Editor: Entwürfe aus dem Speicher nur in fester Form', testEntwuerfeAus);
+  test('Ansprechpartner: einmalige Übernahme, Grenzen, Kontakt muss existieren', testAnsprechpartner);
+  test('Kontakte: Kennzahlen je Kontakt zählen nur gestellte Rechnungen', testKennzahlenJeKontakt);
+  test('Darstellung: Bewegung reduzieren nur an oder aus', testBewegung);
   test('Kontakte: Grenzen halten, Teileingabe bleibt harmlos, Lead wird einmal zum Kunden', testKontakte);
   test('Vorlagen: Grenzen halten, fehlender Satz bleibt leer statt null Euro', testVorlagen);
   test('Vorgang traegt Satz und Projekt aus derselben Wahl', testTicketProjekt);
@@ -3865,11 +7095,68 @@ async function main() {
   }
 
   try {
+    await testSicherheitsHeader();
+    console.log('  ok   Server: Sicherheits-Header');
+  } catch (err) {
+    failed++;
+    console.log('  FAIL Server: Sicherheits-Header\n       ' + err.message);
+  }
+
+  try {
+    await testAnsprechpartnerRoute();
+    console.log('  ok   Ansprechpartner: Routen prüfen und lehnen ab');
+  } catch (err) {
+    failed++;
+    console.log('  FAIL Ansprechpartner: Routen prüfen und lehnen ab\n       ' + err.message);
+  }
+
+  try {
+    await testVorschauRoute();
+    console.log('  ok   Belege: Vorschau-Route lehnt ab, ohne zu schreiben');
+  } catch (err) {
+    failed++;
+    console.log('  FAIL Belege: Vorschau-Route lehnt ab, ohne zu schreiben\n       ' + err.message);
+  }
+
+  try {
+    await testRechnungEinzelabruf();
+    console.log('  ok   Rechnungen: Einzelabruf als JSON nur mit gültiger Nummer');
+  } catch (err) {
+    failed++;
+    console.log('  FAIL Rechnungen: Einzelabruf als JSON nur mit gültiger Nummer\n       ' + err.message);
+  }
+
+  try {
     await testHostHeader();
     console.log('  ok   Server: fremder Host-Header wird abgewiesen (DNS-Rebinding)');
   } catch (err) {
     failed++;
     console.log('  FAIL Server: fremder Host-Header wird abgewiesen (DNS-Rebinding)\n       ' + err.message);
+  }
+
+  for (const [name, fn] of [
+    ['Kalender: Sync legt an, gleicht ab und behaelt die Zuordnung', testKalenderSync],
+    ['Kalender: Routen fuer Termine und Kalender', testKalenderRouten],
+    ['Kalender: Routen fuer Hinweise und Workload', testHinweisRouten],
+    ['Kalender: verschobener Blocker wird neu erinnert', testErinnerungVerschoben],
+    ['Kalender: verbinden und trennen aus der Oberflaeche', testKalenderVerbinden],
+    ['Kalender: Google-Termin wird beim Abgleich zusammengefuehrt', testGoogleZusammenfuehren],
+  ]) {
+    try {
+      await fn();
+      console.log('  ok   ' + name);
+    } catch (err) {
+      failed++;
+      console.log('  FAIL ' + name + '\n       ' + err.message);
+    }
+  }
+
+  try {
+    await testZeitRouten();
+    console.log('  ok   Zeiterfassung: Routen pruefen und lehnen ab');
+  } catch (err) {
+    failed++;
+    console.log('  FAIL Zeiterfassung: Routen pruefen und lehnen ab\n       ' + err.message);
   }
 
   try {

@@ -14,6 +14,7 @@ const { execFile, execFileSync } = require('node:child_process');
 const config = require('./config.json');
 const metrics = require('./metrics');
 const kontakte = require('./kontakte');
+const zeit = require('./zeit');
 
 const RECHNUNGS_DIR = path.join(__dirname, 'data', 'rechnungen');
 
@@ -143,7 +144,17 @@ function istTagSicher(pruefung, wert) {
 // aktuellen Zahlungsziel gerechnet.
 function faelligAm(inv) {
   if (inv.faellig_am) return inv.faellig_am;
-  return tagNach(inv.erstellt_am, Number(config.rechnung.zahlungszielTage) || 14);
+  return tagNach(inv.erstellt_am, zahlungsziel());
+}
+
+// Altrechnungen einmal festschreiben: sonst wanderten Faelligkeit und Ampel
+// mit jeder Aenderung des Zahlungsziels. Geschrieben wird der Tag, der bis
+// jetzt angezeigt wurde. Laeuft beim Start; ohne Altrechnungen tut er nichts.
+function faelligFestschreiben(db) {
+  const alt = db.prepare('SELECT nr, erstellt_am FROM invoices WHERE faellig_am IS NULL').all();
+  const setze = db.prepare('UPDATE invoices SET faellig_am = ? WHERE nr = ?');
+  for (const r of alt) setze.run(faelligAm(r), r.nr);
+  return alt.length;
 }
 
 function tagNach(zeitpunkt, tage) {
@@ -168,22 +179,140 @@ function naechsteNummer(db, jahr) {
   return { laufnr, nr: `${jahr}-${String(laufnr).padStart(4, '0')}` };
 }
 
+// --- Freie Positionen -----------------------------------------------------------
+// Eine Pruefung fuer Angebot und Rechnung (R8). Die Grenzen sind bewusst eng:
+// das Dokument geht nach aussen, ein Tippfehler in der Stundenzahl faellt erst
+// beim Kunden auf.
+//
+// Zahl oder nicht-leerer Text (die bisherige Ansicht schickt Feldinhalte).
+// Alles andere ist NaN: Number() machte aus null 0, aus true 1 und aus [5] 5 —
+// eine Position mit 0 EUR stuende dann unveraenderlich auf der Rechnung.
+function zahlFeld(v) {
+  if (typeof v === 'number') return v;
+  if (typeof v === 'string' && v.trim() !== '') return Number(v);
+  return NaN;
+}
+
+function freiePosition(p, vFaktor) {
+  // Nur Zeichenketten: ein Objekt wuerde sonst als "[object Object]" auf dem
+  // Dokument landen, ein Array stillschweigend zusammengefuegt.
+  if (!p || typeof p.bezeichnung !== 'string') {
+    throw new Error('Jede Position braucht eine Bezeichnung als Text.');
+  }
+  const bezeichnung = p.bezeichnung.trim();
+  if (!bezeichnung) throw new Error('Jede Position braucht eine Bezeichnung.');
+  if (bezeichnung.length > 200) throw new Error('Bezeichnung: hoechstens 200 Zeichen.');
+  kontakte.ohneErsatzzeichen(bezeichnung, 'Bezeichnung');
+
+  // Rabatt je Position, nur auf Stunden: das Dokument zeigt ihn als
+  // "Satz/h abzgl. X %" — bei einem Festpreis stuende dort ein Satz, den es
+  // nicht gibt. Ein Festpreis wird direkt angepasst.
+  const rabattRoh = p.rabatt_prozent === undefined || p.rabatt_prozent === '' ? 0 : p.rabatt_prozent;
+  if (typeof rabattRoh !== 'number' || !Number.isFinite(rabattRoh) || rabattRoh < 0 || rabattRoh > 100) {
+    throw new Error(`"${bezeichnung}": Rabatt muss zwischen 0 und 100 Prozent liegen.`);
+  }
+  const rabatt = rund2(rabattRoh);
+
+  // Pauschalposition: ein Festpreis fuer die beschriebene Leistung, ohne
+  // Stunden. Die Grenze liegt enger als Stunden x Satz es zuliesse — ein
+  // vertippter Festpreis geht ungeprueft nach aussen.
+  if (p.typ === 'pauschal') {
+    if (rabatt > 0) throw new Error(`"${bezeichnung}": Rabatt nur bei Stunden, den Festpreis direkt anpassen.`);
+    const betrag = zahlFeld(p.betrag_eur);
+    // Nach dem Runden pruefen: 0,004 ist groesser 0, steht aber als 0,00 da.
+    if (!Number.isFinite(betrag) || rund2(betrag) <= 0 || betrag > 1000000) {
+      throw new Error(`"${bezeichnung}": Festpreis muss zwischen 0 und 1000000 liegen.`);
+    }
+    return {
+      bezeichnung,
+      typ: 'pauschal',
+      stunden: null,
+      satz: null,
+      basissatz: null,
+      rabatt_prozent: 0,
+      betrag_eur: rund2(betrag),
+      vergleich_stunden: null,
+      vergleich_faktor: null,
+    };
+  }
+
+  const stunden = zahlFeld(p.stunden);
+  if (!Number.isFinite(stunden) || rund2(stunden) <= 0 || stunden > 10000) {
+    throw new Error(`"${bezeichnung}": Stunden muessen zwischen 0 und 10000 liegen.`);
+  }
+  // Fehlt der Satz, gilt der Standardsatz; null ist kein Fehlen, sondern ein Fehler.
+  const basis = p.satz === undefined || p.satz === '' ? config.stundensatz : zahlFeld(p.satz);
+  if (!Number.isFinite(basis) || basis < 0 || basis > 10000) {
+    throw new Error(`"${bezeichnung}": Stundensatz muss zwischen 0 und 10000 liegen.`);
+  }
+  // Wie in metrics: der Rabatt mindert den Satz, nicht den Betrag. Gerundet
+  // wird der Satz, damit Stunden x Satz auf dem Dokument den Betrag ergibt.
+  const satz = rund2(basis * (1 - rabatt / 100));
+
+  return {
+    bezeichnung,
+    stunden: rund2(stunden),
+    satz,
+    basissatz: rund2(basis),
+    rabatt_prozent: rabatt,
+    betrag_eur: rund2(stunden * satz),
+    // Nur Zeit, nie ein Vergleichsbetrag — siehe die Begruendung in
+    // metrics.mehrwert().
+    vergleich_stunden: vFaktor > 1 ? rund2(stunden * vFaktor) : null,
+    vergleich_faktor: vFaktor > 1 ? vFaktor : null,
+  };
+}
+
 // --- Erstellen ---------------------------------------------------------------
+// Positionen aus Vorgaengen, Projekten und freien Posten, ohne zu schreiben.
+// Unterbau von erstelle() und der Vorschau: beide zeigen so dieselben Zeilen.
+//
 // projekte: Vorgaenge ohne Vorgangsnummer, ueber den Projektnamen gewaehlt.
 // Bewusst ein eigener Parameter neben tickets: wuerde ein Projektname in
 // tickets stehen, liefe er ungeprueft als Vorgangsnummer auf ein Dokument
 // nach § 14 UStG und in den Jira-Abgleich.
-function erstelle(db, { from, to, tickets, projekte, empfaenger, kontaktId } = {}) {
-  pruefeStammdaten();
+function baue(db, daten = {}) {
+  return baueMitSperre(db, daten).positionen;
+}
+
+// Wie baue(), dazu die Zeiteintraege, die schreibe() sperrt. Getrennt, weil
+// die Sperrliste nicht in die Abschrift gehoert.
+function baueMitSperre(db, { from, to, tickets, projekte, posten, eintraege, gruppierung } = {}) {
   const tListe = Array.isArray(tickets) ? tickets : [];
   const pListe = Array.isArray(projekte) ? projekte : [];
+  if (eintraege !== undefined && eintraege !== null && !Array.isArray(eintraege)) throw new Error('Einträge: Liste erwartet.');
+  if (posten !== undefined && posten !== null && !Array.isArray(posten)) {
+    throw new Error('Posten: Liste erwartet.');
+  }
+  const frei = posten || [];
+  if (frei.length > 100) throw new Error('Hoechstens 100 Positionen je Rechnung.');
+  // Jede Vorschau fragt die Auswertung ab; eine endlose Liste kostet nur Zeit.
+  if (tListe.length > 200 || pListe.length > 200) throw new Error('Hoechstens 200 Vorgaenge je Rechnung.');
+  const hatZeit = Array.isArray(eintraege) && eintraege.length > 0;
+  if (tListe.length === 0 && pListe.length === 0 && frei.length === 0 && !hatZeit) {
+    throw new Error('Keine Vorgaenge oder Positionen gewaehlt.');
+  }
+  // Vergleichsaufwand ohne KI, nur als Zeit. Muss mit in die Abschrift: die
+  // Druckansicht rechnet nichts nach, sonst stuende auf einer alten Rechnung
+  // ploetzlich ein anderer Wert, sobald der Faktor geaendert wird.
+  // Bewusst keine Euro-Entsprechung — Begruendung in metrics.mehrwert().
+  const vFaktor = Number(config.vergleichsFaktor) || 0;
+  // Freie Posten zuerst pruefen: ein Fehler dort soll nicht hinter der
+  // Auswertung der Vorgaenge warten. Ohne Vergleichsangabe: das Dokument
+  // nennt sie "erfasst" und die erfasste Zeit Berechnungsgrundlage — eine von
+  // Hand eingetragene Stundenzahl ist beides nicht.
+  const freiePositionen = frei.map((p) => freiePosition(p, 0));
+  // Manuelle Zeit als eigene Positionen, vor den Vorgaengen geprueft und frisch
+  // gerechnet. Jeder Eintrag muss im Leistungszeitraum liegen (§ 14 UStG).
+  const zeitTeil = zeit.fuerRechnung(db, eintraege, gruppierung);
+  for (const z of zeitTeil.sperre) {
+    if ((from && z.tag < from) || (to && z.tag > to)) {
+      throw new Error('Eintrag #' + z.id + ' liegt ausserhalb des Leistungszeitraums.');
+    }
+  }
   if (tListe.length === 0 && pListe.length === 0) {
-    throw new Error('Keine Vorgaenge gewaehlt.');
+    return { positionen: [...zeitTeil.positionen, ...freiePositionen], sperre: zeitTeil.sperre };
   }
-  if (!empfaenger || !empfaenger.name) {
-    throw new Error('Empfaenger fehlt (Name ist Pflicht).');
-  }
-  if (!from || !to) throw new Error('Leistungszeitraum fehlt.');
 
   const gewaehlt = new Set(tListe);
   const gewaehltP = new Set(pListe);
@@ -192,20 +321,27 @@ function erstelle(db, { from, to, tickets, projekte, empfaenger, kontaktId } = {
       ? metrics.byTicket(db, { from, to }).filter((t) => gewaehlt.has(t.ticket))
       : []),
     ...(pListe.length
-      ? metrics.ohneTicket(db, { from, to }).filter((t) => gewaehltP.has(t.gruppe))
+      // Nur Projektzeilen: eine Kundenzeile (nur manuelle Zeit) traegt den
+      // Firmennamen als Gruppe und darf nicht als Projekt auf den Beleg.
+      ? metrics.ohneTicket(db, { from, to }).filter((t) => t.art === 'projekt' && gewaehltP.has(t.gruppe))
       : []),
   ];
-  if (zeilen.length === 0) {
+  // Nur Zeilen mit Claude-Zeit oder lokalen Modellen: ein Vorgang mit nur
+  // manueller Zeit ergaebe sonst eine Position mit 0 Stunden und 0 EUR. Seine
+  // Zeit geht ueber die Eintraege auf die Rechnung.
+  const mitInhalt = zeilen.filter((t) => t.active_hours > 0 || (t.lokal_betrag_eur || 0) > 0);
+  // Gewaehlt, aber ohne Claude-Zeit: nicht still weglassen, sonst fehlt er auf
+  // der Rechnung, ohne dass es jemand merkt.
+  const ohne = zeilen.filter((t) => !mitInhalt.includes(t));
+  if (ohne.length && zeitTeil.positionen.length) {
+    throw new Error((ohne[0].ticket ? 'Vorgang ' + ohne[0].ticket : 'Projekt ' + ohne[0].gruppe) +
+      ' hat im Zeitraum keine Claude-Zeit — seine Zeit über die Einträge abrechnen.');
+  }
+  if (mitInhalt.length === 0 && zeitTeil.positionen.length === 0) {
     throw new Error('Zu den gewaehlten Vorgaengen gibt es im Zeitraum keine Daten.');
   }
 
-  // Vergleichsaufwand ohne KI, nur als Zeit. Muss mit in die Abschrift: die
-  // Druckansicht rechnet nichts nach, sonst stuende auf einer alten Rechnung
-  // ploetzlich ein anderer Wert, sobald der Faktor geaendert wird.
-  // Bewusst keine Euro-Entsprechung — Begruendung in metrics.mehrwert().
-  const vFaktor = Number(config.vergleichsFaktor) || 0;
-
-  const positionen = zeilen.map((t) => ({
+  const positionen = mitInhalt.map((t) => ({
     // Ticketlose Zeilen tragen keinen Vorgangsschluessel. Auf dem Dokument
     // steht dann der Projektname als Leistungsbezeichnung — kein erfundener
     // Schluessel, der nach einer Vorgangsnummer aussieht.
@@ -220,7 +356,9 @@ function erstelle(db, { from, to, tickets, projekte, empfaenger, kontaktId } = {
     basissatz: rund2(t.stundensatz_standard),
     rabatt_prozent: t.rabatt_prozent || 0,
     satz: rund2(t.stundensatz),
-    betrag_eur: rund2(t.arbeitswert),
+    // Nur der Claude-Anteil: die Stunden oben sind Claude-Stunden. Manuelle
+    // Zeit kommt als eigene Position, nie versteckt in diesem Betrag.
+    betrag_eur: rund2(t.arbeitswert_claude),
     // Nur zur Information auf der Rechnung, keine Berechnungsgrundlage.
     tokens_gesamt: t.gesamt_tokens,
     vergleich_stunden: vFaktor > 1 ? Math.round(t.active_hours * vFaktor * 100) / 100 : null,
@@ -234,7 +372,7 @@ function erstelle(db, { from, to, tickets, projekte, empfaenger, kontaktId } = {
   // Der Betrag stammt aus metrics und wird hier NICHT nachgerechnet — der
   // Rabatt steckt bereits darin (derselbe wie beim Stundensatz). Wer ihn hier
   // noch einmal anwendete, zoege ihn zweimal ab.
-  for (const t of zeilen) {
+  for (const t of mitInhalt) {
     const betrag = rund2(t.lokal_betrag_eur || 0);
     if (!(betrag > 0)) continue;
     const mio = (t.lokal_tokens || 0) / 1e6;
@@ -252,13 +390,68 @@ function erstelle(db, { from, to, tickets, projekte, empfaenger, kontaktId } = {
     });
   }
 
-  return schreibe(db, { von: from, bis: to, empfaenger, positionen, kontaktId });
+  return { positionen: [...positionen, ...zeitTeil.positionen, ...freiePositionen], sperre: zeitTeil.sperre };
 }
 
-// Schreibt die Abschrift. Eine Stelle fuer beide Wege (aus der Auswertung und
-// aus fertigen Positionen), damit Nummer, Steuer, Faelligkeit und die Abschrift
-// des Empfaengers nicht zweimal gebaut werden.
-function schreibe(db, { von, bis, empfaenger, positionen, kontaktId }) {
+// Der fertige Beleg ohne Nummer, ohne Schreiben. erstelle() schreibt ihn,
+// vorschau() zeigt ihn — derselbe Weg, damit beide nicht auseinanderlaufen.
+function entwurf(db, { from, to, tickets, projekte, posten, eintraege, gruppierung, empfaenger, kontaktId, zahlungszielTage } = {}) {
+  pruefeStammdaten();
+  if (!empfaenger || !empfaenger.name) {
+    throw new Error('Empfaenger fehlt (Name ist Pflicht).');
+  }
+  if (!from || !to) throw new Error('Leistungszeitraum fehlt.');
+  // Vor der Auswertung: ein Zeitraum ohne Datumsform faende sonst "keine Daten"
+  // statt den eigentlichen Fehler zu nennen.
+  if (!istTag(from) || !istTag(to)) throw new Error('Leistungszeitraum: Datum in der Form JJJJ-MM-TT erwartet.');
+  // Fehlt die Angabe, gilt die Einstellung. Eine falsche Angabe faellt auf,
+  // statt still durch die Einstellung ersetzt zu werden.
+  let zielTage = zahlungsziel();
+  if (zahlungszielTage !== undefined && zahlungszielTage !== null) {
+    if (!Number.isInteger(zahlungszielTage) || zahlungszielTage < 0 || zahlungszielTage > 120) {
+      throw new Error('Zahlungsziel: ganze Tage von 0 bis 120.');
+    }
+    zielTage = zahlungszielTage;
+  }
+  const { positionen, sperre } = baueMitSperre(db, { from, to, tickets, projekte, posten, eintraege, gruppierung });
+  return { ...dokument(db, { von: from, bis: to, empfaenger, positionen, kontaktId, zielTage }), sperre };
+}
+
+// Gestellt wird nur, was zu sehen war: der Editor schickt die Summe seiner
+// Vorschau mit. Laeuft inzwischen Zeit auf oder aendert sich ein Satz, entsteht
+// nichts — die Rechnung waere sonst unveraenderlich anders als angezeigt.
+// Ohne Angabe (bisherige Ansicht, API) bleibt es beim Erstellen wie bisher.
+function pruefeErwartet(d, erwartet) {
+  if (erwartet === undefined || erwartet === null) return;
+  if (typeof erwartet !== 'number' || !Number.isFinite(erwartet)) throw new Error('erwartetBrutto: Zahl erwartet.');
+  if (Math.abs(d.brutto_eur - erwartet) > 0.004) {
+    const e = new Error('Der Betrag hat sich seit der Vorschau geaendert (jetzt ' + eur(d.brutto_eur) + '). Bitte pruefen und erneut erstellen.');
+    e.abweichung = true;
+    throw e;
+  }
+}
+
+function erstelle(db, daten = {}) {
+  const d = entwurf(db, daten);
+  pruefeErwartet(d, daten.erwartetBrutto);
+  return schreibe(db, d);
+}
+
+// Vorschau fuer den Editor (R6): das Druck-HTML mit "ENTWURF" statt Nummer.
+// Die Summen gehen mit, damit der Editor nichts nachrechnet.
+function vorschau(db, daten = {}) {
+  const d = entwurf(db, daten);
+  return {
+    html: renderHtml({ ...d, nr: 'ENTWURF' }),
+    netto_eur: d.netto_eur, ust_prozent: d.ust_prozent, ust_eur: d.ust_eur,
+    brutto_eur: d.brutto_eur, kleinunternehmer: d.kleinunternehmer, positionen: d.positionen, faellig_am: d.faellig_am,
+  };
+}
+
+// Baut die Abschrift ohne Nummer. Eine Stelle fuer alle Wege (aus der
+// Auswertung, aus fertigen Positionen, als Vorschau), damit Steuer,
+// Faelligkeit und die Abschrift des Empfaengers nicht mehrfach gebaut werden.
+function dokument(db, { von, bis, empfaenger, positionen, kontaktId, zielTage = zahlungsziel() }) {
   // Vor der Nummernvergabe pruefen: eine abgelehnte Anfrage darf keine Nummer
   // aus dem fortlaufenden Kreis verbrauchen. Der Zeitraum geht als Datum in
   // die E-Rechnung und muss deshalb eines sein.
@@ -276,24 +469,45 @@ function schreibe(db, { von, bis, empfaenger, positionen, kontaktId }) {
   // von den addierten Zeilen ab, und genau das faellt beim Pruefen auf.
   const netto = rund2(positionen.reduce((s, p) => s + (Number(p.betrag_eur) || 0), 0));
   const { klein, satz, ust, brutto } = steuer(netto);
-  const jahr = new Date().getFullYear();
-  const { nr, laufnr } = naechsteNummer(db, jahr);
   const jetzt = new Date().toISOString();
-
-  db.prepare(`
-    INSERT INTO invoices (nr, jahr, laufnr, erstellt_am, leistung_von, leistung_bis,
-      empfaenger, aussteller, positionen, netto_eur, ust_prozent, ust_eur,
-      brutto_eur, kleinunternehmer, status, kontakt_id, faellig_am)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'erstellt',?,?)
-  `).run(
-    nr, jahr, laufnr, jetzt, von, bis,
+  return {
+    erstellt_am: jetzt, leistung_von: von, leistung_bis: bis,
     // Der Empfaenger ist die massgebliche Abschrift; kontakt_id nur der Verweis.
-    JSON.stringify(abschrift), JSON.stringify(stammdaten()),
-    JSON.stringify(positionen), netto, satz, ust, brutto, klein ? 1 : 0,
-    kid, tagNach(jetzt, zahlungsziel())
-  );
+    empfaenger: abschrift, aussteller: stammdaten(), positionen,
+    netto_eur: netto, ust_prozent: satz, ust_eur: ust, brutto_eur: brutto,
+    kleinunternehmer: klein, status: 'erstellt', storno_von: null,
+    kontakt_id: kid, faellig_am: tagNach(jetzt, zielTage),
+  };
+}
 
-  return lade(db, nr);
+// Schreibt die Abschrift mit der naechsten Nummer und sperrt die enthaltenen
+// Zeiteintraege mit ihrem Satz — beides oder nichts. Hat ein anderer Weg einen
+// Eintrag seit der Vorschau abgerechnet, entsteht keine Rechnung (409).
+function schreibe(db, d) {
+  const jahr = new Date(d.erstellt_am).getFullYear();
+  return kontakte.inTransaktion(db, () => {
+    const { nr, laufnr } = naechsteNummer(db, jahr);
+    db.prepare(`
+      INSERT INTO invoices (nr, jahr, laufnr, erstellt_am, leistung_von, leistung_bis,
+        empfaenger, aussteller, positionen, netto_eur, ust_prozent, ust_eur,
+        brutto_eur, kleinunternehmer, status, kontakt_id, faellig_am)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'erstellt',?,?)
+    `).run(
+      nr, jahr, laufnr, d.erstellt_am, d.leistung_von, d.leistung_bis,
+      JSON.stringify(d.empfaenger), JSON.stringify(d.aussteller),
+      JSON.stringify(d.positionen), d.netto_eur, d.ust_prozent, d.ust_eur, d.brutto_eur,
+      d.kleinunternehmer ? 1 : 0, d.kontakt_id, d.faellig_am
+    );
+    const sperren = db.prepare("UPDATE zeit_eintrag SET status = 'abgerechnet', rechnung_nr = ?, satz_eingefroren = ? WHERE id = ? AND status = 'offen'");
+    for (const z of d.sperre || []) {
+      if (sperren.run(nr, z.satz, z.id).changes !== 1) {
+        const e = new Error('Ein Eintrag wurde inzwischen abgerechnet. Bitte Vorschau erneuern.');
+        e.abweichung = true;
+        throw e;
+      }
+    }
+    return lade(db, nr);
+  });
 }
 
 // Rechnung aus fertigen Positionen. Wird gebraucht, wenn die Positionen nicht
@@ -309,7 +523,7 @@ function ausPositionen(db, { positionen, empfaenger, von, bis, kontaktId } = {})
   if (!empfaenger || !empfaenger.name) throw new Error('Empfaenger fehlt (Name ist Pflicht).');
   if (!von || !bis) throw new Error('Leistungszeitraum fehlt.');
 
-  return schreibe(db, { von, bis, empfaenger, positionen, kontaktId });
+  return schreibe(db, dokument(db, { von, bis, empfaenger, positionen, kontaktId }));
 }
 
 // Jede Rechnungsnummer, die von aussen hereinkommt, laeuft hier durch. Der
@@ -319,7 +533,8 @@ function ausPositionen(db, { positionen, empfaenger, von, bis, kontaktId } = {})
 const NUMMER_RE = /^\d{4}-\d{4}$/;
 
 function lade(db, nr) {
-  if (!NUMMER_RE.test(String(nr || ''))) return null;
+  // Nur Text: String(["2026-0001"]) passt sonst auf die Regex.
+  if (typeof nr !== 'string' || !NUMMER_RE.test(nr)) return null;
   const row = db.prepare('SELECT * FROM invoices WHERE nr = ?').get(nr);
   if (!row) return null;
   return {
@@ -331,18 +546,218 @@ function lade(db, nr) {
   };
 }
 
-function liste(db) {
+function liste(db, opts = {}) {
+  const heute = opts.heute || tagNach(new Date(), 0);
+  const gezahlt = gezahltJeRechnung(db);
   return db.prepare(`
-    SELECT nr, erstellt_am, empfaenger, brutto_eur, status, pdf_pfad
+    SELECT nr, erstellt_am, empfaenger, brutto_eur, netto_eur, status, pdf_pfad,
+      leistung_von, leistung_bis, storno_von, kontakt_id, faellig_am
     FROM invoices ORDER BY jahr DESC, laufnr DESC
-  `).all().map((r) => ({
-    nr: r.nr,
-    erstellt_am: r.erstellt_am,
-    empfaenger: (JSON.parse(r.empfaenger) || {}).name || '',
-    brutto_eur: r.brutto_eur,
-    status: r.status,
-    hat_pdf: !!r.pdf_pfad,
-  }));
+  `).all().map((r) => {
+    const g = gezahlt.get(r.nr) || { summe: 0 };
+    return {
+      nr: r.nr,
+      erstellt_am: r.erstellt_am,
+      empfaenger: (JSON.parse(r.empfaenger) || {}).name || '',
+      brutto_eur: r.brutto_eur,
+      netto_eur: r.netto_eur,
+      status: r.status,
+      hat_pdf: !!r.pdf_pfad,
+      leistung_von: r.leistung_von,
+      leistung_bis: r.leistung_bis,
+      storno_von: r.storno_von,
+      kontakt_id: r.kontakt_id,
+      faellig_am: faelligAm(r),
+      ...mitAmpel(r, g.summe, heute),
+    };
+  });
+}
+
+// Eine Rechnung samt Zahlungen fuer die aufgeklappte Zeile. Laeuft ueber
+// lade(), damit die Nummernpruefung (NUMMER_RE) auch hier greift.
+function detail(db, nr, opts = {}) {
+  const inv = lade(db, nr);
+  if (!inv) return null;
+  const zahlungen = zahlungenZu(db, nr);
+  const summe = rund2(zahlungen.reduce((s, z) => s + z.betrag_eur, 0));
+  return { ...inv, faellig_am: faelligAm(inv), zahlungen, ...mitAmpel(inv, summe, opts.heute || tagNach(new Date(), 0)) };
+}
+
+// --- Zahlungen (Block 4a, Owner 06.10.: Free) -------------------------------
+// Eine Zahlung aendert nie die Abschrift. Der Status ergibt sich aus der Summe
+// der Eingaenge; ein Cent Toleranz, damit Rundung beim Kunden nicht als
+// offener Rest stehen bleibt. "Ueberfaellig" ist kein Status, sondern die
+// Ampel daneben (R16, frei): Tage seit der Faelligkeit, solange etwas offen ist.
+const TOLERANZ = 0.01;
+
+function statusOf(inv, gezahlt = 0) {
+  if (inv.status === 'storniert' || inv.status === 'storno') return inv.status;
+  const g = Number(gezahlt) || 0;
+  if (inv.brutto_eur - g <= TOLERANZ + 1e-9) return 'bezahlt';
+  return g > 0 ? 'teilbezahlt' : 'offen';
+}
+
+function zahlstand(inv, summe) {
+  const gezahlt = rund2(summe);
+  const status = statusOf(inv, gezahlt);
+  // Bezahlt innerhalb der Toleranz heisst auch: kein Rest. Sonst stuende der
+  // Cent in "Offen gesamt", waehrend die Rechnung als bezahlt gilt.
+  const offen = inv.status === 'erstellt' && status !== 'bezahlt' ? Math.max(0, rund2(inv.brutto_eur - gezahlt)) : 0;
+  return { gezahlt_eur: gezahlt, rest_eur: offen, status_abgeleitet: status };
+}
+
+// Tage seit der Faelligkeit, 0 = nicht ueberfaellig. Beide Tage als
+// "JJJJ-MM-TT": Date.parse liest sie als UTC-Mitternacht, die Differenz ist ganz.
+function ueberfaelligTage(faellig, status, heute) {
+  if (status !== 'offen' && status !== 'teilbezahlt') return 0;
+  return Math.max(0, Math.round((Date.parse(heute) - Date.parse(faellig)) / 86400000)) || 0;
+}
+
+function mitAmpel(inv, summe, heute) {
+  const z = zahlstand(inv, summe);
+  return { ...z, ueberfaellig_tage: ueberfaelligTage(faelligAm(inv), z.status_abgeleitet, heute) };
+}
+
+function gezahltJeRechnung(db) {
+  const m = new Map();
+  for (const r of db.prepare(`
+    SELECT rechnung_nr, SUM(betrag_eur) AS summe, MAX(datum) AS letzte
+    FROM zahlungen GROUP BY rechnung_nr
+  `).all()) m.set(r.rechnung_nr, { summe: r.summe, letzte: r.letzte });
+  return m;
+}
+
+function zahlungenZu(db, nr) {
+  return db.prepare(`
+    SELECT id, rechnung_nr, datum, betrag_eur, notiz, erstellt_am
+    FROM zahlungen WHERE rechnung_nr = ? ORDER BY datum, id
+  `).all(String(nr)).map((z) => ({ ...z }));
+}
+
+function istTag(s) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(s))
+    && istTagSicher((x) => new Date(x + 'T00:00:00Z').toISOString().slice(0, 10) === x, s);
+}
+
+function bucheZahlung(db, { nr, datum, betrag_eur, notiz } = {}) {
+  const inv = lade(db, nr);
+  if (!inv) throw new Error('Rechnung nicht gefunden.');
+  if (inv.status !== 'erstellt') throw new Error(`Rechnung ${nr} ist ${inv.status} und nimmt keine Zahlung an.`);
+  if (typeof betrag_eur !== 'number' || !Number.isFinite(betrag_eur) || betrag_eur <= 0) {
+    throw new Error('Betrag muss eine Zahl groesser 0 sein.');
+  }
+  const betrag = rund2(betrag_eur);
+  // Tage in Ortszeit, wie sie auf dem Kontoauszug stehen.
+  const ausgestellt = tagNach(inv.erstellt_am, 0);
+  const heute = tagNach(new Date().toISOString(), 0);
+  if (!istTag(datum)) throw new Error('Datum in der Form JJJJ-MM-TT erwartet.');
+  if (datum < ausgestellt) throw new Error('Zahlung liegt vor dem Rechnungsdatum ' + ausgestellt + '.');
+  if (datum > heute) throw new Error('Zahlung liegt in der Zukunft.');
+  if (notiz != null && typeof notiz !== 'string') throw new Error('Notiz muss Text sein.');
+  const text = (notiz || '').trim();
+  if (text.length > 200) throw new Error('Notiz zu lang (hoechstens 200 Zeichen).');
+
+  const bisher = rund2(zahlungenZu(db, nr).reduce((s, z) => s + z.betrag_eur, 0));
+  const rest = rund2(inv.brutto_eur - bisher);
+  if (betrag > rest + TOLERANZ + 1e-9) {
+    throw new Error(rest > 0 ? 'Betrag uebersteigt den offenen Rest von ' + eur(rest) + ' EUR.' : 'Rechnung ist bereits bezahlt.');
+  }
+  const r = db.prepare(`
+    INSERT INTO zahlungen (rechnung_nr, datum, betrag_eur, notiz, erstellt_am) VALUES (?,?,?,?,?)
+  `).run(nr, datum, betrag, text, new Date().toISOString());
+  return { id: Number(r.lastInsertRowid), rechnung_nr: nr, datum, betrag_eur: betrag, notiz: text };
+}
+
+function loescheZahlung(db, id) {
+  if (!Number.isInteger(id) || id <= 0) throw new Error('Unbekannte Zahlung.');
+  const r = db.prepare('DELETE FROM zahlungen WHERE id = ?').run(id);
+  if (!r.changes) throw new Error('Unbekannte Zahlung.');
+  return { id };
+}
+
+// Kennzahlen der Rechnungen-Seite. Gestellt und storniert nach dem Tag der
+// Ausstellung im Zeitraum, Zahlungen nach ihrem Eingangstag. Offene Posten
+// sind ein Bestand und haengen nicht am Zeitraum.
+function kennzahlen(db, opts = {}) {
+  // Nur der Tag zaehlt: ein Zeitstempel als Grenze fiele sonst um einen Tag zu kurz aus.
+  const from = opts.from ? String(opts.from).slice(0, 10) : null;
+  const to = opts.to ? String(opts.to).slice(0, 10) : null;
+  const imZeitraum = (tag) => (!from || tag >= from) && (!to || tag <= to);
+  const heute = opts.heute || tagNach(new Date(), 0);
+  const gezahlt = gezahltJeRechnung(db);
+  let gestelltAnzahl = 0, gestelltBrutto = 0, storniert = 0, offen = 0;
+  let ueberAnzahl = 0, ueberEur = 0, ueberAelteste = null;
+  const dauern = [];
+  for (const r of db.prepare('SELECT nr, erstellt_am, brutto_eur, status, faellig_am FROM invoices').all()) {
+    const tag = tagNach(r.erstellt_am, 0);
+    if (r.status === 'storniert' && imZeitraum(tag)) storniert++;
+    if (r.status !== 'erstellt') continue;
+    const g = gezahlt.get(r.nr) || { summe: 0, letzte: null };
+    if (imZeitraum(tag)) { gestelltAnzahl++; gestelltBrutto += r.brutto_eur; }
+    const z = mitAmpel(r, g.summe, heute);
+    offen += z.rest_eur;
+    // Bestand wie offen: haengt am Stichtag, nicht am Zeitraum.
+    if (z.ueberfaellig_tage > 0) {
+      ueberAnzahl++; ueberEur += z.rest_eur;
+      ueberAelteste = Math.max(ueberAelteste || 0, z.ueberfaellig_tage);
+    }
+    if (statusOf(r, g.summe) === 'bezahlt' && g.letzte && imZeitraum(g.letzte)) {
+      dauern.push((Date.parse(g.letzte) - Date.parse(tag)) / 86400000);
+    }
+  }
+  // Wie jeKontakt: Zahlungen zu stornierten Rechnungen zaehlen nicht.
+  const bezahlt = db.prepare(`SELECT z.datum, z.betrag_eur FROM zahlungen z
+    JOIN invoices i ON i.nr = z.rechnung_nr WHERE i.status = 'erstellt'`).all()
+    .filter((z) => imZeitraum(z.datum)).reduce((s, z) => s + z.betrag_eur, 0);
+  return {
+    gestellt_anzahl: gestelltAnzahl,
+    gestellt_brutto: rund2(gestelltBrutto),
+    storniert_anzahl: storniert,
+    offen_eur: rund2(offen),
+    ueberfaellig_anzahl: ueberAnzahl,
+    ueberfaellig_eur: rund2(ueberEur),
+    ueberfaellig_aeltester_tage: ueberAelteste,
+    bezahlt_eur: rund2(bezahlt),
+    zahlungsdauer_tage: dauern.length ? Math.round(dauern.reduce((a, b) => a + b, 0) / dauern.length * 10) / 10 : null,
+  };
+}
+
+// Kennzahlen der Kontakt-Akte (R10, Block 4c). Nur gestellte Rechnungen
+// (status 'erstellt'): eine stornierte und ihre Gegenrechnung tragen weder
+// Umsatz noch Rest — auch nicht die Zahlung, die vor dem Storno einging.
+function jeKontakt(db) {
+  const gezahlt = gezahltJeRechnung(db);
+  const m = new Map();
+  const eintrag = (kid) => {
+    if (!m.has(kid)) m.set(kid, { umsatz_bezahlt_eur: 0, offen_eur: 0, zahlungsdauer_tage: null, angebote_offen: 0, rechnungen: 0, dauern: [] });
+    return m.get(kid);
+  };
+  for (const r of db.prepare(`
+    SELECT nr, erstellt_am, brutto_eur, status, kontakt_id FROM invoices
+    WHERE kontakt_id IS NOT NULL AND status = 'erstellt'
+  `).all()) {
+    const e = eintrag(r.kontakt_id);
+    const g = gezahlt.get(r.nr) || { summe: 0, letzte: null };
+    e.rechnungen++;
+    e.umsatz_bezahlt_eur += g.summe;
+    e.offen_eur += zahlstand(r, g.summe).rest_eur;
+    if (statusOf(r, g.summe) === 'bezahlt' && g.letzte) {
+      e.dauern.push((Date.parse(g.letzte) - Date.parse(tagNach(r.erstellt_am, 0))) / 86400000);
+    }
+  }
+  // Offen = nicht abgerechnet und nicht abgelaufen, wie status_abgeleitet in angebot.liste().
+  const jetzt = new Date().toISOString();
+  for (const a of db.prepare(`
+    SELECT kontakt_id FROM angebote
+    WHERE kontakt_id IS NOT NULL AND status = 'offen' AND rechnung_nr IS NULL AND gueltig_bis >= ?
+  `).all(jetzt)) eintrag(a.kontakt_id).angebote_offen++;
+  for (const e of m.values()) {
+    e.umsatz_bezahlt_eur = rund2(e.umsatz_bezahlt_eur);
+    e.offen_eur = rund2(e.offen_eur);
+    e.zahlungsdauer_tage = e.dauern.length ? Math.round(e.dauern.reduce((s, x) => s + x, 0) / e.dauern.length * 10) / 10 : null;
+    delete e.dauern;
+  }
+  return m;
 }
 
 // --- Abrechnungsstand --------------------------------------------------------
@@ -370,6 +785,21 @@ function abrechnung(db) {
   return map;
 }
 
+// Was zu einem Vorgang insgesamt gestellt ist: Claude-Zeit aus den
+// Vorgangspositionen, manuelle Zeit aus den Zeitpositionen. Fuer die Marge im
+// Vorgangs-Detail — ohne den manuellen Teil laege sie zu niedrig, sobald
+// manuelle Zeit mitgestellt ist.
+function abgerechnetFuerVorgang(db, key) {
+  const claude = (abrechnung(db)[key] || { betrag_eur: 0 }).betrag_eur;
+  let manuell = 0;
+  for (const r of db.prepare("SELECT positionen FROM invoices WHERE status = 'erstellt'").all()) {
+    for (const p of JSON.parse(r.positionen) || []) {
+      if (p && p.typ === 'zeit' && p.ziel_art === 'vorgang' && p.ziel === key) manuell += Number(p.betrag_eur) || 0;
+    }
+  }
+  return rund2(claude + manuell);
+}
+
 // --- Storno ------------------------------------------------------------------
 // Loeschen gibt es nicht: eine ausgegebene Nummer bleibt vergeben, sonst
 // entsteht eine Luecke in der fortlaufenden Reihe. Die Korrektur ist eine
@@ -385,19 +815,30 @@ function storniere(db, nr) {
   const { nr: stornoNr, laufnr } = naechsteNummer(db, jahr);
   const positionen = original.positionen.map((p) => ({ ...p, betrag_eur: -p.betrag_eur }));
 
-  db.prepare(`
-    INSERT INTO invoices (nr, jahr, laufnr, erstellt_am, leistung_von, leistung_bis,
-      empfaenger, aussteller, positionen, netto_eur, ust_prozent, ust_eur,
-      brutto_eur, kleinunternehmer, status, storno_von)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'storno',?)
-  `).run(
-    stornoNr, jahr, laufnr, new Date().toISOString(),
-    original.leistung_von, original.leistung_bis,
-    JSON.stringify(original.empfaenger), JSON.stringify(original.aussteller),
-    JSON.stringify(positionen), -original.netto_eur, original.ust_prozent,
-    -original.ust_eur, -original.brutto_eur, original.kleinunternehmer ? 1 : 0, nr
-  );
-  db.prepare("UPDATE invoices SET status = 'storniert' WHERE nr = ?").run(nr);
+  // Gegenrechnung und Storno des Originals gemeinsam oder gar nicht: sonst
+  // stuenden beide als gestellt da und zaehlten offen.
+  db.exec('BEGIN');
+  try {
+    db.prepare(`
+      INSERT INTO invoices (nr, jahr, laufnr, erstellt_am, leistung_von, leistung_bis,
+        empfaenger, aussteller, positionen, netto_eur, ust_prozent, ust_eur,
+        brutto_eur, kleinunternehmer, status, storno_von)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'storno',?)
+    `).run(
+      stornoNr, jahr, laufnr, new Date().toISOString(),
+      original.leistung_von, original.leistung_bis,
+      JSON.stringify(original.empfaenger), JSON.stringify(original.aussteller),
+      JSON.stringify(positionen), -original.netto_eur, original.ust_prozent,
+      -original.ust_eur, -original.brutto_eur, original.kleinunternehmer ? 1 : 0, nr
+    );
+    db.prepare("UPDATE invoices SET status = 'storniert' WHERE nr = ?").run(nr);
+    // Die Eintraege sind wieder stellbar; die stornierte Abschrift bleibt, wie sie ist.
+    db.prepare("UPDATE zeit_eintrag SET status = 'offen', rechnung_nr = NULL, satz_eingefroren = NULL WHERE rechnung_nr = ?").run(nr);
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  }
 
   return lade(db, stornoNr);
 }
@@ -448,7 +889,10 @@ function positionsZeilen(positionen, dokument) {
     // Teile der Unterzeile zusammensetzen und erst dann verbinden: sonst steht
     // ein Trennzeichen am Anfang, wenn der Zeitraum fehlt (freie Posten).
     const teile = [];
-    if (p.von) teile.push(esc(p.von) + ' bis ' + esc(p.bis));
+    // Zeitpositionen nennen ihre Tage, solange es wenige sind.
+    if (Array.isArray(p.tage) && p.tage.length && p.tage.length <= 12) {
+      teile.push(p.tage.map((t) => esc(String(t).slice(8, 10) + '.' + String(t).slice(5, 7) + '.')).join(', '));
+    } else if (p.von) teile.push(esc(p.von) + ' bis ' + esc(p.bis));
     if (p.rabatt_prozent > 0) {
       teile.push(`${esc(eur(p.basissatz))}/h abzgl. ${esc(String(p.rabatt_prozent))} % Rabatt`);
     }
@@ -647,8 +1091,9 @@ function erzeugePdf(db, nr, port) {
 }
 
 module.exports = {
-  erstelle, ausPositionen, lade, liste, abrechnung, storniere, renderHtml, erzeugePdf, esc,
+  erstelle, baue, entwurf, vorschau, schreibe, abgerechnetFuerVorgang, freiePosition, ausPositionen, lade, liste, detail, abrechnung, storniere, renderHtml, erzeugePdf, esc,
   stammdaten, fehlendeStammdaten, pruefeStammdaten, faelligAm,
+  statusOf, faelligFestschreiben, bucheZahlung, loescheZahlung, zahlungenZu, kennzahlen, jeKontakt, istTag, pruefeErwartet,
   // Fuer das Angebotsmodul: dieselbe Steuerlogik, dieselbe Rundung, dasselbe
   // Dokumentgeruest. Ein zweiter Satz Formeln waere die sicherste Art, dass
   // Angebot und Rechnung eines Tages auseinanderlaufen.

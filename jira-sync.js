@@ -75,6 +75,10 @@ function fingerprint(t) {
     // Der Fusstext nennt das Zeitmodell. Aendert es sich bei gleicher Zeit
     // (Altbestand ohne Eingabe-Kennung), stuende sonst der alte Satz da.
     t.zeitmodell,
+    // Manuelle Zeit steht im Kommentar und im Arbeitswert; ein neuer oder
+    // geaenderter Eintrag muss den Kommentar erneuern. Ohne Eintraege bleibt
+    // der Fingerabdruck wie bisher, damit nicht jeder Kommentar neu geschrieben wird.
+    ...(t.manuell_seconds ? [Math.round(t.manuell_seconds / 60), Math.round((t.arbeitswert_manuell || 0) * 100)] : []),
   ].join('|');
 }
 
@@ -94,6 +98,8 @@ function buildComment(t, models) {
     ['davon Arbeitssitzung', fmtInt(t.total_tokens)],
     ['davon Werkzeuge', `${fmtInt(t.werkzeug_tokens)} (${fmtInt(t.werkzeug_requests)} Aufrufe)`],
     ['Aktive Arbeitszeit', fmtHours(t.active_seconds)],
+    // Der Arbeitswert unten enthaelt sie; ohne diese Zeile passten Zeit und Wert nicht zusammen.
+    ...(t.manuell_seconds > 0 ? [['Manuelle Zeit (Zeiterfassung)', fmtHours(t.manuell_seconds)]] : []),
     ['Agentenzeit (nicht berechnet)', fmtHours(t.agent_seconds)],
     ['Stundensatz', fmtMoney(t.stundensatz, config.waehrung) +
       (t.rabatt_prozent > 0
@@ -202,7 +208,8 @@ function feldWerte(t) {
   };
   setz(f.kosten_usd, t.api_gegenwert_usd);
   setz(f.tokens, t.gesamt_tokens != null ? t.gesamt_tokens : t.total_tokens);
-  setz(f.stunden, t.active_hours);
+  // Stunden passend zum Arbeitswert: Claude-Zeit plus abrechenbare manuelle Zeit.
+  setz(f.stunden, (t.active_hours || 0) + (t.manuell_hours || 0));
   setz(f.arbeitswert_eur, t.arbeitswert);
   return werte;
 }
@@ -280,8 +287,10 @@ async function run({ db, verbose = false, dryRun = false, only = null } = {}) {
   }
 
   const keys = config.jira.projectKeys || [];
+  // sessions > 0: ein Vorgang nur aus manueller Zeit ist kein Beleg, dass es
+  // das Ticket in Jira gibt — ein vertippter Schluessel bekaeme sonst Kommentare.
   const rows = metrics.byTicket(db).filter((t) =>
-    istJiraKey(t.ticket, keys) && (!only || t.ticket === only)
+    t.sessions > 0 && istJiraKey(t.ticket, keys) && (!only || t.ticket === only)
   );
 
   const results = [];

@@ -2,7 +2,7 @@
   "//": "Vorlage. Zum Einrichten nach config.json kopieren und die Platzhalter ersetzen. config.json selbst ist bewusst nicht versioniert — sie enthaelt Stammdaten, Anschrift und Zugangsangaben.",
   "stundensatz": 85,
   "waehrung": "EUR",
-  "//saetze": "Pro Projekt entweder 'satz' (eigener Stundensatz) ODER 'rabatt' (Prozent auf den Standardsatz). Ist beides gesetzt, gewinnt 'satz'. Projekte ohne Eintrag nutzen den Standardsatz.",
+  "//saetze": "Pro Projekt entweder 'satz' (eigener Stundensatz) ODER 'rabatt' (Prozent auf den Standardsatz). Ist beides gesetzt, gewinnt 'satz'. Projekte ohne Eintrag nutzen den Standardsatz. Optional je Projekt: 'zeitmodell' und 'rundung' (Minuten fuer manuelle Zeit).",
   "projektSaetze": {
     "Beispielprojekt": {
       "satz": 85,
@@ -41,6 +41,12 @@
   "zeitmodell": "eingaben",
   "//gapMinutes": "Pausenschwelle in Minuten. Im Modell 'eingaben' zaehlt je eine halbe Schwelle vor und nach jeder eigenen Eingabe: liegen zwei Eingaben hoechstens so weit auseinander, zaehlt die Zeit dazwischen ganz; arbeitet die KI laenger allein, zaehlt genau eine Schwelle. Im Modell 'aktivitaet' endet die Aktivzeit ab dieser Pause.",
   "gapMinutes": 5,
+  "//tagessollStunden": "Zeiterfassung: geplante Arbeitszeit je Tag. Massstab fuer Arbeitszeit heute und den Workload der naechsten Tage. In den Einstellungen aenderbar (0 bis 24).",
+  "tagessollStunden": 8,
+  "//rundungMinuten": "Zeiterfassung: manuelle Zeit wird beim Buchen auf diesen Schritt aufgerundet (ganze Minuten, 1 bis 60). Die Rohzeit bleibt gespeichert. Je Projekt abweichend ueber projektSaetze.<Projekt>.rundung.",
+  "rundungMinuten": 5,
+  "//kalender": "Zeiterfassung: Kalender, die alle 5 Minuten gelesen werden (nur lesen). Je Eintrag: id (a-z, 0-9, - und _), name, art 'ics' oder 'caldav', url. ICS: die geheime Abo-Adresse, z. B. Google Kalender -> Einstellungen -> Kalender -> 'Privatadresse im iCal-Format' (webcal:// geht auch). CalDAV (Apple, Nextcloud, Fastmail): url der Kalender-Sammlung, nur https, dazu benutzer und passwortEnvVar = Name der Umgebungsvariable mit dem (App-)Passwort, nie das Passwort selbst. Die Adresse ist ein Zugang: sie wird nie angezeigt. ICS-Adressen lassen sich auch in der Oberflaeche einfuegen (Zeiterfassung -> Kalender verbinden oder Einstellungen -> Kalender), die Oberflaeche schreibt sie dann hierher. CalDAV nur hier. Nach einer Aenderung von Hand Server neu starten. Leer = kein Kalender.",
+  "kalender": [],
   "//projectRoots": "Wo deine Projekte liegen. Der erste Ordner unterhalb eines dieser Pfade gilt als Projektname — aus '~/Dev/Kundenprojekt/src/lib' wird also 'Kundenprojekt'. '~' steht fuer dein Benutzerverzeichnis. Reihenfolge zaehlt: der spezifischere Pfad gehoert nach vorne. Ohne Eintrag gilt ['~/Dev', '~'].",
   "projectRoots": [
     "~/Dev",

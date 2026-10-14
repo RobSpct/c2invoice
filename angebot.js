@@ -17,7 +17,7 @@ const metrics = require('./metrics');
 const rechnung = require('./rechnung');
 const kontakte = require('./kontakte');
 
-const { rund2, steuer, esc, positionsZeilen, vergleichsHinweis, eur, datum } = rechnung;
+const { rund2, steuer, esc, positionsZeilen, vergleichsHinweis, eur, datum, freiePosition } = rechnung;
 
 const NUMMER_RE = /^AN-\d{4}-\d{4}$/;
 const GUELTIG_TAGE_STANDARD = 30;
@@ -29,62 +29,8 @@ function naechsteNummer(db, jahr) {
   return { laufnr: row.n, nr: `AN-${jahr}-${String(row.n).padStart(4, '0')}` };
 }
 
-// Positionen aus freier Eingabe. Die Grenzen sind bewusst eng: ein Angebot
-// geht nach aussen, ein Tippfehler in der Stundenzahl faellt erst auf, wenn
-// der Kunde zusagt.
-function freiePosition(p, vFaktor) {
-  // Nur Zeichenketten: ein Objekt wuerde sonst als "[object Object]" auf dem
-  // Dokument landen, ein Array stillschweigend zusammengefuegt.
-  if (!p || typeof p.bezeichnung !== 'string') {
-    throw new Error('Jede Position braucht eine Bezeichnung als Text.');
-  }
-  const bezeichnung = p.bezeichnung.trim();
-  if (!bezeichnung) throw new Error('Jede Position braucht eine Bezeichnung.');
-  if (bezeichnung.length > 200) throw new Error('Bezeichnung: hoechstens 200 Zeichen.');
-
-  // Pauschalposition: ein Festpreis fuer die beschriebene Leistung, ohne
-  // Stunden. Die Grenze liegt enger als Stunden x Satz es zuliesse — ein
-  // vertippter Festpreis geht ungeprueft nach aussen.
-  if (p.typ === 'pauschal') {
-    const betrag = Number(p.betrag_eur);
-    if (!Number.isFinite(betrag) || betrag <= 0 || betrag > 1000000) {
-      throw new Error(`"${bezeichnung}": Festpreis muss zwischen 0 und 1000000 liegen.`);
-    }
-    return {
-      bezeichnung,
-      typ: 'pauschal',
-      stunden: null,
-      satz: null,
-      basissatz: null,
-      rabatt_prozent: 0,
-      betrag_eur: rund2(betrag),
-      vergleich_stunden: null,
-      vergleich_faktor: null,
-    };
-  }
-
-  const stunden = Number(p.stunden);
-  if (!Number.isFinite(stunden) || stunden <= 0 || stunden > 10000) {
-    throw new Error(`"${bezeichnung}": Stunden muessen zwischen 0 und 10000 liegen.`);
-  }
-  const satz = p.satz === undefined || p.satz === '' ? config.stundensatz : Number(p.satz);
-  if (!Number.isFinite(satz) || satz < 0 || satz > 10000) {
-    throw new Error(`"${bezeichnung}": Stundensatz muss zwischen 0 und 10000 liegen.`);
-  }
-
-  return {
-    bezeichnung,
-    stunden: rund2(stunden),
-    satz: rund2(satz),
-    basissatz: rund2(satz),
-    rabatt_prozent: 0,
-    betrag_eur: rund2(stunden * satz),
-    // Auch im Angebot nur Zeit, nie ein Vergleichsbetrag — siehe die
-    // Begruendung in metrics.mehrwert().
-    vergleich_stunden: vFaktor > 1 ? rund2(stunden * vFaktor) : null,
-    vergleich_faktor: vFaktor > 1 ? vFaktor : null,
-  };
-}
+// Freie Positionen prueft rechnung.freiePosition — eine Pruefung fuer beide
+// Belegarten (R8).
 
 // Positionen aus bereits erfassten Vorgaengen. Nuetzlich fuer Nachtraege und
 // Folgeauftraege: die Schaetzung stuetzt sich dann auf gemessene Zeit.
@@ -104,13 +50,16 @@ function vorgangsPositionen(db, { from, to, tickets }, vFaktor) {
     basissatz: rund2(t.stundensatz_standard),
     rabatt_prozent: t.rabatt_prozent || 0,
     satz: rund2(t.stundensatz),
-    betrag_eur: rund2(t.arbeitswert),
+    // Claude-Stunden x Satz; manuelle Zeit gehoert nicht in diese Position.
+    betrag_eur: rund2(t.arbeitswert_claude),
     vergleich_stunden: vFaktor > 1 ? rund2(t.active_hours * vFaktor) : null,
     vergleich_faktor: vFaktor > 1 ? vFaktor : null,
   }));
 }
 
-function erstelle(db, { posten, from, to, tickets, empfaenger, gueltigTage, kontaktId } = {}) {
+// Das Angebot ohne Nummer, ohne Schreiben. erstelle() schreibt es, vorschau()
+// zeigt es — derselbe Weg, damit beide nicht auseinanderlaufen.
+function entwurf(db, { posten, from, to, tickets, empfaenger, gueltigTage, kontaktId } = {}) {
   // Dieselbe Pruefung wie bei der Rechnung: ohne Stammdaten steht auf dem
   // Dokument nicht, wer es ausgestellt hat.
   rechnung.pruefeStammdaten();
@@ -146,33 +95,61 @@ function erstelle(db, { posten, from, to, tickets, empfaenger, gueltigTage, kont
   }
   if (Array.isArray(tickets) && tickets.length > 0) {
     if (!from || !to) throw new Error('Fuer uebernommene Vorgaenge fehlt der Zeitraum.');
+    if (!rechnung.istTag(from) || !rechnung.istTag(to)) throw new Error('Zeitraum: Datum in der Form JJJJ-MM-TT erwartet.');
+    if (tickets.length > 200) throw new Error('Hoechstens 200 Vorgaenge je Angebot.');
     positionen.push(...vorgangsPositionen(db, { from, to, tickets }, vFaktor));
   }
   if (positionen.length === 0) throw new Error('Das Angebot enthaelt keine Position.');
 
-  const tage = Number(gueltigTage) > 0 ? Math.min(Number(gueltigTage), 365) : GUELTIG_TAGE_STANDARD;
+  // Wie beim Zahlungsziel: fehlt die Angabe, gilt der Standard; eine falsche
+  // Angabe faellt auf, statt still ersetzt zu werden.
+  let tage = GUELTIG_TAGE_STANDARD;
+  if (gueltigTage !== undefined && gueltigTage !== null && gueltigTage !== '') {
+    if (!Number.isInteger(gueltigTage) || gueltigTage < 1 || gueltigTage > 365) {
+      throw new Error('Gueltigkeit: ganze Tage von 1 bis 365.');
+    }
+    tage = gueltigTage;
+  }
   const jetzt = new Date();
   const gueltig = new Date(jetzt);
   gueltig.setDate(gueltig.getDate() + tage);
 
   const netto = rund2(positionen.reduce((s, p) => s + p.betrag_eur, 0));
   const { klein, satz, ust, brutto } = steuer(netto);
+  return {
+    erstellt_am: jetzt.toISOString(), gueltig_bis: gueltig.toISOString(),
+    empfaenger: empf, aussteller: rechnung.stammdaten(), positionen,
+    netto_eur: netto, ust_prozent: satz, ust_eur: ust, brutto_eur: brutto,
+    kleinunternehmer: klein, status: 'offen', kontakt_id: kid,
+  };
+}
 
-  const jahr = jetzt.getFullYear();
-  const { nr, laufnr } = naechsteNummer(db, jahr);
-
+function erstelle(db, daten = {}) {
+  const d = entwurf(db, daten);
+  rechnung.pruefeErwartet(d, daten.erwartetBrutto);
+  const { nr, laufnr } = naechsteNummer(db, new Date(d.erstellt_am).getFullYear());
   db.prepare(`
     INSERT INTO angebote (nr, jahr, laufnr, erstellt_am, gueltig_bis,
       empfaenger, aussteller, positionen, netto_eur, ust_prozent, ust_eur,
       brutto_eur, kleinunternehmer, status, kontakt_id)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'offen',?)
   `).run(
-    nr, jahr, laufnr, jetzt.toISOString(), gueltig.toISOString(),
-    JSON.stringify(empf), JSON.stringify(rechnung.stammdaten()),
-    JSON.stringify(positionen), netto, satz, ust, brutto, klein ? 1 : 0, kid
+    nr, new Date(d.erstellt_am).getFullYear(), laufnr, d.erstellt_am, d.gueltig_bis,
+    JSON.stringify(d.empfaenger), JSON.stringify(d.aussteller),
+    JSON.stringify(d.positionen), d.netto_eur, d.ust_prozent, d.ust_eur, d.brutto_eur,
+    d.kleinunternehmer ? 1 : 0, d.kontakt_id
   );
-
   return lade(db, nr);
+}
+
+// Vorschau fuer den Editor (R6), wie rechnung.vorschau().
+function vorschau(db, daten = {}) {
+  const d = entwurf(db, daten);
+  return {
+    html: renderHtml({ ...d, nr: 'ENTWURF' }),
+    netto_eur: d.netto_eur, ust_prozent: d.ust_prozent, ust_eur: d.ust_eur,
+    brutto_eur: d.brutto_eur, kleinunternehmer: d.kleinunternehmer, positionen: d.positionen, gueltig_bis: d.gueltig_bis,
+  };
 }
 
 function lade(db, nr) {
@@ -191,7 +168,7 @@ function lade(db, nr) {
 function liste(db) {
   const heute = new Date().toISOString();
   return db.prepare(`
-    SELECT nr, erstellt_am, gueltig_bis, empfaenger, brutto_eur, status, rechnung_nr
+    SELECT nr, erstellt_am, gueltig_bis, empfaenger, brutto_eur, status, rechnung_nr, kontakt_id
     FROM angebote ORDER BY jahr DESC, laufnr DESC
   `).all().map((r) => ({
     nr: r.nr,
@@ -202,7 +179,12 @@ function liste(db) {
     // Abgelaufen wird abgeleitet, nicht gespeichert: sonst muesste jemand
     // taeglich einen Auftrag laufen lassen, damit der Status stimmt.
     status: r.status === 'offen' && r.gueltig_bis < heute ? 'abgelaufen' : r.status,
+    // Fuer die neue Oberflaeche: abgerechnet ist ein eigener Stand, nicht nur
+    // "angenommen mit Rechnung". Das Feld status bleibt, wie die alte es liest.
+    status_abgeleitet: r.rechnung_nr ? 'abgerechnet'
+      : r.status === 'offen' && r.gueltig_bis < heute ? 'abgelaufen' : r.status,
     rechnung_nr: r.rechnung_nr,
+    kontakt_id: r.kontakt_id,
   }));
 }
 
@@ -353,4 +335,4 @@ ${vergleichsHinweis(ang.positionen, 'angebot')}
 `;
 }
 
-module.exports = { erstelle, lade, liste, setzeStatus, loesche, inRechnung, renderHtml };
+module.exports = { erstelle, vorschau, lade, liste, setzeStatus, loesche, inRechnung, renderHtml };

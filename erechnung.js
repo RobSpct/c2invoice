@@ -163,6 +163,11 @@ function pruefe(inv) {
 function mengeUndPreis(p) {
   const netto = Number(p.betrag_eur) || 0;
   const satz = Number(p.satz);
+  // Kulanz: die Stunden bleiben sichtbar, der Preis ist 0 (EN 16931 erlaubt
+  // einen Preis von null, nur keinen negativen).
+  if (p.typ === 'kulanz' && typeof p.stunden === 'number') {
+    return { menge: String(Math.abs(p.stunden)), einheit: 'HUR', preis: betrag(0) };
+  }
   const pauschal = p.typ === 'pauschal' || typeof p.stunden !== 'number' || !(satz > 0);
   if (pauschal) {
     return { menge: netto < 0 ? '-1' : '1', einheit: 'C62', preis: betrag(Math.abs(netto)) };

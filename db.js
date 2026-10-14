@@ -204,6 +204,20 @@ function migrate(db) {
       zeitmodell TEXT NOT NULL,   -- 'eingaben' | 'aktivitaet'
       PRIMARY KEY (art, schluessel)
     );
+
+    -- Zahlungseingaenge je Rechnung. Bewusst neben invoices statt darin: eine
+    -- Zahlung ist kein Teil des Dokuments (Par. 14 UStG), sie darf korrigiert
+    -- und geloescht werden, die Abschrift nie. Der Status offen/teilbezahlt/
+    -- bezahlt wird beim Lesen aus der Summe abgeleitet (rechnung.statusOf).
+    CREATE TABLE IF NOT EXISTS zahlungen (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      rechnung_nr TEXT NOT NULL,
+      datum       TEXT NOT NULL,     -- Tag des Eingangs, JJJJ-MM-TT
+      betrag_eur  REAL NOT NULL,
+      notiz       TEXT NOT NULL DEFAULT '',
+      erstellt_am TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_zahlungen_rechnung ON zahlungen(rechnung_nr);
   `);
 
   // Nachtraeglich zugeordnete Tickets sollen nachvollziehbar bleiben: woher
@@ -270,6 +284,134 @@ function migrate(db) {
   // NULL = unbekannt (eingelesen vor dieser Spalte), 0 = nein, 1 = ja.
   addColumn(db, 'activity', 'eingabe', 'INTEGER');
   db.exec('CREATE INDEX IF NOT EXISTS idx_activity_eingabe ON activity(ts) WHERE eingabe = 1');
+
+  // Ansprechpartner je Kontakt (R11, Block 4c). Die E-Mail am Kontakt bleibt —
+  // die E-Rechnung liest sie weiter. Beim Umstieg wird sie einmal als
+  // Ansprechpartner uebernommen, danach nie wieder: sonst kaeme ein geloeschter
+  // Eintrag beim naechsten Start zurueck.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS ansprechpartner (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      kontakt_id  INTEGER NOT NULL,
+      name        TEXT NOT NULL,
+      email       TEXT NOT NULL DEFAULT '',
+      telefon     TEXT NOT NULL DEFAULT '',
+      rolle       TEXT NOT NULL DEFAULT '',
+      erstellt_am TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_ansprechpartner_kontakt ON ansprechpartner(kontakt_id);
+  `);
+  if (getMeta(db, 'ansprechpartner_uebernommen') === null) {
+    db.exec('BEGIN');
+    try {
+      db.prepare(`
+        INSERT INTO ansprechpartner (kontakt_id, name, email, telefon, rolle, erstellt_am)
+        SELECT k.id, COALESCE(NULLIF(TRIM(k.vorname || ' ' || k.nachname), ''), k.firma), TRIM(k.email), '', '', ?
+        FROM kontakte k
+        WHERE TRIM(k.email) <> ''
+          AND NOT EXISTS (SELECT 1 FROM ansprechpartner a WHERE a.kontakt_id = k.id)
+      `).run(new Date().toISOString());
+      setMeta(db, 'ansprechpartner_uebernommen', new Date().toISOString());
+      db.exec('COMMIT');
+    } catch (err) {
+      db.exec('ROLLBACK');
+      throw err;
+    }
+  }
+
+  // Zeiterfassung (2.0): Zeit ohne Claude, auf Vorgang, Projekt, Kunde oder
+  // intern gebucht. Rohzeit und gezaehlte Zeit stehen getrennt: Rundung und
+  // Abzug ueberlappender Claude-Zeit bleiben nachvollziehbar, und ein spaeter
+  // geaenderter Rundungsschritt rechnet keinen alten Eintrag um.
+  // Zeitpunkte als UTC-ISO, `tag` wie activity.day (die ersten zehn Zeichen).
+  // status/rechnung_nr sperren den Eintrag, sobald er auf einer Rechnung steht.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS zeit_eintrag (
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      ziel_art         TEXT NOT NULL CHECK (ziel_art IN ('vorgang','projekt','kunde','intern')),
+      ziel_schluessel  TEXT NOT NULL,
+      start            TEXT NOT NULL,
+      ende             TEXT NOT NULL,
+      tag              TEXT NOT NULL,
+      dauer_fest_min   INTEGER,
+      pause_min        INTEGER NOT NULL DEFAULT 0,
+      taetigkeit       TEXT NOT NULL,
+      notiz            TEXT NOT NULL DEFAULT '',
+      abrechenbar      INTEGER NOT NULL DEFAULT 1,
+      rohzeit_min      INTEGER NOT NULL,
+      abzug_min        INTEGER NOT NULL DEFAULT 0,
+      parallel_min     INTEGER NOT NULL DEFAULT 0,
+      kulanz_min       INTEGER NOT NULL DEFAULT 0,
+      gezaehlt_min     INTEGER NOT NULL,
+      status           TEXT NOT NULL DEFAULT 'offen' CHECK (status IN ('offen','abgerechnet')),
+      rechnung_nr      TEXT,
+      satz_eingefroren REAL,
+      kalender_uid     TEXT,
+      created_at       TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_zeit_eintrag_tag ON zeit_eintrag(tag);
+    CREATE INDEX IF NOT EXISTS idx_zeit_eintrag_ziel ON zeit_eintrag(ziel_art, ziel_schluessel);
+    CREATE INDEX IF NOT EXISTS idx_zeit_eintrag_rechnung ON zeit_eintrag(rechnung_nr) WHERE rechnung_nr IS NOT NULL;
+
+    -- Taetigkeitsarten der Zeiterfassung. satz NULL = Satz des Ziels (Projekt
+    -- inkl. Rabatt). parallel = 1: darf neben einer Claude-Sitzung voll zaehlen.
+    CREATE TABLE IF NOT EXISTS taetigkeitsart (
+      name     TEXT PRIMARY KEY,
+      satz     REAL,
+      parallel INTEGER NOT NULL DEFAULT 0
+    );
+
+    -- Wahl bei Ueberlappung, je Paar Eintrag und Claude-Sitzung. Eine Quelle
+    -- fuer beide Seiten: claude/keins senken den Eintrag, meine/keins die
+    -- Sitzung, jeweils um genau die ueberlappenden Minuten.
+    CREATE TABLE IF NOT EXISTS ueberlappung_wahl (
+      eintrag_id INTEGER NOT NULL,
+      session_id TEXT NOT NULL,
+      wahl       TEXT NOT NULL CHECK (wahl IN ('beides','claude','meine','keins')),
+      PRIMARY KEY (eintrag_id, session_id)
+    );
+
+    -- Termine aus Kalendern (ICS/CalDAV, nur gelesen) und lokal angelegte
+    -- (kalender_id 'lokal'). Eine Serie steht je Vorkommen hier, uid dann
+    -- "<UID>#<Beginn>". ziel_von_hand = 1: Zuordnung von Hand, der Abgleich
+    -- raet sie nicht neu. Zugaenge stehen nur in config.json, nie hier.
+    CREATE TABLE IF NOT EXISTS termin (
+      kalender_id        TEXT NOT NULL,
+      uid                TEXT NOT NULL,
+      titel              TEXT NOT NULL,
+      start              TEXT NOT NULL,
+      ende               TEXT NOT NULL,
+      ganztag            INTEGER NOT NULL DEFAULT 0,
+      art                TEXT NOT NULL CHECK (art IN ('meeting','blocker','fremd')),
+      quelle             TEXT NOT NULL CHECK (quelle IN ('kalender','lokal')),
+      ziel_art           TEXT,
+      ziel_schluessel    TEXT,
+      ziel_von_hand      INTEGER NOT NULL DEFAULT 0,
+      gebucht_eintrag_id INTEGER,
+      erinnert_am        TEXT,
+      aktualisiert_am    TEXT NOT NULL,
+      PRIMARY KEY (kalender_id, uid)
+    );
+    CREATE INDEX IF NOT EXISTS idx_termin_start ON termin(start);
+  `);
+  // Hinweis bei Blocker-Beginn (Z6b) am Termin selbst, nicht im Speicher: ein
+  // Neustart darf eine schon verbrauchte Erinnerung nicht verschlucken.
+  // hinweis_fall: claude | begleiten | manuell, hinweis_weg = 1: weggeklickt.
+  addColumn(db, 'termin', 'hinweis_fall', 'TEXT');
+  addColumn(db, 'termin', 'hinweis_weg', 'INTEGER NOT NULL DEFAULT 0');
+  // Schalter "Bei Beginn erinnern" am Blocker (Z7a). Vorgabe an: so war es bis Z6b.
+  addColumn(db, 'termin', 'erinnern', 'INTEGER NOT NULL DEFAULT 1');
+  // Lokal angelegt und an Googles Formular uebergeben, aber noch nicht aus dem
+  // Kalender zurueck (Zeitpunkt der Uebergabe). Der Abgleich fuehrt zusammen.
+  addColumn(db, 'termin', 'google_offen', 'TEXT');
+  // Saat genau einmal: eine geloeschte Taetigkeit kaeme sonst bei jedem Start zurueck.
+  if (getMeta(db, 'taetigkeiten_gesaet') === null) {
+    const ein = db.prepare('INSERT OR IGNORE INTO taetigkeitsart (name, satz, parallel) VALUES (?, NULL, ?)');
+    for (const [name, parallel] of [['Entwicklung', 0], ['Meeting', 1], ['Konzept', 0], ['Review', 0], ['Begleiten', 0], ['Support', 0]]) {
+      ein.run(name, parallel);
+    }
+    setMeta(db, 'taetigkeiten_gesaet', new Date().toISOString());
+  }
 }
 
 // ALTER TABLE ... ADD COLUMN wirft, wenn die Spalte schon da ist. Deshalb

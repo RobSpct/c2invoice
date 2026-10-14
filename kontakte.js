@@ -45,9 +45,14 @@ function spalteVon(feld) {
 
 // U+FFFD entsteht bei kaputt uebertragenen Sonderzeichen (z.B. PowerShell
 // Invoke-RestMethod ohne UTF-8). Landet sonst still auf einem Kundendokument.
+// Zeichen, die auf einem Dokument nichts verloren haben: Steuerzeichen
+// (ohne Tab und Zeilenwechsel, die Notizen brauchen), Bidi-Steuerung (U+202E
+// dreht die Schreibrichtung im PDF) und Zeilen-/Absatztrenner U+2028/9.
+const STEUERZEICHEN_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u202A-\u202E\u2066-\u2069\u2028\u2029]/;
 function ohneErsatzzeichen(s, label) {
   if (typeof s !== 'string') throw new Error(`${label}: Text erwartet.`);
   if (s.includes('�')) throw new Error(`${label}: ungueltige Kodierung (Ersatzzeichen �).`);
+  if (STEUERZEICHEN_RE.test(s)) throw new Error(`${label}: enthaelt Steuerzeichen.`);
 }
 
 function text(wert, max, label) {
@@ -362,6 +367,7 @@ function loesche(db, id) {
   // Kunden an, den es nicht mehr gibt.
   inTransaktion(db, () => {
     db.prepare('DELETE FROM projekt_kontakt WHERE kontakt_id = ?').run(k.id);
+    db.prepare('DELETE FROM ansprechpartner WHERE kontakt_id = ?').run(k.id);
     db.prepare('DELETE FROM kontakte WHERE id = ?').run(k.id);
   });
   return true;
@@ -385,13 +391,56 @@ function macheKunde(db, kontaktId) {
 // fehlende Verknuepfung zu enden.
 function pruefeId(db, kontaktId) {
   if (kontaktId === undefined || kontaktId === null || kontaktId === '') return null;
-  const id = Number(kontaktId);
+  // Nur Zahl oder Ziffernfolge: Number(true), Number('1e0') und Number([1])
+  // ergaeben sonst Kontakt 1 — die Rechnung hinge still am falschen Kunden.
+  const id = typeof kontaktId === 'number' ? kontaktId : /^\d+$/.test(String(kontaktId)) && typeof kontaktId === 'string' ? Number(kontaktId) : NaN;
   if (!Number.isInteger(id) || id <= 0) throw new Error('Unbekannter Kontakt.');
   if (!lade(db, id)) throw new Error('Unbekannter Kontakt.');
   return id;
 }
 
+// --- Ansprechpartner (R11, Block 4c) -------------------------------------------
+// Personen am Kontakt, fuer Akte und spaeter den Versand. Kein Feld auf einem
+// Dokument (Block 11) — deshalb nur Laengen- und Formpruefung, keine Abschrift.
+function ansprechpartnerVon(db, kontaktId) {
+  return db.prepare('SELECT id, kontakt_id, name, email, telefon, rolle FROM ansprechpartner WHERE kontakt_id = ? ORDER BY id')
+    .all(kontaktId).map((r) => ({ ...r }));
+}
+
+function speichereAnsprechpartner(db, daten = {}) {
+  const d = daten && typeof daten === 'object' ? daten : {};
+  const kid = pruefeId(db, d.kontakt_id);
+  if (kid === null) throw new Error('Unbekannter Kontakt.');
+  const name = text(d.name, 200, 'Name');
+  if (!name) throw new Error('Name fehlt.');
+  const email = d.email === undefined ? '' : text(d.email, 120, 'E-Mail');
+  if (email && !email.includes('@')) throw new Error('E-Mail: Adresse sieht nicht wie eine E-Mail aus.');
+  const telefon = d.telefon === undefined ? '' : text(d.telefon, 40, 'Telefon');
+  const rolle = d.rolle === undefined ? '' : text(d.rolle, 80, 'Rolle');
+
+  if (d.id === undefined || d.id === null || d.id === '') {
+    const info = db.prepare(`
+      INSERT INTO ansprechpartner (kontakt_id, name, email, telefon, rolle, erstellt_am) VALUES (?,?,?,?,?,?)
+    `).run(kid, name, email, telefon, rolle, new Date().toISOString());
+    return ansprechpartnerVon(db, kid).find((a) => a.id === Number(info.lastInsertRowid));
+  }
+  // Aendern nur am eigenen Kontakt: eine fremde Id darf keinen Eintrag umhaengen.
+  const id = Number(d.id);
+  const alt = Number.isInteger(id) && id > 0 ? db.prepare('SELECT kontakt_id FROM ansprechpartner WHERE id = ?').get(id) : null;
+  if (!alt || alt.kontakt_id !== kid) throw new Error('Unbekannter Ansprechpartner.');
+  db.prepare('UPDATE ansprechpartner SET name = ?, email = ?, telefon = ?, rolle = ? WHERE id = ?').run(name, email, telefon, rolle, id);
+  return ansprechpartnerVon(db, kid).find((a) => a.id === id);
+}
+
+function loescheAnsprechpartner(db, id) {
+  const n = Number.isInteger(id) && id > 0 ? db.prepare('DELETE FROM ansprechpartner WHERE id = ?').run(id).changes : 0;
+  if (!n) throw new Error('Unbekannter Ansprechpartner.');
+  return { id };
+}
+
 module.exports = {
   FELDER, liste, lade, speichere, loesche, macheKunde, pruefeId, ohneErsatzzeichen,
   projekteVon, kontaktJeProjekt, setzeProjekte,
+  ansprechpartnerVon, speichereAnsprechpartner, loescheAnsprechpartner,
+  inTransaktion,
 };

@@ -2,6 +2,7 @@
 // Wertet die Datenbank aus: Tokens, Kosten, Arbeitszeit, Mehrwert.
 // Rechnet ausschliesslich auf gespeicherten Zahlen, kein Modellaufruf.
 const config = require('./config.json');
+const pricing = require('./pricing');
 
 const SUM_COLS = `
   COUNT(*) AS requests,
@@ -24,6 +25,10 @@ function withTotals(row) {
     input_tokens: inp,
     output_tokens: out,
     cache_write_tokens: cw,
+    // Getrennt mitgefuehrt: der 1h-Cache kostet mehr als der 5m-Cache, die
+    // Detailseite zeigt beide mit eigenem Betrag.
+    cache_w_5m: r.cache_w_5m || 0,
+    cache_w_1h: r.cache_w_1h || 0,
     cache_read_tokens: cr,
     total_tokens: inp + out + cw + cr,
     cost_usd: r.cost_usd || 0,
@@ -220,6 +225,37 @@ function zeitAbschnitte(db, rahmen) {
   return out;
 }
 
+// Nimmt aus den Abschnitten einer Sitzung genau die Spannen heraus, die sie
+// laut Wahl ("meine"/"keins") an einen Zeiteintrag abgibt. abzuege:
+// [{session, von, bis}] in ms. Ohne Abzuege kommt dasselbe Array zurueck —
+// ohne Zeiterfassung rechnet alles exakt wie vorher.
+function schneide(abschnitte, abzuege) {
+  if (!abzuege.length) return abschnitte;
+  const je = new Map();
+  for (const z of abzuege) {
+    if (!je.has(z.session)) je.set(z.session, []);
+    je.get(z.session).push(z);
+  }
+  const out = [];
+  for (const a of abschnitte) {
+    const schnitte = je.get(a.session);
+    if (!schnitte) { out.push(a); continue; }
+    let stuecke = [[a.von, a.bis]];
+    for (const z of schnitte) {
+      stuecke = stuecke.flatMap(([v, b]) => (z.bis <= v || z.von >= b ? [[v, b]]
+        : [[v, z.von], [z.bis, b]].filter(([x, y]) => y > x)));
+    }
+    for (const [v, b] of stuecke) out.push({ ...a, von: v, bis: b });
+  }
+  return out;
+}
+
+// Die Abschnitte, wie sie abgerechnet werden: roh minus abgegebene Minuten.
+// zeit.js erst beim Aufruf laden — es braucht metrics fuer die Saetze.
+function abrechenbareAbschnitte(db, rahmen) {
+  return schneide(zeitAbschnitte(db, rahmen), require('./zeit').sitzungsAbzuege(db));
+}
+
 // Verteilt ueberlappende Abschnitte so, dass jede Minute hoechstens einmal
 // zaehlt: laufen n Abschnitte gleichzeitig, bekommt jeder ein n-tel. Eine
 // Stunde auf der Uhr ergibt damit hoechstens eine Stunde auf der Rechnung,
@@ -271,17 +307,20 @@ function activeSecondsByGroup(db, opts = {}, wie = {}) {
 
 // Wie activeSecondsByGroup, liefert dazu je Gruppe die Zeitmodelle, nach denen
 // ihre Zeit entstanden ist. Ein Durchlauf fuer beides.
+// groupBy 'day' zaehlt nur Projektarbeit (ohne Werkzeugbetrieb), wie split.arbeit.
 function zeitJeGruppe(db, opts = {}, { groupBy = 'ticket', ticketlos = false } = {}) {
   const rahmen = zeitRahmen(opts);
   const out = new Map();
   const modelle = new Map();
-  for (const a of verteile(zeitAbschnitte(db, rahmen))) {
+  for (const a of verteile(abrechenbareAbschnitte(db, rahmen))) {
     if (rahmen.von && a.day < rahmen.von) continue;
     if (rahmen.bis && a.day > rahmen.bis) continue;
     if (opts.ticket && a.ticket !== opts.ticket) continue;
     if (opts.project && a.project !== opts.project) continue;
     if (ticketlos && a.ticket) continue;
-    const grp = (groupBy === 'project' ? a.project : groupBy === 'session' ? a.session : a.ticket) || '(ohne)';
+    if (groupBy === 'day' && isOverhead(a.project)) continue;
+    const grp = (groupBy === 'project' ? a.project : groupBy === 'session' ? a.session
+      : groupBy === 'day' ? a.day : a.ticket) || '(ohne)';
     out.set(grp, (out.get(grp) || 0) + a.ms);
     if (a.ms > 0) {
       if (!modelle.has(grp)) modelle.set(grp, new Set());
@@ -360,6 +399,8 @@ if (typeof config.stundensatz !== 'number' || !Number.isFinite(config.stundensat
 
 function satzFuerProjekt(projekt) {
   const standard = config.stundensatz;
+  // Ein geerbter Schluessel ("toString") findet hier eine Funktion ohne satz
+  // und rabatt und landet im Standardzweig unten — Test "Eingaben werden geprueft".
   const eintrag = (config.projektSaetze || {})[projekt];
   if (!eintrag) {
     return {
@@ -701,7 +742,7 @@ function lokalStundenJeGruppe(db, opts = {}, nach = 'ticket') {
 function werkzeuge(db, opts = {}) {
   if (OVERHEAD.size === 0) {
     return { summe: { requests: 0, total_tokens: 0, cost_usd: 0, cost_eur: 0, ohne_zuordnung: 0,
-      fenster_minuten: ZUORDNUNGSFENSTER_MS / 60000 },
+      fenster_minuten: ZUORDNUNGSFENSTER_MS / 60000, zuletzt: null, projekte: [] },
       nach_werkzeug: [], nach_projekt: [], nach_modell: [] };
   }
   // Ebenfalls nur zeitlich filtern: ein Projekt-/Ticketfilter wuerde die
@@ -761,6 +802,10 @@ function werkzeuge(db, opts = {}) {
       cost_eur: usdToEur(gesamtKosten),
       ohne_zuordnung: ohneZuordnung,
       fenster_minuten: ZUORDNUNGSFENSTER_MS / 60000,
+      // Ohne Zeitfilter: ein leerer Zeitraum soll sagen koennen, seit wann ein
+      // Dienst still ist (claude-mem 13.18 schrieb z. B. keine Logs mehr).
+      zuletzt: db.prepare(`SELECT max(ts) AS ts FROM events WHERE project IN (${platz})`).get(...OVERHEAD).ts || null,
+      projekte: [...OVERHEAD],
     },
     nach_werkzeug: alsListe(proWerkzeug, 'werkzeug'),
     nach_projekt: alsListe(proProjekt, 'projekt'),
@@ -960,15 +1005,129 @@ function preisLuecken(db, opts = {}) {
 // Zeitreihe in drei Koernungen. `day` ist ein ISO-Datum, deshalb genuegt der
 // Zuschnitt der Zeichenkette: 10 Zeichen Tag, 7 Monat, 4 Jahr. Kein zweiter
 // Weg, die Werte zu summieren — Monat und Jahr rechnen dieselbe Abfrage.
-const PERIODEN = { tag: 10, monat: 7, jahr: 4 };
+// Die Woche (Montag bis Sonntag) heisst nach ihrem Montag.
+const PERIODEN = { tag: 10, monat: 7, jahr: 4, woche: 'woche' };
+const SQL_MONTAG = "date(day, 'weekday 0', '-6 days')";
+function montagVon(tag) {
+  const d = new Date(tag + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+  return d.toISOString().slice(0, 10);
+}
 
 function byPeriod(db, opts = {}, koernung = 'tag') {
   const laenge = PERIODEN[koernung] || PERIODEN.tag;
+  const schluesselSql = laenge === 'woche' ? SQL_MONTAG : `substr(day,1,${laenge})`;
+  const schluessel = laenge === 'woche' ? montagVon : (tag) => tag.slice(0, laenge);
   const { where, params } = filterClause(opts);
-  return db.prepare(`
-    SELECT substr(day,1,${laenge}) AS day, ${SUM_COLS} FROM events ${where ? 'WHERE ' + where : ''}
+  const zeilen = db.prepare(`
+    SELECT ${schluesselSql} AS day, ${SUM_COLS} FROM events ${where ? 'WHERE ' + where : ''}
     GROUP BY 1 ORDER BY 1
   `).all(...params).map((r) => ({ day: r.day, ...withTotals(r) }));
+  // Aktive Zeit der Projektarbeit je Abschnitt. Wie bei byProject wirkt der
+  // Modellfilter nicht auf die Zeit: sie ist keine Eigenschaft eines Requests.
+  const sek = zeitJeGruppe(db, { ...opts, model: undefined }, { groupBy: 'day' }).sekunden;
+  const jeAbschnitt = {};
+  for (const [tag, s] of Object.entries(sek)) {
+    const k = schluessel(tag);
+    jeAbschnitt[k] = (jeAbschnitt[k] || 0) + s;
+  }
+  // Perioden mit aktiver Zeit, aber ohne Request, gehoeren dazu (mit 0 USD) —
+  // sonst fehlt deren Zeit in jeder Reihe.
+  const da = new Set(zeilen.map((z) => z.day));
+  for (const k of Object.keys(jeAbschnitt)) if (!da.has(k)) zeilen.push({ day: k, ...withTotals({}) });
+  zeilen.sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0));
+  return zeilen.map((z) => {
+    const sek = jeAbschnitt[z.day] || 0;
+    return { ...z, active_seconds: sek, usd_je_stunde: usdJeStunde([{ cost_usd: z.cost_usd, active_seconds: sek }]) };
+  });
+}
+
+// API-Gegenwert je aktive Stunde ueber Perioden: Summe USD durch Summe Stunden,
+// nicht Mittel der Periodenwerte. Ohne aktive Zeit gibt es keinen Wert (null).
+function usdJeStunde(perioden) {
+  const sek = perioden.reduce((a, p) => a + (p.active_seconds || 0), 0);
+  return sek > 0 ? perioden.reduce((a, p) => a + (p.cost_usd || 0), 0) / (sek / 3600) : null;
+}
+
+// Verlauf je Modell fuer das gestapelte Diagramm der Analyse. Perioden wie
+// byPeriod; die vier teuersten Modelle einzeln, der Rest als model = null.
+function verlaufJeModell(db, opts = {}, koernung = 'tag') {
+  const perioden = byPeriod(db, opts, koernung);
+  const idx = new Map(perioden.map((p, i) => [p.day, i]));
+  const laenge = PERIODEN[koernung] || PERIODEN.tag;
+  const schluesselSql = laenge === 'woche' ? SQL_MONTAG : `substr(day,1,${laenge})`;
+  const { where, params } = filterClause(opts);
+  const zeilen = db.prepare(`
+    SELECT ${schluesselSql} AS p, model, SUM(cost_usd) AS usd FROM events ${where ? 'WHERE ' + where : ''}
+    GROUP BY 1, 2
+  `).all(...params);
+  const jeModell = new Map();
+  for (const z of zeilen) jeModell.set(z.model, (jeModell.get(z.model) || 0) + z.usd);
+  const oben = [...jeModell].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([m]) => m);
+  const reihen = oben.map((model) => ({ model, werte: perioden.map(() => 0) }));
+  const rest = { model: null, werte: perioden.map(() => 0) };
+  for (const z of zeilen) {
+    const i = idx.get(z.p);
+    if (i == null) continue;
+    const r = oben.includes(z.model) ? reihen[oben.indexOf(z.model)] : rest;
+    r.werte[i] += z.usd;
+  }
+  if (jeModell.size > 4) reihen.push(rest);
+  return {
+    perioden: perioden.map((p) => p.day),
+    modelle: reihen,
+    summe: perioden.map((p) => p.cost_usd),
+    aktiv: perioden.map((p) => p.active_seconds),
+  };
+}
+
+// Fluss Modell -> Projekt -> Vorgang (USD) fuer den Sankey der Analyse.
+// Werkzeugbetrieb faellt heraus (eigener Reiter); die Summe ist damit genau
+// die Projektarbeit aus splitOverhead. Je Spalte die sechs groessten Knoten,
+// der Rest wird zu "andere" zusammengefasst — die Summen bleiben gleich.
+function fluss(db, opts = {}) {
+  const { where, params } = filterClause(opts);
+  const zeilen = db.prepare(`
+    SELECT model, project, ticket, SUM(cost_usd) AS usd FROM events ${where ? 'WHERE ' + where : ''}
+    GROUP BY model, project, ticket
+  `).all(...params).filter((z) => !isOverhead(z.project) && z.usd > 0);
+  const vorgang = (z) => (z.ticket ? 'v:' + z.ticket : 'v:ohne:' + z.project);
+  const top = (schluessel, praefix) => {
+    const s = new Map();
+    for (const z of zeilen) { const k = schluessel(z); s.set(k, (s.get(k) || 0) + z.usd); }
+    const behalten = new Set([...s].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k]) => k));
+    // Eigene Kennung fuer den Sammelknoten: ein echtes Projekt namens "andere" darf nicht hineinfallen.
+    return (k) => (behalten.has(k) ? k : praefix + '\u0001andere');
+  };
+  const m = top((z) => 'm:' + z.model, 'm:'), p = top((z) => 'p:' + z.project, 'p:'), v = top(vorgang, 'v:');
+  const links = new Map();
+  const add = (s, t, w) => { const k = s + '\u0000' + t; links.set(k, (links.get(k) || 0) + w); };
+  for (const z of zeilen) {
+    add(m('m:' + z.model), p('p:' + z.project), z.usd);
+    add(p('p:' + z.project), v(vorgang(z)), z.usd);
+  }
+  return {
+    links: [...links].map(([k, w]) => { const [s, t] = k.split('\u0000'); return { s, t, v: w }; }),
+    summe_usd: zeilen.reduce((a, z) => a + z.usd, 0),
+  };
+}
+
+// Marge je Woche (Mo–So) fuer die letzten `wochen` Wochen bis `bis`. Je Woche
+// dieselbe Rechnung wie die Hub-Kennzahlen eines Zeitraums: kennzahlen() ueber
+// Vorgaenge plus ticketlose Arbeit. Die Abrechnung kommt von aussen (rechnung.js).
+function margeJeWoche(db, { bis, wochen = 12 } = {}, abrechnung = {}) {
+  const tag = (iso, n) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+  // Nur abgeschlossene Wochen (Owner 06.10.): eine angebrochene Woche hat die
+  // Kosten schon, die Arbeit noch nicht — ihre Marge laege systematisch zu tief.
+  // Letzte Woche = die, deren Sonntag spaetestens `bis` ist.
+  const ende = montagVon(tag(bis || new Date().toISOString().slice(0, 10), -6));
+  const out = [];
+  for (let i = wochen - 1; i >= 0; i--) {
+    const montag = tag(ende, -7 * i);
+    const o = { from: montag, to: tag(montag, 6) };
+    out.push({ montag, kennzahlen: kennzahlen(byTicket(db, o).concat(ohneTicket(db, o)), abrechnung, require('./zeit').kennzahlenZusatz(db, o)) });
+  }
+  return out;
 }
 
 function byDay(db, opts = {}) {
@@ -983,12 +1142,52 @@ function byYear(db, opts = {}) {
   return byPeriod(db, opts, 'jahr');
 }
 
+// Manuelle Zeit (zeit.js) eines Zeitraums, auf dieselben Filter beschraenkt.
+// Erst beim Aufruf geladen: zeit.js braucht metrics fuer die Saetze.
+// Ein Modellfilter trifft sie nicht — wie die Aktivzeit gehoert sie keinem Request.
+const OHNE_MANUELL = { sek: 0, nicht_sek: 0, eur: 0, n: 0, abg_eur: 0, offen_sek: 0, par_min: 0, kul_min: 0 };
+function manuellImRahmen(db, opts) {
+  const zeit = require('./zeit');
+  // Unter einem Modellfilter gar nicht: manuelle Zeit gehoert keinem Modell,
+  // und nur einigen Zeilen einen Anteil zu geben, ergaebe eine Zufallssumme.
+  let liste = opts.model ? [] : zeit.imRahmen(db, opts);
+  if (opts.ticket) liste = liste.filter((e) => e.ziel_art === 'vorgang' && e.ziel_schluessel === opts.ticket);
+  if (opts.project) liste = liste.filter((e) => e.projekt === opts.project);
+  return { liste, nach: (fn) => zeit.gruppiere(liste, fn) };
+}
+
+// Zusatzfelder einer Zeile: manuelle Zeit getrennt von der Claude-Zeit.
+// arbeitswert = Claude-Anteil + manueller Anteil; ohne Eintraege gleich dem
+// Claude-Anteil. active_* bleibt reine Claude-Zeit.
+function mitManuell(arbeitswertClaude, m) {
+  return {
+    manuell_seconds: m.sek,
+    manuell_hours: m.sek / 3600,
+    manuell_nicht_hours: m.nicht_sek / 3600,
+    manuell_eintraege: m.n,
+    arbeitswert_claude: arbeitswertClaude,
+    arbeitswert_manuell: m.eur,
+    arbeitswert: arbeitswertClaude + m.eur,
+    // Davon schon auf einer Rechnung (zum eingefrorenen Satz) und noch offen.
+    arbeitswert_manuell_abgerechnet: m.abg_eur,
+    manuell_offen_hours: m.offen_sek / 3600,
+    manuell_parallel_min: m.par_min,
+    manuell_kulanz_min: m.kul_min,
+  };
+}
+
 function byProject(db, opts = {}) {
   const { where, params } = filterClause(opts);
   const rows = db.prepare(`
     SELECT project, ${SUM_COLS} FROM events ${where ? 'WHERE ' + where : ''}
     GROUP BY project ORDER BY cost_usd DESC
   `).all(...params);
+  // Projekte mit manueller Zeit, aber ohne Request im Zeitraum, gehoeren dazu.
+  const man = manuellImRahmen(db, opts).nach((e) => e.projekt);
+  if (!opts.model) {
+    const da = new Set(rows.map((r) => r.project));
+    for (const k of man.keys()) if (!da.has(k)) rows.push({ project: k });
+  }
   // Die Aktivzeit kennt kein Modell: sie ist eine Zeitspanne zwischen zwei
   // Ereignissen, keine Eigenschaft eines Requests. Ein Modellfilter darf sie
   // deshalb nicht einschraenken — sonst stuende bei einer Modellansicht ein
@@ -1006,7 +1205,7 @@ function byProject(db, opts = {}) {
       active_seconds: seconds,
       // Laufzeit der KI je Sitzung. Wird ausgewiesen, nicht abgerechnet.
       agent_seconds: agent[r.project] || 0,
-      arbeitswert: (seconds / 3600) * satzInfo.satz,
+      ...mitManuell((seconds / 3600) * satzInfo.satz, man.get(r.project) || OHNE_MANUELL),
       stundensatz: satzInfo.satz,
       stundensatz_standard: satzInfo.standard,
       rabatt_prozent: satzInfo.rabatt,
@@ -1040,13 +1239,20 @@ function byTicket(db, opts = {}) {
   // Lokale Modelle, die im selben Zeitraum fuer diesen Vorgang liefen.
   const lokalTicket = lokalJeGruppe(db, opts, 'ticket');
   const lokalStunden = lokalStundenJeGruppe(db, opts, 'ticket');
+  // Vorgaenge mit manueller Zeit, aber ohne Request im Zeitraum, gehoeren dazu.
+  const man = manuellImRahmen(db, opts).nach((e) => (e.ziel_art === 'vorgang' ? e.ziel_schluessel : null));
+  if (!opts.model) {
+    const da = new Set(rows.map((r) => r.ticket));
+    for (const [k, g] of man) if (!da.has(k)) rows.push({ ticket: k, sessions: 0, first_day: g.von, last_day: g.bis });
+  }
 
   return rows.map((r) => {
     const t = withTotals(r);
     const seconds = act[r.ticket] || 0;
     const stunden = seconds / 3600;
     const satzInfo = satzFuerTicket(db, r.ticket);
-    const arbeitswert = stunden * satzInfo.satz;
+    const zeilenwert = mitManuell(stunden * satzInfo.satz, man.get(r.ticket) || OHNE_MANUELL);
+    const arbeitswert = zeilenwert.arbeitswert;
     // Was der Vorgang ohne eigene Wahl haette: das Modell seines Projekts
     // oder der Standard. Die Oberflaeche zeigt es neben der eigenen Wahl.
     const erbt = karte.projekt(satzInfo.projekt) || karte.standard;
@@ -1077,7 +1283,8 @@ function byTicket(db, opts = {}) {
       zeitmodell: zeitmodellAus(zeit.modelle.get(r.ticket), wahl || erbt),
       zeitmodell_wahl: wahl,
       zeitmodell_erbt: erbt,
-      arbeitswert,                            // Zeit x Stundensatz, in Euro
+      // Zeit x Stundensatz in Euro: Claude-Anteil, manueller Anteil, Summe.
+      ...zeilenwert,
       stundensatz: satzInfo.satz,
       stundensatz_standard: satzInfo.standard,
       rabatt_prozent: satzInfo.rabatt,
@@ -1114,6 +1321,85 @@ function byTicket(db, opts = {}) {
   });
 }
 
+// Sitzungen eines Vorgangs fuer die Detailseite. Die Zeit kommt aus derselben
+// Verteilung wie in byTicket (nur nach Sitzung gruppiert), die Dollar aus
+// denselben Zeilen — die Summen stimmen deshalb mit dem Kopf des Vorgangs
+// ueberein. Der Werkzeuganteil gehoert keiner Sitzung und fehlt hier.
+function sitzungenJeVorgang(db, key) {
+  const rows = db.prepare(`
+    SELECT session_id, MIN(ts) AS start, MAX(ts) AS ende, MAX(branch) AS branch, MAX(cwd) AS cwd,
+           GROUP_CONCAT(DISTINCT model) AS modelle, MAX(is_sidechain) AS subagent,
+           COALESCE(SUM(web_search),0) AS web_suchen, ${SUM_COLS}
+    FROM events WHERE ticket = ? GROUP BY session_id
+  `).all(key);
+  const zeit = zeitJeGruppe(db, { ticket: key }, { groupBy: 'session' });
+  const agent = agentSecondsByGroup(db, { ticket: key }, { groupBy: 'session' });
+  const karte = zeitmodellKarte(db);
+  const nachId = new Map(rows.map((r) => [r.session_id, r]));
+  // Sitzungen mit Zeit, aber ohne Request (nur Aktivitaet), gehoeren auch dazu.
+  // Start und Branch kommen dann aus der Aktivitaet.
+  const ausAktivitaet = new Map(db.prepare(`
+    SELECT session_id, MIN(ts) AS start, MAX(ts) AS ende, MAX(branch) AS branch
+    FROM activity WHERE ticket = ? GROUP BY session_id
+  `).all(key).map((a) => [a.session_id, a]));
+  for (const id of Object.keys(zeit.sekunden)) {
+    if (!nachId.has(id)) nachId.set(id, { session_id: id, ...ausAktivitaet.get(id) });
+  }
+  // Ueberlappungen mit Zeiteintraegen und ihre Wahl, wie in live() — fuer die
+  // Spalte "Bei Ueberlappung" im Vorgangs-Detail.
+  const ids = [...nachId.keys()];
+  const spanne = ids.length ? db.prepare(
+    `SELECT MIN(day) AS von, MAX(day) AS bis FROM activity WHERE session_id IN (${ids.map(() => '?').join(',')})`
+  ).get(...ids) : {};
+  const ueberlappt = require('./zeit').ueberlappungenJeSitzung(db, ids, spanne.von, spanne.bis);
+  return [...nachId.values()].map((r) => {
+    const t = withTotals(r);
+    const erbt = karte.sitzung.get(r.session_id) || karte.vorgang.get(key) || karte.standard;
+    return {
+      session_id: r.session_id,
+      start: r.start || null,
+      ende: r.ende || null,
+      branch: r.branch || null,
+      cwd: r.cwd || null,
+      modelle: r.modelle ? r.modelle.split(',').sort() : [],
+      requests: t.requests,
+      tokens: t.total_tokens,
+      cost_usd: t.cost_usd,
+      subagent: r.subagent === 1,
+      web_suchen: r.web_suchen || 0,
+      active_seconds: zeit.sekunden[r.session_id] || 0,
+      agent_seconds: agent[r.session_id] || 0,
+      zeitmodell: zeitmodellAus(zeit.modelle.get(r.session_id), erbt),
+      wahl: ueberlappt.get(r.session_id) || [],
+    };
+  }).sort((a, b) => String(a.start || '').localeCompare(String(b.start || '')));
+}
+
+// Dollar je Tag und Vorgang in einer Abfrage, fuer die Sparklines der Tabelle.
+function verlaufJeVorgang(db, opts = {}) {
+  const { where, params } = filterClause({ ...opts, ticket: undefined });
+  const out = {};
+  for (const r of db.prepare(`
+    SELECT ticket, day, SUM(cost_usd) AS usd FROM events
+    WHERE ${where ? where + ' AND ' : ''}ticket IS NOT NULL
+    GROUP BY ticket, day ORDER BY ticket, day
+  `).all(...params)) (out[r.ticket] = out[r.ticket] || []).push([r.day, r.usd]);
+  return out;
+}
+
+// Dollar je Tag und Projekt (mit und ohne Vorgang), fuer die Sparklines
+// "Nach Projekt" der Analyse.
+function verlaufJeProjekt(db, opts = {}) {
+  const { where, params } = filterClause(opts);
+  const out = Object.create(null);   // Projektname "__proto__" darf kein Prototyp-Setter sein
+  for (const r of db.prepare(`
+    SELECT project, day, SUM(cost_usd) AS usd FROM events
+    ${where ? 'WHERE ' + where : ''}
+    GROUP BY project, day ORDER BY project, day
+  `).all(...params)) (out[r.project] = out[r.project] || []).push([r.day, r.usd]);
+  return out;
+}
+
 // Arbeit ohne Vorgangsnummer, gruppiert nach Projekt. Nicht jede Leistung
 // laeuft ueber ein Ticketsystem — ohne diese Sicht waere sie unabrechenbar.
 //
@@ -1141,6 +1427,23 @@ function ohneTicket(db, opts = {}) {
   const lokalProjekt = lokalJeGruppe(db, opts, 'project');
   const lokalStunden = lokalStundenJeGruppe(db, opts, 'project');
 
+  // Manuelle Zeit direkt auf ein Projekt oder einen Kunden (ohne Vorgang).
+  // Projekte und Kunden nur mit manueller Zeit bekommen eine eigene Zeile;
+  // ein Kunde ohne Projekt rechnet zum Standardsatz (satzFuerProjekt(null)).
+  const manuell = manuellImRahmen(db, opts);
+  const manP = manuell.nach((e) => (e.ziel_art === 'projekt' ? e.ziel_schluessel : null));
+  const manK = manuell.nach((e) => (e.ziel_art === 'kunde' ? e.ziel_schluessel : null));
+  if (!opts.model) {
+    const da = new Set(rows.map((r) => r.project));
+    for (const [k, g] of manP) if (!da.has(k)) rows.push({ project: k, sessions: 0, first_day: g.von, last_day: g.bis });
+    if (!opts.project) {
+      for (const [id, g] of manK) {
+        const k = db.prepare('SELECT id, firma FROM kontakte WHERE id = ?').get(Number(id));
+        if (k) rows.push({ project: null, gruppe: k.firma, art: 'kunde', kunde_id: k.id, sessions: 0, first_day: g.von, last_day: g.bis });
+      }
+    }
+  }
+
   return rows
     // Werkzeugprojekte tragen nie ein Ticket und rutschten hier sonst als
     // eigene Zeile herein — obwohl ihre Kosten ueber werkzeugeJeTicket()
@@ -1153,14 +1456,18 @@ function ohneTicket(db, opts = {}) {
       // Direkt ueber das Projekt, nicht ueber satzFuerTicket(): dort wird der
       // Ticketschluessel nachgeschlagen, den es hier per Definition nicht gibt.
       const satzInfo = satzFuerProjekt(r.project);
-      const arbeitswert = stunden * satzInfo.satz;
+      const kunde = r.art === 'kunde';
+      const zeilenwert = mitManuell(stunden * satzInfo.satz,
+        (kunde ? manK.get(String(r.kunde_id)) : manP.get(r.project)) || OHNE_MANUELL);
+      const arbeitswert = zeilenwert.arbeitswert;
       const abo = aboAnteil(db, t.cost_usd, monthOf(r.last_day));
       const lok = lokalProjekt.get(r.project) || { requests: 0, tokens: 0, modelle: new Set() };
       const lokStd = lokalStunden.get(r.project) || 0;
 
       return {
-        gruppe: r.project,
-        art: 'projekt',
+        gruppe: kunde ? r.gruppe : r.project,
+        art: kunde ? 'kunde' : 'projekt',
+        ...(kunde ? { kunde_id: r.kunde_id } : {}),
         project: r.project,
         ...t,
         sessions: r.sessions,
@@ -1171,7 +1478,7 @@ function ohneTicket(db, opts = {}) {
         agent_seconds: agent[r.project] || 0,
         agent_hours: (agent[r.project] || 0) / 3600,
         zeitmodell: zeitmodellAus(zeit.modelle.get(r.project), karte.projekt(r.project) || karte.standard),
-        arbeitswert,
+        ...zeilenwert,
         stundensatz: satzInfo.satz,
         stundensatz_standard: satzInfo.standard,
         rabatt_prozent: satzInfo.rabatt,
@@ -1233,8 +1540,12 @@ function mehrwert(ticketRow, rechnungsbetrag = 0) {
   // schon drin, er ist keine kostenlose Zutat. Fehlt der Selbstkostensatz,
   // bleibt die Marge leer statt den Deckungsbeitrag als Marge auszugeben.
   const selbstkostenStunde = Number(config.selbstkostenStunde) || 0;
+  // Eigene Zeit: Claude-Zeit, manuelle Zeit, dazu manuelle Zeit ohne Wert
+  // (nicht abrechenbar, intern) — die kostet, bringt aber nichts ein.
   const stunden = ticketRow.active_hours || 0;
-  const zeitkosten = selbstkostenStunde * stunden;
+  const eigeneStunden = stunden + (Number(ticketRow.manuell_hours) || 0)
+    + (Number(ticketRow.manuell_nicht_hours) || 0) + (Number(ticketRow.intern_hours) || 0);
+  const zeitkosten = selbstkostenStunde * eigeneStunden;
   const hatSelbstkosten = selbstkostenStunde > 0;
   const gewinn = deckungsbeitrag - zeitkosten;
 
@@ -1279,6 +1590,7 @@ function mehrwert(ticketRow, rechnungsbetrag = 0) {
     deckungsbeitrag_prozent: hatErloes ? (deckungsbeitrag / erloes) * 100 : null,
     // Der eigene Zeitaufwand, bewertet mit dem Selbstkostensatz.
     selbstkosten_stunde: selbstkostenStunde,
+    eigene_stunden: eigeneStunden,
     zeitkosten: hatSelbstkosten ? zeitkosten : null,
     // Absoluter Gewinn in Euro, nach Sachkosten UND eigener Arbeitszeit.
     marge: hatErloes && hatSelbstkosten ? gewinn : null,
@@ -1297,6 +1609,103 @@ function mehrwert(ticketRow, rechnungsbetrag = 0) {
     vergleich_faktor: hatFaktor ? faktor : null,
     vergleich_stunden: hatFaktor ? stunden * faktor : null,
     vergleich_mehrstunden: hatFaktor ? stunden * (faktor - 1) : null,
+  };
+}
+
+// Kennzahlen eines Zeitraums fuer den Hub. `zeilen` sind die Vorgaenge plus
+// die ticketlose Arbeit desselben Zeitraums (ohne Werkzeugbetrieb) — deren
+// Summe ist genau split.arbeit. Gerechnet wird mit mehrwert() auf der Summe,
+// also mit derselben Formel wie je Vorgang.
+//
+// Bewusst OHNE Rechnungsbetrag: eine Rechnung kann Zeit ausserhalb des
+// Zeitraums enthalten. Der Zeitraum bewertet seine eigene Arbeit (Arbeitswert);
+// "abgerechnet" ist der Teil davon, der auf Vorgaengen mit Rechnung liegt.
+//
+// Eine gestellte Rechnung deckt bisher nur die Claude-Zeit eines Vorgangs ab;
+// manuelle Zeit bleibt offen, bis sie selbst auf einer Rechnung steht.
+// `zusatz` (zeit.kennzahlenZusatz): interne Zeit, die keiner Zeile gehoert.
+function kennzahlen(zeilen, abrechnung, zusatz = {}) {
+  const summe = (k) => zeilen.reduce((a, r) => a + (Number(r[k]) || 0), 0);
+  const internStunden = Number(zusatz.intern_stunden) || 0;
+  const wert = mehrwert({
+    arbeitswert: summe('arbeitswert'),
+    api_gegenwert_usd: summe('api_gegenwert_usd'),
+    abo_anteil_usd: summe('abo_anteil_usd'),
+    active_hours: summe('active_hours'),
+    manuell_hours: summe('manuell_hours'),
+    manuell_nicht_hours: summe('manuell_nicht_hours'),
+    intern_hours: internStunden,
+    lokal_betrag_eur: summe('lokal_betrag_eur'),
+    lokal_stunden: summe('lokal_stunden'),
+  }, 0);
+  const istAbgerechnet = (r) => r.ticket != null && Object.prototype.hasOwnProperty.call(abrechnung, r.ticket);
+  const claudeWert = (r) => Number(r.arbeitswert_claude ?? r.arbeitswert) || 0;
+  const abgerechnet = zeilen.filter(istAbgerechnet).reduce((a, r) => a + claudeWert(r), 0);
+  // Manuelle Zeit gilt je Eintrag als abgerechnet (zeit_eintrag.status), nicht
+  // je Vorgang: ein Vorgang kann gestellte und offene Eintraege zugleich haben.
+  const manuellAbg = (r) => Number(r.arbeitswert_manuell_abgerechnet) || 0;
+  const abgerechnetManuell = summe('arbeitswert_manuell_abgerechnet');
+  const offenAnteil = (r) => (Number(r.arbeitswert) || 0) - (istAbgerechnet(r) ? claudeWert(r) : 0) - manuellAbg(r);
+  return {
+    wert,
+    abgerechnet_eur: abgerechnet,
+    abgerechnet_manuell_eur: abgerechnetManuell,
+    offen_eur: wert.arbeitswert - abgerechnet - abgerechnetManuell,
+    // Offen = noch etwas zu stellen; ganz gestellte manuelle Zeit zaehlt nicht mehr.
+    offen_vorgaenge: zeilen.filter((r) => r.ticket != null && !istAbgerechnet(r) && offenAnteil(r) > 1e-9).length,
+    abgerechnet_vorgaenge: zeilen.filter(istAbgerechnet).length,
+    // "offen" aufgeteilt: Arbeitswert offener Vorgaenge und ticketloser Arbeit.
+    offen_vorgang_eur: zeilen.filter((r) => r.ticket != null).reduce((a, r) => a + offenAnteil(r), 0),
+    ohne_vorgang_eur: zeilen.filter((r) => r.ticket == null).reduce((a, r) => a + (Number(r.arbeitswert) || 0) - manuellAbg(r), 0),
+    aktive_stunden: summe('active_hours'),
+    agent_stunden: summe('agent_hours'),
+    manuell_stunden: summe('manuell_hours'),
+    manuell_offen_stunden: summe('manuell_offen_hours'),
+    // Stunden zu offen_eur: Claude-Zeit nicht abgerechneter Zeilen plus offene manuelle Zeit.
+    offen_stunden: zeilen.filter((r) => !istAbgerechnet(r)).reduce((a, r) => a + (Number(r.active_hours) || 0), 0) + summe('manuell_offen_hours'),
+    parallel_min: summe('manuell_parallel_min'),
+    kulanz_min: summe('manuell_kulanz_min'),
+    intern_stunden: internStunden,
+  };
+}
+
+// Was die gelesenen Cache-Tokens als normale Eingabe gekostet haetten, minus
+// was sie als Cache-Lesen kosten — je Modell mit dessen Listenpreis (USD).
+function cacheErsparnis(modelle) {
+  return modelle.reduce((a, m) => {
+    const n = Number(m.cache_read_tokens) || 0;
+    if (!n) return a;
+    return a + pricing.costOf(m.model, { input_tokens: n }) - pricing.costOf(m.model, { cache_read: n });
+  }, 0);
+}
+
+// Tokens je Art mit dem Betrag aus der Preisliste des jeweiligen Modells (USD).
+// Erfasst ist nur die Summe je Request; die Aufteilung wird mit den heutigen
+// Preisen nachgerechnet. Was davon abweicht (Preis seit der Erfassung
+// geaendert, Modell ohne Preis), bleibt als Abweichung sichtbar, statt die
+// Zeilen auf die erfasste Summe hochzurechnen.
+const TOKEN_ARTEN = [
+  ['input', 'input_tokens', 'input_tokens'],
+  ['output', 'output_tokens', 'output_tokens'],
+  ['cache_5m', 'cache_w_5m', 'cache_w_5m'],
+  ['cache_1h', 'cache_w_1h', 'cache_w_1h'],
+  ['cache_lesen', 'cache_read_tokens', 'cache_read'],
+];
+function tokenArten(modelle) {
+  const zeilen = TOKEN_ARTEN.map(([art, feld, usage]) => modelle.reduce((a, m) => {
+    const n = Number(m[feld]) || 0;
+    a.tokens += n;
+    a.usd += n ? pricing.costOf(m.model, { [usage]: n }) : 0;
+    return a;
+  }, { art, tokens: 0, usd: 0 }));
+  const usd = zeilen.reduce((a, r) => a + r.usd, 0);
+  const erfasst = modelle.reduce((a, m) => a + (Number(m.cost_usd) || 0), 0);
+  return {
+    zeilen,
+    tokens: zeilen.reduce((a, r) => a + r.tokens, 0),
+    usd,
+    erfasst_usd: erfasst,
+    abweichung_usd: erfasst - usd,
   };
 }
 
@@ -1334,15 +1743,45 @@ function live(db, { minutes = 60 } = {}) {
   const ids = [...new Set(recent.map((r) => r.session_id))];
   let zeitJe = {};
   let agentJe = {};
+  // Je Sitzung die Zeiteintraege, mit denen sie sich ueberschneidet, samt
+  // Regel und Wahl — fuer die Spalte "Bei Ueberlappung".
+  let ueberlappt = new Map();
   if (ids.length) {
     const beginn = db.prepare(
       `SELECT MIN(day) AS d FROM activity WHERE session_id IN (${ids.map(() => '?').join(',')})`
     ).get(...ids).d;
     zeitJe = activeSecondsByGroup(db, { from: beginn }, { groupBy: 'session' });
     agentJe = agentSecondsByGroup(db, { from: beginn }, { groupBy: 'session' });
+    ueberlappt = require('./zeit').ueberlappungenJeSitzung(db, ids, beginn);
+  }
+
+  // Spuren der letzten Stunde je Sitzung, in Minuten ab Fensterbeginn:
+  // "fenster" = abrechenbare Abschnitte (dieselbe Regel wie die Abrechnung,
+  // zeitAbschnitte), "agent" = Laufzeit nach der Lueckenregel (gapMinutes).
+  const fensterBeginn = Date.now() - 60 * 60000;
+  const inMin = (ms) => Math.max(0, (ms - fensterBeginn) / 60000);
+  const spur = new Map(ids.map((id) => [id, { fenster: [], agent: [] }]));
+  if (ids.length) {
+    const tag = new Date(fensterBeginn).toISOString().slice(0, 10);
+    for (const a of abrechenbareAbschnitte(db, { von: tag, bis: today })) {
+      if (spur.has(a.session) && a.bis > fensterBeginn) spur.get(a.session).fenster.push([inMin(a.von), inMin(a.bis)]);
+    }
+    const luecke = config.gapMinutes * 60000;
+    const zeilen = db.prepare(`SELECT session_id, ts FROM activity WHERE ts >= ? AND session_id IN (${ids.map(() => '?').join(',')}) ORDER BY session_id, ts`)
+      .all(new Date(fensterBeginn).toISOString(), ...ids);
+    let lauf = null;
+    for (const z of zeilen) {
+      const ms = Date.parse(z.ts);
+      if (!Number.isFinite(ms)) continue;
+      if (lauf && lauf.id === z.session_id && ms - lauf.bis <= luecke) { lauf.bis = ms; continue; }
+      lauf = { id: z.session_id, von: ms, bis: ms };
+      spur.get(z.session_id).agent.push(lauf);
+    }
+    for (const s of spur.values()) s.agent = s.agent.map((l) => [inMin(l.von), inMin(l.bis)]);
   }
 
   const sitzungen = recent.map((r) => ({
+    spur: spur.get(r.session_id),
     session_id: r.session_id, project: r.project, branch: r.branch,
     ticket: r.ticket, ticket_quelle: r.ticket_quelle, model: r.model,
     is_sidechain: r.is_sidechain === 1, last_ts: r.last_ts, ...withTotals(r),
@@ -1350,6 +1789,7 @@ function live(db, { minutes = 60 } = {}) {
     // denselben Wert, angezeigt wird er nur in der ersten.
     active_seconds: zeitJe[r.session_id] || 0,
     agent_seconds: agentJe[r.session_id] || 0,
+    wahl: ueberlappt.get(r.session_id) || [],
     zeitmodell_wahl: karte.sitzung.get(r.session_id) || null,
     zeitmodell: karte.fuer(r),
     // Was ohne eigene Wahl der Sitzung gaelte: Vorgang, Projekt, Standard.
@@ -1368,8 +1808,20 @@ function live(db, { minutes = 60 } = {}) {
   const windowRow = db.prepare(`SELECT ${SUM_COLS} FROM events WHERE ts >= ?`).get(since);
   const w = withTotals(windowRow);
 
+  // Tokens je Minute der letzten Stunde (Live-Strom), aelteste zuerst. Wie die
+  // Verbrauchsrate ueber alle Requests, ohne Werkzeugbetrieb herauszurechnen.
+  const jetztMin = Math.floor(Date.now() / 60000);
+  const minuten = new Array(60).fill(0);
+  const minutenRows = db.prepare(`SELECT ts, ${SUM_COLS} FROM events WHERE ts >= ? GROUP BY substr(ts,1,16)`)
+    .all(new Date((jetztMin - 59) * 60000).toISOString());
+  for (const r of minutenRows) {
+    const i = 59 - (jetztMin - Math.floor(Date.parse(r.ts) / 60000));
+    if (i >= 0 && i < 60) minuten[i] += withTotals(r).total_tokens;
+  }
+
   return {
     now: new Date().toISOString(),
+    minuten,
     today: withTotals(todayRow),
     window_minutes: minutes,
     window: w,
@@ -1426,6 +1878,10 @@ module.exports = {
   zeitmodellKarte,
   ZEITMODELLE,
   summary,
+  zeitRahmen,
+  zeitAbschnitte,
+  schneide,
+  abrechenbareAbschnitte,
   byModel,
   preisLuecken,
   byDay,
@@ -1436,6 +1892,16 @@ module.exports = {
   ohneTicket,
   byTicket,
   mehrwert,
+  kennzahlen,
+  cacheErsparnis,
+  tokenArten,
+  sitzungenJeVorgang,
+  verlaufJeVorgang,
+  verlaufJeProjekt,
+  usdJeStunde,
+  verlaufJeModell,
+  fluss,
+  margeJeWoche,
   live,
   aboAnteil,
   aboKosten,
