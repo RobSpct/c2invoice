@@ -196,6 +196,31 @@ function istEingabe(o) {
   return !KEINE_EINGABE_RE.test(text);
 }
 
+// Geschrieben wird in Bloecken, je Block eine Transaktion ohne await dazwischen.
+// Der Server bedient Anfragen ueber dieselbe Verbindung: eine Transaktion, die
+// ueber das Lesen der Datei (await) offen bliebe, liesse jedes BEGIN einer
+// Anfrage scheitern ("cannot start a transaction within a transaction") und
+// haengte deren Schreibvorgaenge an ein spaeteres ROLLBACK. Ein Block, der vor
+// einem Fehler schon geschrieben ist, schadet nicht: die Upserts sind beim
+// erneuten Lesen idempotent, und die Dateiposition rueckt erst danach vor.
+const BLOCK = 2000;
+function schreibeBlock(db, puffer) {
+  if (!puffer.length) return;
+  db.exec('BEGIN');
+  try {
+    for (const [stmt, args] of puffer) stmt.run(...args);
+    db.exec('COMMIT');
+  } catch (err) {
+    try { db.exec('ROLLBACK'); } catch { /* Transaktion bereits beendet */ }
+    throw err;
+  }
+  puffer.length = 0;
+}
+function puffere(db, puffer, stmt, args) {
+  puffer.push([stmt, args]);
+  if (puffer.length >= BLOCK) schreibeBlock(db, puffer);
+}
+
 // Liest eine Datei ab der gemerkten Byte-Position zeilenweise ein.
 // Streaming, damit auch 200-MB-Dateien nicht in den Speicher geladen werden.
 // nurAktivitaet: schreibt nur die Aktivitaetszeilen, keine Requests. Fuer den
@@ -216,6 +241,7 @@ async function ingestFile(db, filePath, fromOffset, stmts, { nurAktivitaet = fal
   let events = 0;
   let consumed = fromOffset;
   let lastComplete = fromOffset;
+  const puffer = [];
 
   for await (const line of rl) {
     // +1 fuer das Newline. Eine noch unvollstaendig geschriebene letzte Zeile
@@ -250,8 +276,8 @@ async function ingestFile(db, filePath, fromOffset, stmts, { nurAktivitaet = fal
 
     // Jede Zeile ist ein Aktivitaetssignal, unabhaengig vom Typ. Ob sie eine
     // eigene Eingabe ist, entscheidet spaeter ueber die abgerechnete Zeit.
-    stmts.activity.run(sessionId, ts, project, branch, ticket, day, ticketQuelle,
-      istEingabe(o) ? 1 : 0);
+    puffere(db, puffer, stmts.activity, [sessionId, ts, project, branch, ticket, day, ticketQuelle,
+      istEingabe(o) ? 1 : 0]);
 
     if (nurAktivitaet) continue;
     if (o.type !== 'assistant' || !o.message || !o.message.usage) continue;
@@ -269,16 +295,17 @@ async function ingestFile(db, filePath, fromOffset, stmts, { nurAktivitaet = fal
     const mcpTool = typeof o.attributionMcpTool === 'string' ? o.attributionMcpTool : null;
     const skill = typeof o.attributionSkill === 'string' ? o.attributionSkill : null;
 
-    stmts.event.run(
+    puffere(db, puffer, stmts.event, [
       requestId, ts, sessionId, project, o.cwd || null, branch, ticket,
       model || '<unknown>', u.input_tokens, u.output_tokens, u.cache_w_5m,
       u.cache_w_1h, u.cache_read, u.web_search, cost,
       o.isSidechain ? 1 : 0, day, ticketQuelle, 'claude',
-      mcpServer, mcpTool, skill, preisLuecke(model)
-    );
+      mcpServer, mcpTool, skill, preisLuecke(model),
+    ]);
     events++;
   }
 
+  schreibeBlock(db, puffer);
   return { lines, events, offset: lastComplete };
 }
 
@@ -305,6 +332,7 @@ async function ingestLokalFile(db, filePath, fromOffset, stmts) {
   let events = 0;
   let consumed = fromOffset;
   let lastComplete = fromOffset;
+  const puffer = [];
 
   for await (const line of rl) {
     consumed += Buffer.byteLength(line, 'utf8') + 1;
@@ -334,19 +362,20 @@ async function ingestLokalFile(db, filePath, fromOffset, stmts) {
 
     // Jede Anfrage an ein lokales Modell gilt als eigene Eingabe: der Proxy
     // sieht nur, was jemand abgeschickt hat, keine selbstlaufenden Agenten.
-    stmts.activity.run(sessionId, ts, LOKAL_PROJEKT, null, null, day, null, 1);
+    puffere(db, puffer, stmts.activity, [sessionId, ts, LOKAL_PROJEKT, null, null, day, null, 1]);
 
-    stmts.event.run(
+    puffere(db, puffer, stmts.event, [
       requestId, ts, sessionId, LOKAL_PROJEKT, null, null, null,
       String(o.model || 'lokal/unbekannt'), ein, aus, 0, 0, 0, 0,
       0, 0, day, null, 'lokal',
       // Ein lokales Modell laeuft ausserhalb von Claude Code: es kennt weder
       // MCP-Server noch Skills. Und es hat keinen Preis, der fehlen koennte.
-      null, null, null, null
-    );
+      null, null, null, null,
+    ]);
     events++;
   }
 
+  schreibeBlock(db, puffer);
   return { lines, events, offset: lastComplete };
 }
 
@@ -435,20 +464,10 @@ async function trageEingabenNach(db, files, stmts, verbose) {
 
   let fehler = 0;
   for (const { pfad } of logs) {
-    // Je Datei eine eigene Transaktion, wie im normalen Lauf. Eine einzige
-    // ueber alle Dateien bliebe Minuten offen: der Server bedient
-    // waehrenddessen Anfragen ueber dieselbe Verbindung, und eine in dieser
-    // Zeit gestellte Rechnung haenge an einem spaeteren ROLLBACK.
-    // ponytail: das Fenster ist damit klein, aber nicht weg — die Datei wird
-    // bei offener Transaktion gelesen (await). Ganz zu schliessen waere es,
-    // indem Zeilen erst gepuffert und dann ohne await geschrieben werden;
-    // das gilt genauso fuer den normalen Lauf in run().
-    db.exec('BEGIN');
+    // ingestFile schreibt in Bloecken ohne await in der Transaktion (schreibeBlock).
     try {
       await ingestFile(db, pfad, 0, stmts, { nurAktivitaet: true });
-      db.exec('COMMIT');
     } catch (err) {
-      try { db.exec('ROLLBACK'); } catch { /* Transaktion bereits beendet */ }
       // Eine unlesbare Datei haelt die uebrigen nicht auf, bleibt aber nicht
       // unbemerkt: sie entscheidet, ob der Nachtrag als erledigt gilt.
       fehler++;
@@ -480,7 +499,7 @@ async function run({ db, verbose = false } = {}) {
   // Zwei Quellen, ein Lesemechanismus: Claude-Code-Logs und die Zeilen des
   // Proxys fuer die lokalen Modelle. Die Herkunft entscheidet, welcher
   // Zeilenleser greift — der Rest (Byte-Position, Wiederholungslauf,
-  // Transaktion je Datei) ist fuer beide gleich.
+  // Schreiben in Bloecken) ist fuer beide gleich.
   const files = [
     ...listJsonlFiles(jsonlDir()).map((f) => ({ pfad: f, quelle: 'claude' })),
     ...listJsonlFiles(lokalDir()).map((f) => ({ pfad: f, quelle: 'lokal' })),
@@ -516,19 +535,18 @@ async function run({ db, verbose = false } = {}) {
     if (prev && stat.size < prev.size) start = 0;
     if (prev && stat.size === prev.size && stat.mtimeMs === prev.mtime_ms) continue;
 
-    db.exec('BEGIN');
     let res;
     try {
       res = quelle === 'lokal'
         ? await ingestLokalFile(db, f, start, stmts)
         : await ingestFile(db, f, start, stmts);
-      setFile.run(f, res.offset, stat.size, Math.floor(stat.mtimeMs), new Date().toISOString());
-      db.exec('COMMIT');
     } catch (err) {
-      db.exec('ROLLBACK');
+      // Position bleibt stehen: der naechste Lauf liest die Datei ab dort erneut.
       if (verbose) console.error('Fehler bei', f, err.message);
       continue;
     }
+    // Erst nach den Daten: faellt der Lauf dazwischen aus, wird nur nachgelesen.
+    setFile.run(f, res.offset, stat.size, Math.floor(stat.mtimeMs), new Date().toISOString());
     totalLines += res.lines;
     totalEvents += res.events;
     touched++;

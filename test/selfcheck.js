@@ -888,6 +888,59 @@ function testIngestRoundtrip() {
   });
 }
 
+// Der Server bedient Anfragen ueber dieselbe Verbindung, waehrend der Ingest
+// Logdateien liest. Haelt der Ingest dabei eine Transaktion ueber ein await
+// offen, scheitert jedes BEGIN einer Anfrage (Storno, Kontakt speichern) mit
+// "cannot start a transaction within a transaction". Simuliert wird die
+// Anfrage durch BEGIN/COMMIT in jeder Pause des Laufs.
+function testIngestOhneOffeneTransaktion() {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tl-'));
+  const projDir = path.join(tmp, 'C--Users-Test-Dev-Demo');
+  fs.mkdirSync(projDir, { recursive: true });
+  // Mehrere MB, damit der Zeilenleser mehrfach auf die Platte wartet.
+  const zeilen = [];
+  for (let i = 0; i < 12000; i++) {
+    zeilen.push(JSON.stringify({
+      type: 'assistant', timestamp: new Date(Date.UTC(2026, 7, 18, 10) + i * 1000).toISOString(), sessionId: 'sess-tx',
+      cwd: 'C:\\Users\\Test\\Dev\\Demo', gitBranch: 'feature/PROJ-1-demo', requestId: 'tx' + i,
+      message: { id: 'msg_tx' + i, model: 'claude-opus-5', content: [{ type: 'text', text: 'x'.repeat(400) }],
+        usage: { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } },
+    }));
+  }
+  fs.writeFileSync(path.join(projDir, 'gross.jsonl'), zeilen.join('\n') + '\n');
+
+  const cfg = require('../config.json');
+  const origDir = cfg.jsonlDir;
+  cfg.jsonlDir = tmp;
+  if (!cfg.lokaleModelle) cfg.lokaleModelle = {};
+  const origLokal = cfg.lokaleModelle.protokollDir;
+  cfg.lokaleModelle.protokollDir = path.join(tmp, 'lokal-leer');
+
+  const db = dbmod.open(':memory:');
+  openDbs.push(db);
+  let proben = 0, fehler = null, laeuft = true;
+  const probe = () => {
+    if (!laeuft) return;
+    proben++;
+    try { db.exec('BEGIN'); db.exec('COMMIT'); } catch (e) { fehler = fehler || e.message; }
+    setImmediate(probe);
+  };
+  setImmediate(probe);
+  return ingest.run({ db }).then(() => {
+    laeuft = false;
+    assert.ok(proben > 3, 'Probe lief nicht waehrend des Ingests (' + proben + ') — Test kann nicht rot werden');
+    assert.strictEqual(fehler, null, 'Anfrage-Transaktion scheiterte waehrend des Ingests: ' + fehler);
+    assert.strictEqual(db.prepare('SELECT COUNT(*) c FROM events').get().c, 12000, 'nicht alle Requests eingelesen');
+    assert.strictEqual(db.prepare('SELECT COUNT(*) c FROM files').get().c, 1, 'Dateiposition nicht gespeichert');
+  }).finally(() => {
+    laeuft = false;
+    try { db.close(); } catch { /* bereits geschlossen */ }
+    cfg.jsonlDir = origDir;
+    cfg.lokaleModelle.protokollDir = origLokal;
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+}
+
 // --- Waehrung und Mehrwert --------------------------------------------------
 // Arbeitswert steht in Euro, API-Kosten in Dollar. Werden sie ohne Umrechnung
 // addiert, ist der ausgewiesene Mehrwert zu hoch.
@@ -3487,6 +3540,60 @@ function testKontaktKonversion() {
       assert.strictEqual(ohne.kontakt_id, null, 'Angebot ohne Kontakt traegt einen Verweis');
       assert.doesNotThrow(() => angebot.setzeStatus(db, ohne.nr, 'angenommen'),
         'Annahme ohne Kontakt scheiterte');
+
+      // Kanban (Nacharbeit 14.10.): Zeitpunkte, Wiederoeffnen, Rueckgaengig.
+      const lead4 = kontakte.speichere(db, { firma: 'Vierte GmbH' });
+      const e = angebot.erstelle(db, { posten: [{ bezeichnung: 'X', stunden: 1 }], empfaenger: empf, kontaktId: lead4.id });
+      const vorE = angebot.lade(db, e.nr);
+      const zu = angebot.setzeStatus(db, e.nr, 'angenommen');
+      assert.ok(zu.angenommen_am && Math.abs(Date.parse(zu.angenommen_am) - Date.now()) < 60000, 'angenommen_am nicht jetzt');
+      assert.strictEqual(zu.abgelehnt_am, null, 'abgelehnt_am bei Annahme gesetzt');
+      assert.strictEqual(zu.kunde_geworden, true, 'kunde_geworden fehlt, obwohl der Lead umgewandelt wurde');
+      assert.strictEqual(angebot.setzeStatus(db, ohne.nr, 'angenommen').kunde_geworden, false, 'ohne Kontakt als Kunde gemeldet');
+      // Rueckgaengig stellt Angebot und Kontakt her — in einem Schritt.
+      angebot.setzeStatus(db, e.nr, 'offen', { gueltig_bis: vorE.gueltig_bis, angenommen_am: null, abgelehnt_am: null, lead: true });
+      const zurueck = angebot.lade(db, e.nr);
+      assert.deepStrictEqual([zurueck.status, zurueck.gueltig_bis, zurueck.angenommen_am, zurueck.abgelehnt_am],
+        ['offen', vorE.gueltig_bis, null, null], 'Rueckgaengig stellt das Angebot nicht her');
+      assert.strictEqual(kontakte.lade(db, lead4.id).status, 'lead', 'Rueckgaengig macht den Kunden nicht wieder zum Lead');
+      // Ein Kunde, der nicht durch diese Annahme Kunde wurde, bleibt Kunde (lead fehlt im Stand).
+      angebot.setzeStatus(db, a.nr, 'offen', { gueltig_bis: a.gueltig_bis, angenommen_am: null, abgelehnt_am: null });
+      assert.strictEqual(kontakte.lade(db, lead.id).status, 'kunde', 'Rueckgaengig ohne lead hat einen Kunden zurueckgestuft');
+      // Ablehnung haelt ihren Zeitpunkt fest und loescht den der Annahme.
+      angebot.setzeStatus(db, e.nr, 'angenommen');
+      const ab = angebot.setzeStatus(db, e.nr, 'abgelehnt');
+      assert.ok(ab.abgelehnt_am && ab.angenommen_am === null, 'abgelehnt_am/angenommen_am falsch: ' + ab.abgelehnt_am + ' / ' + ab.angenommen_am);
+      // Abgelaufen wieder oeffnen: gueltig bis heute + 30 Tage; nicht abgelaufen: unveraendert.
+      db.prepare('UPDATE angebote SET gueltig_bis = ? WHERE nr = ?').run(new Date(Date.now() - 2 * 86400000).toISOString(), e.nr);
+      const auf = angebot.setzeStatus(db, e.nr, 'offen');
+      const tage = (Date.parse(auf.gueltig_bis) - Date.now()) / 86400000;
+      assert.ok(tage > 29.9 && tage < 30.1, 'Wiederoeffnen verlaengert nicht um 30 Tage: ' + tage);
+      assert.strictEqual(angebot.liste(db).find((x) => x.nr === e.nr).status_abgeleitet, 'offen', 'wiedergeoeffnet, aber weiter abgelaufen');
+      const vorher = angebot.lade(db, ohne.nr).gueltig_bis;
+      assert.strictEqual(angebot.setzeStatus(db, ohne.nr, 'offen').gueltig_bis, vorher, 'gueltiges Angebot beim Wiederoeffnen verlaengert');
+      // Liste traegt die Zeitpunkte fuer die Karte.
+      assert.ok('angenommen_am' in angebot.liste(db)[0] && 'abgelehnt_am' in angebot.liste(db)[0], 'Liste ohne Zeitpunkte');
+      // Uebernahme in eine Rechnung setzt angenommen_am, wenn es fehlt.
+      const f2 = angebot.erstelle(db, { posten: [{ bezeichnung: 'X', stunden: 1 }], empfaenger: empf });
+      assert.ok(angebot.inRechnung(db, f2.nr).angebot.angenommen_am, 'inRechnung ohne angenommen_am');
+      // Der Ingest haelt eine Transaktion ueber ein await offen; ein Statuswechsel
+      // in diesem Fenster darf nicht an einem eigenen BEGIN scheitern.
+      db.exec('BEGIN');
+      try {
+        assert.doesNotThrow(() => angebot.setzeStatus(db, e.nr, 'abgelehnt'), 'Statuswechsel scheitert bei offener Ingest-Transaktion');
+      } finally { db.exec('COMMIT'); }
+      angebot.setzeStatus(db, e.nr, 'offen');
+      // Ein kaputter Stand wird abgewiesen, ohne etwas zu schreiben.
+      assert.throws(() => angebot.setzeStatus(db, e.nr, 'abgelehnt', { gueltig_bis: 'gestern' }), /kein gueltiger Zeitpunkt/, 'kaputter Stand angenommen');
+      assert.strictEqual(angebot.lade(db, e.nr).status, 'offen', 'kaputter Stand hat den Status geaendert');
+      assert.throws(() => angebot.setzeStatus(db, e.nr, 'offen', { gueltig_bis: '+275760-09-13T00:00:00.000Z' }), /erlaubten Bereichs/, 'Jahr ausserhalb angenommen');
+      assert.throws(() => angebot.setzeStatus(db, e.nr, 'offen', { gueltig_bis: vorE.gueltig_bis, angenommen_am: vorE.gueltig_bis }), /passt nicht/, 'Zeitpunkt zum falschen Status angenommen');
+      // lead wirkt nur als Rueckgaengig einer Annahme: auf einem offenen Angebot bleibt der Kunde Kunde.
+      const kunde5 = kontakte.speichere(db, { firma: 'Fuenfte GmbH' });
+      const g5 = angebot.erstelle(db, { posten: [{ bezeichnung: 'X', stunden: 1 }], empfaenger: empf, kontaktId: kunde5.id });
+      kontakte.macheKunde(db, kunde5.id);
+      angebot.setzeStatus(db, g5.nr, 'abgelehnt', { gueltig_bis: g5.gueltig_bis, abgelehnt_am: g5.gueltig_bis, lead: true });
+      assert.strictEqual(kontakte.lade(db, kunde5.id).status, 'kunde', 'lead ohne vorherige Annahme hat einen Kunden zurueckgestuft');
 
       // Ein Tippfehler in der id soll dagegen sofort auffallen.
       assert.throws(() => angebot.erstelle(db, {
@@ -7060,6 +7167,14 @@ async function main() {
   } catch (err) {
     failed++;
     console.log('  FAIL Ingest: echte Datei, Dedup und Wiederholungslauf\n       ' + err.message);
+  }
+
+  try {
+    await testIngestOhneOffeneTransaktion();
+    console.log('  ok   Ingest: keine Transaktion ueber await, Anfragen koennen waehrenddessen schreiben');
+  } catch (err) {
+    failed++;
+    console.log('  FAIL Ingest: keine Transaktion ueber await, Anfragen koennen waehrenddessen schreiben\n       ' + err.message);
   }
 
   try {

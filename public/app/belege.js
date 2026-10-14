@@ -1,10 +1,11 @@
 'use strict';
-/* Angebote und Rechnungen (Block 4a). Free zeigt beide als Tabelle mit
-   Filtern; Kanban ist noch nicht gebaut und erscheint bei offenem Schalter
-   nicht (R16). Gerechnet wird hier
+/* Angebote und Rechnungen (Block 4a, Kanban Nacharbeit 14.10.). Beide als
+   Tabelle mit Filtern oder als Kanban-Board (Spalten nach Stand, Karten
+   ziehen); ohne Pro zeigt der Kanban-Knopf die Sperre. Gerechnet wird hier
    nichts: Status, gezahlt, Rest und die Kennzahlen kommen vom Server
    (rechnung.liste, rechnung.kennzahlen, angebot.liste). Im Browser entstehen
-   nur Filter, Sortierung, die Summe der angezeigten Zeilen und Formatierung. */
+   nur Filter, Sortierung, Spaltenzuordnung, die Summe der angezeigten Zeilen
+   und Formatierung. */
 
 Object.assign(EN, {
   'Offen gesamt': 'Open total', 'gestellt, abzüglich Zahlungen': 'issued, minus payments',
@@ -75,6 +76,25 @@ Object.assign(EN, {
   'Anzeige nicht aktualisiert': 'View not refreshed',
   'Keine Antwort vom Server — die Zahlung ist vielleicht gebucht. Bitte die Zeile prüfen, bevor du erneut buchst.':
     'No answer from the server — the payment may have been booked. Check the row before booking again.',
+  'Fällig / Überfällig': 'Due / overdue', 'noch nicht fällig': 'not due yet', 'erinnern oder mahnen': 'remind or dun',
+  'Rest steht aus': 'balance outstanding', 'hierher ziehen bucht den Rest': 'drop here to book the balance',
+  'Nichts offen.': 'Nothing open.', 'Nichts überfällig.': 'Nothing overdue.', 'Keine Teilzahlungen.': 'No partial payments.', 'Noch nichts bezahlt.': 'Nothing paid yet.',
+  'offen {b}': 'open {b}', 'heute fällig': 'due today', 'fällig {d} · in {n} T.': 'due {d} · in {n} d', 'überfällig seit {n} T.': 'overdue {n} d',
+  '{n} stornierte Rechnung mit Gutschrift nur in der Tabelle': '{n} cancelled invoice with credit note only in the table',
+  '{n} stornierte Rechnungen mit Gutschrift nur in der Tabelle': '{n} cancelled invoices with credit note only in the table',
+  'Karte nach „Bezahlt“ ziehen bucht den Rest. Klick öffnet das Dokument.': 'Drag a card to “Paid” to book the balance. Click opens the document.',
+  '{nr} bezahlt · {b} am {d} gebucht': '{nr} paid · {b} booked on {d}', 'auf dem Board als bezahlt markiert': 'marked as paid on the board',
+  'Offen und überfällig ergeben sich aus Fälligkeit und Zahlungen. Zahlungen entfernst du in der Tabelle.':
+    'Open and overdue follow from the due date and payments. Remove payments in the table.',
+  'versendet, Antwort steht aus': 'sent, awaiting reply', 'bereit für die Rechnung': 'ready to invoice',
+  'Ablage · zurückziehen öffnet wieder': 'archive · drag back to reopen', 'entsteht über „In Rechnung“': 'created via “Invoice”',
+  'Keine offenen Angebote.': 'No open quotes.', 'Nichts wartet auf eine Rechnung.': 'Nothing waiting for an invoice.', 'Leer.': 'Empty.', 'Noch nichts abgerechnet.': 'Nothing invoiced yet.',
+  'gültig bis {d} · noch {n} T.': 'valid until {d} · {n} d left', 'angenommen {d}': 'accepted {d}', 'abgelehnt {d}': 'declined {d}', 'abgelaufen {d}': 'expired {d}',
+  'Karten ziehen: Offen ↔ Angenommen ↔ Abgelehnt. Klick öffnet das Dokument.': 'Drag cards: Open ↔ Accepted ↔ Declined. Click opens the document.',
+  '{nr} wieder offen': '{nr} open again', '{nr} wieder offen · gültig bis {d}': '{nr} open again · valid until {d}',
+  '{nr} angenommen': '{nr} accepted', '{nr} abgelehnt': '{nr} declined', '{f} ist jetzt Kunde': '{f} is now a customer',
+  'Abgerechnet entsteht über „In Rechnung“ – so bekommt die Rechnung ihre Nummer.': '“Invoiced” comes from “Invoice” – that is how the invoice gets its number.',
+  'In Rechnung': 'Invoice',
 });
 
 // Fuellt {n}/{b} nach der Uebersetzung ein — sonst braeuchte jede Zahl einen eigenen Eintrag.
@@ -108,7 +128,8 @@ const bz = {
   af: lies('angebote.filter', 'alle'),
   aq: '',
   akunde: '',
-  ansicht: { rechnungen: 'tabelle', angebote: 'tabelle' },
+  ansicht: liesJson('belege.ansicht', null),
+  zieh: null,                   // { seite, nr } der gezogenen Karte
   auf: Object.create(null),     // nr -> { d, fehler, lauf } der aufgeklappten Rechnung
   menu: null,                   // Nummer mit offenem ⋯-Menue
   frage: null,                  // { art, nr } Rueckfrage in der Zeile
@@ -116,6 +137,13 @@ const bz = {
 if (!R_PASST[bz.rf]) bz.rf = 'alle';
 if (!A_PASST[bz.af]) bz.af = 'alle';
 if (!bz.rsort || !R_SORT.includes(bz.rsort.k) || ![1, -1].includes(bz.rsort.dir)) bz.rsort = { k: 'datum', dir: -1 };
+// Ansichten je Seite. Ein dritter Knopf (Serien, PLAN 11.4) kommt als weiterer Eintrag hinzu.
+const B_ANSICHTEN = { rechnungen: [['tabelle', 'Tabelle'], ['kanban', 'Kanban']], angebote: [['tabelle', 'Tabelle'], ['kanban', 'Kanban']] };
+{
+  const g = bz.ansicht && typeof bz.ansicht === 'object' ? bz.ansicht : {};
+  bz.ansicht = {};
+  for (const [s, l] of Object.entries(B_ANSICHTEN)) bz.ansicht[s] = l.some((x) => x[0] === g[s]) ? g[s] : 'tabelle';
+}
 
 // Tag in Ortszeit: erstellt_am ist ein UTC-Zeitstempel.
 const ortsTag = (iso) => isoTag(new Date(iso));
@@ -135,19 +163,87 @@ function chips(aktionName, liste, aktuell, zaehle) {
 }
 
 function ansichtWahl(seite) {
-  if (proAktiv()) return '';
   const a = bz.ansicht[seite];
   return '<span class="segment" role="group" aria-label="' + esc(uebersetze('Ansicht')) + '">' +
-    '<button type="button" data-aktion="beleg-ansicht" data-wert="' + seite + ':tabelle" aria-pressed="' + (a === 'tabelle') + '">' + esc(uebersetze('Tabelle')) + '</button>' +
-    '<button type="button" data-aktion="beleg-ansicht" data-wert="' + seite + ':kanban" aria-pressed="' + (a === 'kanban') + '">' + esc(uebersetze('Kanban')) + ' <span class="pille pro">Pro</span></button></span>';
+    B_ANSICHTEN[seite].map(([k, l]) => '<button type="button" data-aktion="beleg-ansicht" data-wert="' + seite + ':' + k + '" aria-pressed="' + (a === k) + '">' +
+      esc(uebersetze(l)) + (k === 'kanban' && !proAktiv() ? ' <span class="pille pro">Pro</span>' : '') + '</button>').join('') + '</span>';
 }
 aktion('beleg-ansicht', (wert) => {
   const [seite, a] = String(wert).split(':');
-  if (!(seite in bz.ansicht) || !['tabelle', 'kanban'].includes(a)) return;
+  if (!B_ANSICHTEN[seite] || !B_ANSICHTEN[seite].some((x) => x[0] === a)) return;
   bz.ansicht[seite] = a;
+  merke('belege.ansicht', bz.ansicht);
   zeichneAnsicht();
 });
+const zeigtBoard = (seite) => bz.ansicht[seite] === 'kanban' && proAktiv();
 const kanbanSperre = () => '<div class="karte eingelassen sperre-huelle">' + sperre('Kanban-Ansicht', 'Belege als Spalten nach Stand, Karten ziehen — mit der Pro-Version.') + '</div>';
+
+/* ---------- Kanban (Mockup Abrechnung Z. 115–188) ----------
+   Spalten und Summen kommen aus den Server-Feldern, hier wird nur zugeordnet.
+   Ziehen wie im Hub: HTML5-DnD mit Zieh-Sperre, damit das Nachladen das Board
+   nicht mitten im Ziehen ersetzt. Jede Ablage hat einen Weg ohne Ziehen
+   (Knopf „Zahlung“, ⋯-Menü der Karte). Klick auf die Karte oeffnet das Dokument. */
+function boardHtml(seite, spalten, karte) {
+  return '<div class="kb-huelle"><div class="kb-raster ' + seite + '" data-kb="' + seite + '">' +
+    spalten.map((s) => '<div class="kb-spalte" data-kb-spalte="' + s.id + '">' +
+      '<div class="kb-kopf"><div class="kb-kopf-z"><b>' + esc(uebersetze(s.l)) + '</b><span class="kb-n">' + num(s.karten.length) + '</span>' +
+        '<span class="kb-summe">' + nf0.format(s.summe) + ' €</span></div><span class="kb-hinweis">' + esc(uebersetze(s.h)) + '</span></div>' +
+      (s.karten.length ? s.karten.map(karte).join('') : '<div class="kb-leer">' + esc(uebersetze(s.leer)) + '</div>') +
+    '</div>').join('') + '</div></div>';
+}
+const spaltenAus = (def, liste, spalteVon, summand) => def.map(([id, l, h, leerT]) => {
+  const karten = liste.filter((x) => spalteVon(x) === id);
+  return { id, l, h, leer: leerT, karten, summe: karten.reduce((s, x) => s + summand(x, id), 0) };
+});
+const karteKopf = (nr, href, betrag) => '<div class="kb-z1"><a class="kb-nr" href="' + href + '" target="_blank" rel="noopener">' + esc(nr) + '</a>' +
+  '<span class="kb-betrag">' + nf2.format(betrag) + '</span></div>';
+aktion('kb-oeffnen', (href, el, e) => {
+  // Rueckfrage und Menue liegen in der Karte — ein Klick dort meint nicht das Dokument.
+  if (e && e.target.closest('.b-frage, .zeilen-menue')) return;
+  if (/^\/(rechnung|angebot)\/[^/]+$/.test(href)) window.open(href, '_blank', 'noopener');
+});
+const imFlug = new Set();   // Nummern, deren Ablage noch beim Server ist — kein zweiter Zug darauf
+
+// erlaubt(spalte) faerbt das Ziel gruen bzw. orange oder rot; ablegen(nr, spalte) handelt.
+function verdrahteBoard(w, seite, erlaubt, ablegen) {
+  const raster = w.querySelector('[data-kb="' + seite + '"]');
+  if (!raster) return;
+  const spalten = [...raster.querySelectorAll('.kb-spalte')];
+  const markiere = (ziel) => {
+    for (const s of spalten) {
+      const an = s === ziel, ok = an && erlaubt(s.dataset.kbSpalte);
+      s.classList.toggle('ziel-ok', ok);
+      s.classList.toggle('ziel-nein', an && !ok);
+    }
+  };
+  for (const k of raster.querySelectorAll('.kb-karte[draggable="true"]')) {
+    k.addEventListener('dragstart', (e) => {
+      bz.zieh = { seite, nr: k.dataset.nr, von: k.closest('.kb-spalte').dataset.kbSpalte };
+      try { e.dataTransfer.setData('text/plain', k.dataset.nr); e.dataTransfer.effectAllowed = 'move'; } catch { /* egal */ }
+      k.classList.add('zieht');
+      menueZu();   // ohne Neuzeichnen — das braeche den Zug ab
+      ziehen(true);
+    });
+    k.addEventListener('dragend', () => { bz.zieh = null; k.classList.remove('zieht'); markiere(null); ziehen(false); });
+  }
+  for (const s of spalten) {
+    s.addEventListener('dragover', (e) => {
+      if (!bz.zieh || bz.zieh.seite !== seite) return;
+      e.preventDefault();
+      markiere(s);
+    });
+    s.addEventListener('dragleave', (e) => { if (!s.contains(e.relatedTarget)) s.classList.remove('ziel-ok', 'ziel-nein'); });
+    s.addEventListener('drop', (e) => {
+      if (!bz.zieh || bz.zieh.seite !== seite) return;
+      e.preventDefault();
+      const z = bz.zieh;
+      markiere(null);
+      if (z.von === s.dataset.kbSpalte || imFlug.has(z.nr)) return;
+      imFlug.add(z.nr);
+      Promise.resolve(ablegen(z.nr, s.dataset.kbSpalte)).finally(() => imFlug.delete(z.nr));
+    });
+  }
+}
 
 // Neue Belege entstehen im Beleg-Editor (editor.js). Entwuerfe stehen als
 // eigener Knopf daneben, nie als Tabellenzeile (R5).
@@ -244,6 +340,82 @@ function bezahltZelle(r) {
     ? nf2.format(r.gezahlt_eur) + ' ' + uebersetze('von') + ' ' + nf2.format(r.brutto_eur) : uebersetze('vollständig');
   return '<span class="b-bezahlt"><span class="spur"><span style="width:' + (anteil * 100).toFixed(1) + '%" class="' + (r.rest_eur > 0 ? 'teil' : 'voll') + '"></span></span>' +
     '<span class="s ell">' + esc(text) + '</span></span>';
+}
+
+const rTreffer = (r, q) => !q || (r.nr + ' ' + (r.empfaenger || '') + ' ' + (r.leistung_von || '') + ' ' + (r.storno_von || '')).toLowerCase().includes(q);
+
+// Spalte wie im Mockup (colOf): faellig/ueberfaellig vor teilbezahlt; storniert erscheint nicht.
+const R_SPALTEN = [['off', 'Offen', 'noch nicht fällig', 'Nichts offen.'], ['ue', 'Fällig / Überfällig', 'erinnern oder mahnen', 'Nichts überfällig.'],
+  ['teil', 'Teilbezahlt', 'Rest steht aus', 'Keine Teilzahlungen.'], ['bez', 'Bezahlt', 'hierher ziehen bucht den Rest', 'Noch nichts bezahlt.']];
+function rSpalte(r) {
+  const st = r.status_abgeleitet;
+  if (st === 'storniert' || st === 'storno') return null;
+  if (st === 'bezahlt') return 'bez';
+  if (r.rest_eur > 0 && (r.ueberfaellig_tage > 0 || (r.faellig_am && r.faellig_am <= heuteTag()))) return 'ue';
+  return st === 'teilbezahlt' ? 'teil' : 'off';
+}
+
+function rechnungKarte(r) {
+  const sp = rSpalte(r), rest = r.rest_eur > 0;
+  const anteil = r.brutto_eur > 0 ? Math.min(1, r.gezahlt_eur / r.brutto_eur) : 0;
+  let fl, ton = '';
+  if (sp === 'bez') { fl = uebersetze('bezahlt'); ton = 'ok'; }
+  else if (r.ueberfaellig_tage > 0) { fl = fuelle('überfällig seit {n} T.', { n: r.ueberfaellig_tage }); ton = 'bad'; }
+  else {
+    const d = tageZwischen(ausIso(heuteTag()), ausIso(r.faellig_am));
+    if (d <= 0) { fl = uebersetze('heute fällig'); ton = 'warn'; }
+    else { fl = fuelle('fällig {d} · in {n} T.', { d: datumKurz(r.faellig_am), n: d }); ton = d <= 3 ? 'warn' : ''; }
+  }
+  const sub = r.leistung_von ? datum(r.leistung_von) + ' – ' + datum(r.leistung_bis) : '';
+  const href = '/rechnung/' + encodeURIComponent(r.nr);
+  return '<div class="kb-karte" draggable="' + rest + '" data-nr="' + esc(r.nr) + '" data-aktion="kb-oeffnen" data-wert="' + href + '">' +
+    karteKopf(r.nr, href, r.brutto_eur) +
+    '<span class="kb-firma ell">' + esc(r.empfaenger || '—') + '</span>' +
+    (sub ? '<span class="kb-titel ell">' + esc(sub) + '</span>' : '') +
+    '<span class="kb-band"><span class="' + (rest ? 'teil' : 'voll') + '" style="width:' + (anteil * 100).toFixed(1) + '%"></span></span>' +
+    '<div class="kb-zeile"><span class="mono ' + (rest ? 'teil' : 'ok') + '">' + esc(rest ? fuelle('offen {b}', { b: nf2.format(r.rest_eur) }) : uebersetze('ausgeglichen')) + '</span></div>' +
+    '<div class="kb-zeile"><span class="ell ' + ton + '">' + esc(fl) + '</span></div>' +
+    (rest ? '<div class="kb-knoepfe"><button type="button" class="mini-aktion zahlung" data-aktion="r-zahlung" data-wert="' + esc(r.nr) + '">' + esc(uebersetze('Zahlung')) + '</button></div>' : '') +
+  '</div>';
+}
+
+function rechnungBoard(L, q) {
+  if (!L.length) return leer('beleg', 'Noch keine Rechnung gestellt');
+  const sicht = L.filter((r) => rTreffer(r, q));
+  const storniert = sicht.filter((r) => r.status_abgeleitet === 'storniert').length;
+  const spalten = spaltenAus(R_SPALTEN, sicht, rSpalte, (r, id) => (id === 'bez' ? r.brutto_eur : r.rest_eur));
+  return '<div class="kb-oben hinweis">' + esc(uebersetze('Karte nach „Bezahlt“ ziehen bucht den Rest. Klick öffnet das Dokument.')) +
+      (storniert ? ' · ' + esc(fuelle(storniert === 1 ? '{n} stornierte Rechnung mit Gutschrift nur in der Tabelle' : '{n} stornierte Rechnungen mit Gutschrift nur in der Tabelle', { n: storniert })) : '') + '</div>' +
+    boardHtml('rechnungen', spalten, rechnungKarte);
+}
+
+// Ablage: Bezahlt bucht den Rest heute (mit Rueckgaengig), Teilbezahlt oeffnet den
+// Zahlung-Dialog mit der Haelfte. Offen/Faellig ergeben sich, gesetzt wird dort nichts.
+// VERLOREN (Netzfehler-Namen) steht in editor.js — gleiche globale Ebene.
+async function rAblegen(nr, sp) {
+  const r = (state.rechnungen || []).find((x) => x.nr === nr);
+  if (!r || !(r.rest_eur > 0)) return;
+  if (sp === 'teil') {
+    zahlungDialog(nr);
+    const feld = document.getElementById('z-betrag');
+    if (feld) { feld.value = nf2.format(Math.round(r.rest_eur * 50) / 100); feld.dispatchEvent(new Event('input', { bubbles: true })); }
+    return;
+  }
+  if (sp !== 'bez') { toast(uebersetze('Offen und überfällig ergeben sich aus Fälligkeit und Zahlungen. Zahlungen entfernst du in der Tabelle.'), 'warn'); return; }
+  const tag = heuteTag();
+  let antwort;
+  try {
+    antwort = await sende('/api/zahlung', { nr, betrag_eur: r.rest_eur, datum: tag, notiz: uebersetze('auf dem Board als bezahlt markiert') });
+  } catch (e) {
+    // Antwort verloren: die Zahlung kann trotzdem gebucht sein — sagen, nicht still neu versuchen.
+    toast(VERLOREN.includes(e.name) ? uebersetze('Keine Antwort vom Server — die Zahlung ist vielleicht gebucht. Bitte die Zeile prüfen, bevor du erneut buchst.')
+      : uebersetze('Zahlung nicht gebucht') + ': ' + e.message, 'err');
+    await belegeNeu(nr);
+    return;
+  }
+  toast(fuelle('{nr} bezahlt · {b} am {d} gebucht', { nr, b: eur(antwort.zahlung.betrag_eur), d: datum(tag) }), 'ok',
+    { text: uebersetze('Rückgängig'), tu: () => zahlungWeg(antwort.zahlung.id, nr) });
+  await belegeNeu(nr);
 }
 
 function rechnungZeile(r) {
@@ -364,7 +536,7 @@ function zeichneRechnungen(w) {
   const { k, dir } = bz.rsort;
   const schluessel = { datum: (r) => r.erstellt_am, brutto: (r) => r.brutto_eur, faellig: (r) => r.faellig_am || '' }[k];
   const zeilen = L.filter(passt)
-    .filter((r) => !q || (r.nr + ' ' + (r.empfaenger || '') + ' ' + (r.leistung_von || '') + ' ' + (r.storno_von || '')).toLowerCase().includes(q))
+    .filter((r) => rTreffer(r, q))
     .sort((a, b) => { const x = schluessel(a), y = schluessel(b); return (x < y ? -1 : x > y ? 1 : 0) * dir || (a.nr < b.nr ? 1 : -1); });
   const sortKnopf = (key, text, titel, rechts) => '<button type="button" class="th-knopf' + (rechts ? ' rechts' : '') + '" data-aktion="r-sort" data-wert="' + key + '" title="' + esc(uebersetze(titel)) + '"' +
     ' aria-sort="' + (k === key ? (dir > 0 ? 'ascending' : 'descending') : 'none') + '">' + esc(uebersetze(text)) + (k === key ? (dir > 0 ? ' ↑' : ' ↓') : '') + '</button>';
@@ -381,16 +553,18 @@ function zeichneRechnungen(w) {
 
   w.innerHTML = '<div class="beleg-seite">' + kpis + abrechenbareAngebote() +
     '<div class="karte weit"><div class="beleg-leiste">' +
-      chips('r-filter', R_FILTER, bz.rf, (f) => L.filter(R_PASST[f]).length) +
+      // Im Board sind die Spalten der Filter — die Chips stehen nur an der Tabelle.
+      (zeigtBoard('rechnungen') ? '' : chips('r-filter', R_FILTER, bz.rf, (f) => L.filter(R_PASST[f]).length)) +
       '<span class="luecke"></span>' + ansichtWahl('rechnungen') +
       suchFeld('r-suche', bz.rq, 'Suchen: Nummer, Kunde, Leistung') + neuKnopf('+ Rechnung', 'rechnung') +
       (state.fehler.belege ? '<span class="hinweis warn">' + esc(uebersetze('Belege nicht aktualisiert')) + '</span>' : '') +
     '</div>' +
-    (bz.ansicht.rechnungen === 'kanban' && !proAktiv() ? kanbanSperre() : tabelle) +
+    (bz.ansicht.rechnungen !== 'kanban' ? tabelle : proAktiv() ? rechnungBoard(L, q) : kanbanSperre()) +
     '</div>' +
     (proAktiv() ? '' : '<div class="karte eingelassen sperre-huelle">' + sperre('Mahnen, Versand und Kontoauszug', 'Zahlungserinnerung und Mahnung, Versand per E-Mail, Zahlungen aus dem Kontoauszug zuordnen — mit der Pro-Version.') + '</div>') +
   '</div>';
   verdrahteSuche(w, 'r-suche', (v) => { bz.rq = v; }, suche);
+  verdrahteBoard(w, 'rechnungen', (sp) => sp === 'bez' || sp === 'teil', rAblegen);
 }
 
 // Suche: Eingabe filtert sofort. Fokus und Cursor bleiben auch, wenn das
@@ -548,9 +722,8 @@ function gueltigText(a) {
   return { t: datumKurz(ortsTag(a.gueltig_bis)), s: d <= 0 ? uebersetze('läuft heute ab') : d === 1 ? uebersetze('noch 1 Tag') : fuelle('noch {n} Tage', { n: d }), warn: d <= 7 };
 }
 
-function angebotZeile(a) {
-  const kontakt = a.kontakt_id && (state.kontakte || []).find((k) => k.id === a.kontakt_id);
-  const g = gueltigText(a);
+// Menue einer Zeile bzw. Karte — auch der Weg ohne Ziehen im Board.
+function angebotMenue(a) {
   const st = a.status_abgeleitet;
   const eintraege = [menueLink('/angebot/' + encodeURIComponent(a.nr), 'Ansehen', true)];
   // Abgelaufen ist abgeleitet, nicht gesetzt: eine spaete Zusage laesst sich trotzdem erfassen (R17).
@@ -560,6 +733,18 @@ function angebotZeile(a) {
   // Wie in der bisherigen Ansicht: abrechnen geht aus jedem Stand, der Server setzt dabei "angenommen".
   if (!a.rechnung_nr && st !== 'angenommen') eintraege.push(menueKnopf('a-rechnung-frage', a.nr, 'In Rechnung …'));
   if (!a.rechnung_nr) eintraege.push(menueKnopf('a-loeschen-frage', a.nr, 'Löschen …', true));
+  return eintraege;
+}
+const angebotFragen = (a) =>
+  (frageIst('rechnung', a.nr) ? frageZeile(fuelle('Erzeugt eine Rechnung über {b} mit der nächsten Nummer. Das Angebot bleibt, wie es ist.', { b: eur(a.brutto_eur) }), 'a-rechnung', a.nr, 'Rechnung erstellen') : '') +
+  (frageIst('loeschen', a.nr) ? frageZeile(uebersetze('Das Angebot wird gelöscht. Angebote sind kein Steuerdokument; die Nummer bleibt frei.'), 'a-loeschen', a.nr, 'Löschen', true) : '');
+const kontaktVon = (a) => a.kontakt_id && (state.kontakte || []).find((k) => k.id === a.kontakt_id);
+
+function angebotZeile(a) {
+  const kontakt = kontaktVon(a);
+  const g = gueltigText(a);
+  const st = a.status_abgeleitet;
+  const eintraege = angebotMenue(a);
   return '<div class="b-eintrag">' +
     '<div class="b-zeile ohne-klick">' +
       '<span class="b-nr"><span class="mono">' + esc(a.nr) + '</span></span>' +
@@ -571,10 +756,64 @@ function angebotZeile(a) {
       '<span>' + pille(st) + '</span>' +
       '<span class="b-aktion">' + (st === 'angenommen' ? '<button type="button" class="mini-aktion akzent" data-aktion="a-rechnung-frage" data-wert="' + esc(a.nr) + '">' + esc(uebersetze('In Rechnung →')) + '</button>' : '') +
         menue(a.nr, eintraege) + '</span>' +
-    '</div>' +
-    (frageIst('rechnung', a.nr) ? frageZeile(fuelle('Erzeugt eine Rechnung über {b} mit der nächsten Nummer. Das Angebot bleibt, wie es ist.', { b: eur(a.brutto_eur) }), 'a-rechnung', a.nr, 'Rechnung erstellen') : '') +
-    (frageIst('loeschen', a.nr) ? frageZeile(uebersetze('Das Angebot wird gelöscht. Angebote sind kein Steuerdokument; die Nummer bleibt frei.'), 'a-loeschen', a.nr, 'Löschen', true) : '') +
+    '</div>' + angebotFragen(a) +
   '</div>';
+}
+
+const A_SPALTEN = [['off', 'Offen', 'versendet, Antwort steht aus', 'Keine offenen Angebote.'], ['ang', 'Angenommen', 'bereit für die Rechnung', 'Nichts wartet auf eine Rechnung.'],
+  ['abl', 'Abgelehnt / Abgelaufen', 'Ablage · zurückziehen öffnet wieder', 'Leer.'], ['abg', 'Abgerechnet', 'entsteht über „In Rechnung“', 'Noch nichts abgerechnet.']];
+const A_SPALTE = { offen: 'off', angenommen: 'ang', abgelehnt: 'abl', abgelaufen: 'abl', abgerechnet: 'abg' };
+const A_ZIEL = { off: 'offen', ang: 'angenommen', abl: 'abgelehnt' };
+
+function angebotKarte(a) {
+  const sp = A_SPALTE[a.status_abgeleitet];
+  const kontakt = kontaktVon(a);
+  const tagD = (iso) => datumKurz(ortsTag(iso));
+  let gl, ton = '';
+  if (sp === 'off') {
+    const d = tageZwischen(ausIso(heuteTag()), ausIso(ortsTag(a.gueltig_bis)));
+    gl = d <= 0 ? uebersetze('läuft heute ab') : fuelle('gültig bis {d} · noch {n} T.', { d: tagD(a.gueltig_bis), n: d });
+    ton = d <= 7 ? 'warn' : '';
+  } else if (sp === 'ang') {
+    gl = a.angenommen_am ? fuelle('angenommen {d}', { d: tagD(a.angenommen_am) }) : uebersetze('angenommen');
+    ton = 'ok';
+  } else if (sp === 'abl') {
+    gl = a.status_abgeleitet === 'abgelaufen' ? fuelle('abgelaufen {d}', { d: tagD(a.gueltig_bis) })
+      : a.abgelehnt_am ? fuelle('abgelehnt {d}', { d: tagD(a.abgelehnt_am) }) : uebersetze('abgelehnt');
+    ton = 'warn';
+  } else {
+    const r = (state.rechnungen || []).find((x) => x.nr === a.rechnung_nr);
+    gl = '→ ' + a.rechnung_nr + (r ? ' · ' + uebersetze(STATUS_TEXT[r.status_abgeleitet] || r.status_abgeleitet) : '');
+    ton = r && r.status_abgeleitet === 'bezahlt' ? 'ok' : r && r.ueberfaellig_tage > 0 ? 'bad' : 'dim';
+  }
+  const href = '/angebot/' + encodeURIComponent(a.nr);
+  return '<div class="kb-karte" draggable="' + (sp !== 'abg') + '" data-nr="' + esc(a.nr) + '" data-aktion="kb-oeffnen" data-wert="' + href + '">' +
+    karteKopf(a.nr, href, a.brutto_eur) +
+    '<div class="kb-z1"><span class="kb-firma ell">' + esc(a.empfaenger || '—') + '</span>' + (kontakt && kontakt.status === 'lead' ? pille('lead') : '') + '</div>' +
+    '<div class="kb-zeile"><span class="ell ' + ton + '">' + esc(gl) + '</span><span class="kb-menue">' + menue(a.nr, angebotMenue(a)) + '</span></div>' +
+    (sp === 'ang' ? '<button type="button" class="kb-rechnung" data-aktion="a-rechnung-frage" data-wert="' + esc(a.nr) + '">' + esc(uebersetze('In Rechnung →')) + '</button>' : '') +
+    angebotFragen(a) +
+  '</div>';
+}
+
+function angebotBoard(L, liste) {
+  if (!L.length) return leer('beleg', 'Noch kein Angebot');
+  const sortiert = liste.slice().sort((x, y) => (x.erstellt_am < y.erstellt_am ? 1 : x.erstellt_am > y.erstellt_am ? -1 : 0));
+  return '<div class="kb-oben hinweis">' + esc(uebersetze('Karten ziehen: Offen ↔ Angenommen ↔ Abgelehnt. Klick öffnet das Dokument.')) + '</div>' +
+    boardHtml('angebote', spaltenAus(A_SPALTEN, sortiert, (a) => A_SPALTE[a.status_abgeleitet], (a) => a.brutto_eur), angebotKarte);
+}
+
+// Abgerechnet entsteht nur ueber „In Rechnung“ (C4) — so bekommt die Rechnung ihre Nummer.
+function aAblegen(nr, sp) {
+  const a = (state.angebote || []).find((x) => x.nr === nr);
+  if (!a) return;
+  if (sp === 'abg') {
+    const kann = A_SPALTE[a.status_abgeleitet] === 'ang';
+    toast(uebersetze('Abgerechnet entsteht über „In Rechnung“ – so bekommt die Rechnung ihre Nummer.'), 'warn',
+      kann ? { text: uebersetze('In Rechnung'), tu: () => frageAuf('rechnung', nr) } : undefined);
+    return;
+  }
+  if (A_ZIEL[sp]) return angebotStatus(nr, A_ZIEL[sp]);
 }
 
 function zeichneAngebote(w) {
@@ -596,43 +835,53 @@ function zeichneAngebote(w) {
       zeilen.map(angebotZeile).join('') + '</div></div>' +
       '<div class="b-summe hinweis">' + num(zeilen.length) + ' ' + esc(uebersetze(zeilen.length === 1 ? 'Angebot im Filter' : 'Angebote im Filter')) + ' · ' + eur(summe) + ' ' + esc(uebersetze('brutto')) + '</div>';
   w.innerHTML = '<div class="beleg-seite"><div class="karte weit"><div class="beleg-leiste">' +
-      chips('a-filter', A_FILTER, bz.af, (f) => vorFilter.filter(A_PASST[f]).length) +
+      (zeigtBoard('angebote') ? '' : chips('a-filter', A_FILTER, bz.af, (f) => vorFilter.filter(A_PASST[f]).length)) +
       '<span class="luecke"></span>' + ansichtWahl('angebote') +
       '<select class="suche-feld schmal" id="a-kunde" aria-label="' + esc(uebersetze('Kunde')) + '"><option value="">' + esc(uebersetze('Alle Kunden')) + '</option>' +
         kunden.map((k) => '<option value="' + esc(k) + '"' + (k === bz.akunde ? ' selected' : '') + '>' + esc(k) + '</option>').join('') + '</select>' +
       suchFeld('a-suche', bz.aq, 'Suchen: Nummer, Kunde') + neuKnopf('+ Angebot', 'angebot') +
       (state.fehler.belege ? '<span class="hinweis warn">' + esc(uebersetze('Belege nicht aktualisiert')) + '</span>' : '') +
     '</div>' +
-    (bz.ansicht.angebote === 'kanban' && !proAktiv() ? kanbanSperre() : tabelle) +
+    (bz.ansicht.angebote !== 'kanban' ? tabelle : proAktiv() ? angebotBoard(L, vorFilter) : kanbanSperre()) +
   '</div></div>';
   verdrahteSuche(w, 'a-suche', (v) => { bz.aq = v; }, suche);
+  verdrahteBoard(w, 'angebote', (sp) => sp !== 'abg', aAblegen);
   const sel = w.querySelector('#a-kunde');
   if (sel) sel.addEventListener('change', () => { bz.akunde = sel.value; zeichneAnsicht(); });
 }
 
 aktion('a-filter', (f) => { if (!A_PASST[f]) return; bz.af = f; merke('angebote.filter', f); zeichneAnsicht(); });
-aktion('a-status', (wert, el) => {
-  const [nr, status] = String(wert).split(':');
+// Statuswechsel aus Menue und Board. Rueckgaengig schickt den vorigen Stand mit
+// (Gueltigkeit, Zeitpunkte) und, wenn die Annahme den Lead erst zum Kunden
+// gemacht hat, auch das — der Server stellt beides in einem Schritt her.
+function angebotStatus(nr, status, el) {
   const a = (state.angebote || []).find((x) => x.nr === nr);
   if (!a || !['offen', 'angenommen', 'abgelehnt'].includes(status)) return;
   // Zurueck auf den gespeicherten Stand: "abgelaufen" ist abgeleitet und nicht setzbar (R17).
   const vorher = a.status === 'abgelaufen' ? 'offen' : a.status;
+  const stand = { gueltig_bis: a.gueltig_bis, angenommen_am: a.angenommen_am || null, abgelehnt_am: a.abgelehnt_am || null };
   bz.menu = null;
   return mitLauf(el, async () => {
-    try { await sende('/api/angebot-status', { nr, status }); }
+    let r;
+    try { r = await sende('/api/angebot-status', { nr, status }); }
     catch (e) { toast(uebersetze('Status nicht geändert') + ': ' + e.message, 'err'); zeichneAnsicht(); return; }
-    // Annehmen macht den Lead zum Kunden (Server). Das liesse sich nicht
-    // zuruecknehmen — deshalb gibt es dort kein "Rueckgaengig".
-    toast(uebersetze('Status geändert') + ': ' + nr + ' · ' + uebersetze(STATUS_TEXT[status]), 'ok', status === 'angenommen' ? undefined : {
+    let text = status === 'angenommen' ? fuelle('{nr} angenommen', { nr }) : status === 'abgelehnt' ? fuelle('{nr} abgelehnt', { nr })
+      : a.status_abgeleitet === 'abgelaufen' ? fuelle('{nr} wieder offen · gültig bis {d}', { nr, d: datum(ortsTag(r.gueltig_bis)) }) : fuelle('{nr} wieder offen', { nr });
+    if (r.kunde_geworden) { const k = kontaktVon(a); text += ' · ' + fuelle('{f} ist jetzt Kunde', { f: (k && k.firma) || a.empfaenger }); }
+    toast(text, 'ok', {
       text: uebersetze('Rückgängig'),
       tu: async () => {
-        try { await sende('/api/angebot-status', { nr, status: vorher }); }
+        try { await sende('/api/angebot-status', { nr, status: vorher, stand: { ...stand, lead: !!r.kunde_geworden } }); }
         catch (e) { toast(uebersetze('Status nicht geändert') + ': ' + e.message, 'err'); }
         await belegeNeu();
       },
     });
     await belegeNeu();
   });
+}
+aktion('a-status', (wert, el) => {
+  const [nr, status] = String(wert).split(':');
+  return angebotStatus(nr, status, el);
 });
 aktion('a-rechnung-frage', (nr) => frageAuf('rechnung', nr));
 aktion('a-rechnung', (nr, el) => mitLauf(el, async () => {

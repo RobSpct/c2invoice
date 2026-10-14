@@ -389,6 +389,7 @@ button.pille { cursor: pointer; }
 }
 .toast.ok { border-color: rgba(87, 201, 138, .45); }
 .toast.err { border-color: rgba(239, 68, 68, .5); }
+.toast.warn { border-color: rgba(224, 179, 85, .55); }
 .toast.geht { opacity: 0; transition: opacity var(--zeit-mittel) var(--kurve-ein); }
 .toast-zu { background: none; border: 0; color: var(--text-faint); cursor: pointer; font-size: 16px; line-height: 1; }
 
@@ -638,7 +639,7 @@ button.pille { cursor: pointer; }
 .katalog-eintrag .tx .wozu { color: var(--text-dim); }
 
 /* Raster der Kacheln: Flex wie im Entwurf, die letzte Reihe streckt sich. */
-.raster-kacheln { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 26px; }
+.raster-kacheln { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 26px; }
 .raster-kacheln.inst .kachel.b1 { flex: 1 1 230px; }
 .raster-kacheln.inst .kachel.b2 { flex: 2 1 474px; }
 .raster-kacheln.inst .kachel.b3 { flex: 3 1 718px; }
@@ -649,12 +650,10 @@ button.pille { cursor: pointer; }
 
 .kachel {
   position: relative; min-width: 0; background: var(--panel); border: 1px solid var(--line-soft);
-  border-radius: var(--r-karte); padding: 16px 18px; display: flex; flex-direction: column; gap: 6px; min-height: 180px;
+  border-radius: var(--r-karte); padding: 16px 18px; display: flex; flex-direction: column; gap: 6px;
 }
-.raster-kacheln.inst .kachel { min-height: 250px; }
 .kachel.bearbeiten { outline: 1.5px dashed rgba(249, 115, 22, .45); outline-offset: 3px; }
 .kachel.ziel-drop { outline: 2px solid var(--accent); }
-.kachel.zieht { opacity: .5; }
 .kachel-kopf { display: flex; align-items: center; gap: 8px; }
 .kachel-kopf .mini-knopf, .kachel-kopf .mini-link { margin-left: auto; }
 .kachel-unter { font-size: var(--schrift-klein); color: var(--text-faint); margin-top: -2px; }
@@ -684,9 +683,10 @@ button.pille { cursor: pointer; }
   font-family: var(--font-zahl); font-size: 10.5px; font-weight: 600; pointer-events: none;
 }
 .groesse-auto {
-  position: absolute; top: -11px; right: 162px; z-index: 8; padding: 3px 9px; border-radius: var(--r-pille); border: 0; background: var(--chip-aus);
+  position: absolute; top: -11px; right: 118px; z-index: 8; padding: 3px 9px; border-radius: var(--r-pille); border: 0; background: var(--chip-aus);
   color: var(--text); font-size: 10.5px; cursor: pointer; white-space: nowrap; box-shadow: var(--schatten-chip);
 }
+.raster-kacheln.ana .groesse-auto { right: 162px; }   /* Griff „Bereich ziehen“ ist breiter */
 .zu-klein {
   position: absolute; inset: 0; z-index: 4; background: rgba(14, 14, 16, .95); border-radius: inherit; display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 5px; padding: 10px; text-align: center; font-size: 11px; color: var(--text-dim);
@@ -702,7 +702,8 @@ button.pille { cursor: pointer; }
 /* Meine Metriken im Bearbeiten: gestrichelter Rand, Griff und × in der Kopfzeile. */
 .raster-kacheln.meine .kachel.bearbeiten { outline: none; border: 1px dashed rgba(249, 115, 22, .5); }
 .raster-kacheln.meine .kachel.ziel-drop { border-style: solid; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(249, 115, 22, .15); }
-.raster-kacheln.meine .kachel.plus { flex: 1 1 100%; min-height: 150px; border-radius: 14px; }
+.raster-kacheln.meine .kachel.plus { flex: 1 1 260px; min-height: 150px; border-radius: 14px; }
+.raster-kacheln.meine .kachel.plus.allein { flex: 1 1 100%; }
 .greif.im-kopf { position: static; padding: 0 4px 0 0; background: none; box-shadow: none; color: var(--accent); font-size: 13px; letter-spacing: -3px; }
 .kachel-unter.im-kopf { margin: 0; font-size: 11px; color: var(--text-gruppe); }
 .kachel-knoepfe { margin-left: auto; display: flex; gap: 2px; align-items: center; flex: 0 0 auto; }
@@ -990,6 +991,8 @@ span.chip:hover { border-color: var(--line); color: var(--text-dim); }
 .ana-kpi:hover { border-color: var(--line); background: var(--panel-hover); }
 .ana-kpi-kopf { display: flex; align-items: center; gap: 8px; }
 .ana-kpi-kopf .pin { margin-left: auto; padding: 2px 8px; font-size: 10.5px; }
+.ana-kpi.bearbeiten { outline: 1.5px dashed rgba(249, 115, 22, .45); outline-offset: 2px; }
+.ana-kpi.ziel-drop { outline: 2px solid var(--accent); }
 .ana-kpi .kpi-wert { font-size: 24px; line-height: 1.2; }
 .ana-kpi .kpi-wert span { font-size: 13px; }
 .ana-kpi .hinweis { font-size: 11px; min-height: 16px; }
@@ -1246,6 +1249,57 @@ span.chip:hover { border-color: var(--line); color: var(--text-dim); }
 .b-zeile:hover { background: #18181b; }
 .b-eintrag.auf .b-zeile { background: var(--panel-hover); }
 .b-eintrag.weg .strich { text-decoration: line-through; opacity: .55; }
+
+/* Kanban (Mockup Abrechnung Z. 115–188): vier Spalten, waagerecht scrollbar statt gestaucht. */
+.kb-oben { margin: 2px 0 10px; }
+.kb-huelle { overflow-x: auto; padding-bottom: 4px; }
+.kb-raster { display: grid; grid-template-columns: repeat(4, minmax(230px, 1fr)); gap: 12px; min-width: 960px; align-items: start; }
+.kb-raster.angebote { grid-template-columns: repeat(4, minmax(240px, 1fr)); min-width: 1000px; }
+.kb-spalte {
+  background: #101012; border: 1px solid var(--line); border-radius: 14px; padding: 12px; display: flex; flex-direction: column; gap: 8px;
+  min-height: 360px; transition: border-color .12s, background .12s;
+}
+.kb-raster.angebote .kb-spalte { background: #121214; min-height: 380px; }
+.kb-spalte.ziel-ok { border-color: rgba(87, 201, 138, .6); background: rgba(87, 201, 138, .05); }
+.kb-raster.angebote .kb-spalte.ziel-ok { border-color: rgba(249, 115, 22, .6); background: rgba(249, 115, 22, .05); }
+.kb-spalte.ziel-nein { border-color: rgba(239, 68, 68, .5); background: rgba(239, 68, 68, .04); }
+.kb-kopf { display: flex; flex-direction: column; gap: 2px; padding: 2px 4px 6px; }
+.kb-kopf-z { display: flex; align-items: baseline; gap: 8px; }
+.kb-kopf b { font-size: 13px; font-weight: 600; }
+.kb-n { font-family: var(--font-zahl); font-size: 11px; color: var(--text-faint); }
+.kb-summe { margin-left: auto; font-family: var(--font-zahl); font-size: 12px; color: var(--text-hell); }
+.kb-hinweis { font-size: 11px; color: var(--text-faint); }
+.kb-karte {
+  position: relative; background: #1a1a1d; border: 1px solid #26262b; border-radius: 10px; padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 6px; cursor: pointer; transition: opacity .12s, border-color .12s;
+}
+.kb-karte[draggable="true"] { cursor: grab; }
+.kb-karte:hover { border-color: var(--line-hover); }
+.kb-karte.zieht { opacity: .4; }
+.kb-z1 { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.kb-nr { font-family: var(--font-zahl); font-size: 11px; color: var(--text-faint); }
+.kb-nr:hover, .kb-nr:focus-visible { color: var(--accent); }
+.kb-betrag { margin-left: auto; font-family: var(--font-zahl); font-size: 13px; font-weight: 600; color: var(--text-hell); }
+.kb-firma { font-size: 13px; font-weight: 500; min-width: 0; }
+.kb-titel { font-size: 12px; color: var(--text-dim); margin-top: -4px; }
+.kb-band { height: 4px; border-radius: 2px; background: #26262b; overflow: hidden; }
+.kb-band > span { display: block; height: 100%; border-radius: 2px; background: var(--ok); transition: width .32s var(--kurve-ein, ease); }
+.kb-band > span.teil { background: #fdba74; }
+.kb-zeile { display: flex; align-items: center; gap: 8px; font-size: 11px; min-width: 0; color: var(--text-faint); }
+.kb-zeile .teil { color: #fdba74; }
+.kb-zeile .ok { color: var(--ok); }
+.kb-zeile .warn { color: var(--warn); }
+.kb-zeile .bad { color: var(--bad); }
+.kb-zeile .dim { color: var(--text-dim); }
+.kb-menue { margin-left: auto; flex: 0 0 auto; }
+.kb-knoepfe { display: flex; gap: 6px; flex-wrap: wrap; }
+.kb-rechnung {
+  margin-top: 4px; padding: 6px 10px; border-radius: 7px; border: 1px solid rgba(249, 115, 22, .55); background: rgba(249, 115, 22, .13);
+  color: var(--accent); font-size: 12px; font-weight: 500; cursor: pointer; text-align: center;
+}
+.kb-rechnung:hover { background: rgba(249, 115, 22, .2); }
+.kb-leer { padding: 18px 10px; border: 1px dashed var(--line-hover); border-radius: 10px; text-align: center; font-size: 12px; color: var(--text-faint); }
+.kb-karte .b-frage { margin: 4px 0 0; }
 .b-nr { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .b-nr .pfeil { color: var(--text-faint); font-size: 10px; width: 10px; }
 .b-wer { display: flex; flex-direction: column; min-width: 0; }

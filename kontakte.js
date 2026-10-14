@@ -386,6 +386,17 @@ function macheKunde(db, kontaktId) {
   return info.changes > 0;
 }
 
+// Gegenstueck fuer "Rueckgaengig" nach einer Annahme: nur wer gerade dadurch
+// Kunde wurde, wird wieder Lead (der Aufrufer weiss das aus macheKunde()).
+function macheLead(db, kontaktId) {
+  if (!Number.isInteger(kontaktId) || kontaktId <= 0) return false;
+  const info = db.prepare(`
+    UPDATE kontakte SET status = 'lead', geaendert_am = ?
+    WHERE id = ? AND status = 'kunde'
+  `).run(new Date().toISOString(), kontaktId);
+  return info.changes > 0;
+}
+
 // Beim Erstellen eines Dokuments dagegen hart pruefen: eine mitgeschickte, aber
 // unbekannte id ist ein Fehler und soll sofort auffallen, statt still als
 // fehlende Verknuepfung zu enden.
@@ -439,7 +450,7 @@ function loescheAnsprechpartner(db, id) {
 }
 
 module.exports = {
-  FELDER, liste, lade, speichere, loesche, macheKunde, pruefeId, ohneErsatzzeichen,
+  FELDER, liste, lade, speichere, loesche, macheKunde, macheLead, pruefeId, ohneErsatzzeichen,
   projekteVon, kontaktJeProjekt, setzeProjekte,
   ansprechpartnerVon, speichereAnsprechpartner, loescheAnsprechpartner,
   inTransaktion,

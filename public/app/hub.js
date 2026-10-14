@@ -511,10 +511,13 @@ function rasterStand(sek) {
   if (s && s.breite && typeof s.breite === 'object') for (const [id, b] of Object.entries(s.breite)) if (bekannt.has(id) && [1, 2, 3, 4].includes(b)) breite[id] = b;
   if (s && s.groesse && typeof s.groesse === 'object') for (const [id, g] of Object.entries(s.groesse)) { const v = bekannt.has(id) && kachelGroesse(g); if (v) groesse[id] = v; }
   const sicht = s && Array.isArray(s.sicht) ? [...new Set(s.sicht.filter((id) => bekannt.has(id)))] : std;
-  return { sicht, breite, groesse, angepasst: !!s };
+  // zusatz: weitere Ansichts-Vorlieben des Abschnitts (z. B. Kennzahlen-Reihenfolge der Analyse).
+  return { sicht, breite, groesse, angepasst: !!s || (R.zusatz || []).some((z) => lies(z, null) !== null) };
 }
 function rasterMerke(sek, st) { merke(RASTER[sek].speicher, { sicht: st.sicht, breite: st.breite, groesse: st.groesse }); }
-function rasterStandard(sek) { try { localStorage.removeItem(SPEICHER + RASTER[sek].speicher); } catch { /* egal */ } }
+function rasterStandard(sek) {
+  try { for (const k of [RASTER[sek].speicher, ...(RASTER[sek].zusatz || [])]) localStorage.removeItem(SPEICHER + k); } catch { /* egal */ }
+}
 
 const hubZustand = { bearbeiten: {}, katalog: {}, hilfe: false, zielBearbeiten: false, verbindungen: false, gezaehlt: false };
 
@@ -758,7 +761,7 @@ function zeichneHub(w, teile, neu) {
     rasterKopf('meine', 'Meine Metriken', 'deine Schnellansicht ohne Soll — Kennzahlen, Diagramme, Belege', wst.angepasst) +
     katalogHtml('meine', WIDGETS, wst.sicht) +
     '<div class="raster-kacheln meine" data-raster="meine">' + widHtml +
-      (hubZustand.bearbeiten.meine || !wst.sicht.length ? '<button type="button" class="kachel plus b1" data-aktion="raster-plus" data-wert="meine" data-sek="meine"><span class="gross">+</span><span>' +
+      (hubZustand.bearbeiten.meine || !wst.sicht.length ? '<button type="button" class="kachel plus b1' + (wst.sicht.length ? '' : ' allein') + '" data-aktion="raster-plus" data-wert="meine" data-sek="meine"><span class="gross">+</span><span>' +
         esc(uebersetze(wst.sicht.length ? 'Metrik hinzufügen' : 'Noch keine eigenen Metriken')) + '</span><span class="hinweis">' + esc(uebersetze(wst.sicht.length ? 'oder hierher ziehen' : 'Kennzahlen, Diagramme oder Belege auf den Hub holen.')) + '</span></button>' : '') + '</div>';
 
   if (neu || !hubZustand.gezaehlt) {
@@ -783,7 +786,8 @@ function rasterSetze(sek, fn) {
 function verdrahteRaster(w) {
   for (const g of w.querySelectorAll('.greif')) {
     g.addEventListener('dragstart', (e) => {
-      const k = g.closest('.kachel');
+      // Naechster Traeger mit Sektion: die Kachel, bei den Analyse-Kennzahlen die einzelne Karte.
+      const k = g.closest('[data-sek]');
       gezogen = { sek: k.dataset.sek, id: k.dataset.id };
       try { e.dataTransfer.setData('text/plain', k.dataset.id); e.dataTransfer.effectAllowed = 'move'; } catch { /* egal */ }
       k.classList.add('zieht');
@@ -800,16 +804,25 @@ function verdrahteRaster(w) {
     });
     k.addEventListener('dragend', () => { gezogen = null; ziehen(false); });
   }
-  for (const k of w.querySelectorAll('.kachel.bearbeiten, .kachel.plus')) {
-    k.addEventListener('dragover', (e) => { if (gezogen && gezogen.sek === k.dataset.sek) { e.preventDefault(); k.classList.add('ziel-drop'); } });
-    k.addEventListener('dragleave', () => k.classList.remove('ziel-drop'));
+  for (const k of w.querySelectorAll('.kachel.bearbeiten, .kachel.plus, .ana-kpi.bearbeiten')) {
+    // Genau eine Kachel ist Ziel. dragleave feuert auch beim Wechsel auf ein
+    // Kind-Element — nur das echte Verlassen nimmt die Markierung weg.
+    k.addEventListener('dragover', (e) => {
+      if (!gezogen || gezogen.sek !== k.dataset.sek) return;
+      e.preventDefault();
+      for (const x of k.parentElement.querySelectorAll('.ziel-drop')) if (x !== k) x.classList.remove('ziel-drop');
+      k.classList.add('ziel-drop');
+    });
+    k.addEventListener('dragleave', (e) => { if (!k.contains(e.relatedTarget)) k.classList.remove('ziel-drop'); });
     k.addEventListener('drop', (e) => {
       if (!gezogen || gezogen.sek !== k.dataset.sek) return;
       e.preventDefault();
+      e.stopPropagation();   // eine Kennzahl liegt in der Kachel "Kennzahlen" — die darf den Drop nicht noch einmal sehen
       const id = gezogen.id, vor = k.dataset.id || null;
       gezogen = null;
       // erst speichern, dann Sperre loesen — ziehen(false) zeichnet einmal neu
-      if (id !== vor) rasterSetze(k.dataset.sek, (st) => { st.sicht = verschiebe(st.sicht, id, vor); });
+      if (id !== vor && k.dataset.sek === 'kpi') { merke('analyse.kpi', verschiebe(kpiReihe(), id, vor)); zeichneAnsicht(); }
+      else if (id !== vor) rasterSetze(k.dataset.sek, (st) => { st.sicht = verschiebe(st.sicht, id, vor); });
       else zeichneAnsicht();
       ziehen(false);
     });
@@ -826,6 +839,9 @@ function verdrahteRaster(w) {
       const r = k.getBoundingClientRect(), zeile = k.parentElement.clientWidth;
       const x0 = e.clientX, y0 = e.clientY;
       const alt = rasterStand(k.dataset.sek).groesse[k.dataset.id] || {};
+      // Sofort fest: sonst haelt die Mindesthoehe die Kachel beim Verkleinern
+      // fest, und der Inhalt laeuft ueber, bis losgelassen wird.
+      k.classList.add('fest');
       try { g.setPointerCapture(e.pointerId); } catch { /* synthetische Ereignisse */ }
       ziehen(true);
       document.body.style.cursor = getComputedStyle(g).cursor;
@@ -856,6 +872,8 @@ function verdrahteRaster(w) {
         cancelAnimationFrame(bild);
         document.body.style.cursor = document.body.style.userSelect = '';
         anzeige.remove();
+        // Nur geklickt, nicht gezogen: eine Kachel ohne gespeicherte Groesse bleibt frei.
+        if (roh == null && !alt.w && !alt.h) k.classList.remove('fest');
         const neu = roh && raste(roh);
         // Erst speichern, dann Sperre loesen: so zeichnet ein verpasstes
         // Nachladen nicht noch einmal die alte Groesse.
@@ -884,7 +902,7 @@ function verdrahteRaster(w) {
 
 aktion('raster-bearbeiten', (sek) => {
   hubZustand.bearbeiten[sek] = !hubZustand.bearbeiten[sek];
-  hubZustand.katalog[sek] = false;
+  hubZustand.katalog = {};   // alle offenen Auswahl-Listen zu, nicht nur die eigene
   zeichneAnsicht();
 });
 aktion('raster-katalog', (sek) => { hubZustand.katalog[sek] = !hubZustand.katalog[sek]; zeichneAnsicht(); });

@@ -230,6 +230,9 @@ function migrate(db) {
   // Kunde. Bewusst ohne FOREIGN KEY: das Dokument traegt seine eigene
   // Abschrift, ein geloeschter Kontakt darf es weder blockieren noch aendern.
   addColumn(db, 'angebote', 'kontakt_id', 'INTEGER');
+  // Wann zugesagt bzw. abgelehnt wurde (Kanban-Karte). Aeltere Angebote bleiben leer.
+  addColumn(db, 'angebote', 'angenommen_am', 'TEXT');
+  addColumn(db, 'angebote', 'abgelehnt_am', 'TEXT');
   addColumn(db, 'invoices', 'kontakt_id', 'INTEGER');
 
   // Woher ein Ereignis stammt: 'claude' fuer Claude Code, 'lokal' fuer die

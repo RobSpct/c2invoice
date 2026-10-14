@@ -168,7 +168,7 @@ function lade(db, nr) {
 function liste(db) {
   const heute = new Date().toISOString();
   return db.prepare(`
-    SELECT nr, erstellt_am, gueltig_bis, empfaenger, brutto_eur, status, rechnung_nr, kontakt_id
+    SELECT nr, erstellt_am, gueltig_bis, empfaenger, brutto_eur, status, rechnung_nr, kontakt_id, angenommen_am, abgelehnt_am
     FROM angebote ORDER BY jahr DESC, laufnr DESC
   `).all().map((r) => ({
     nr: r.nr,
@@ -185,22 +185,70 @@ function liste(db) {
       : r.status === 'offen' && r.gueltig_bis < heute ? 'abgelaufen' : r.status,
     rechnung_nr: r.rechnung_nr,
     kontakt_id: r.kontakt_id,
+    angenommen_am: r.angenommen_am,
+    abgelehnt_am: r.abgelehnt_am,
   }));
 }
 
-function setzeStatus(db, nr, status) {
+// Zeitpunkt aus einem Rueckgaengig-Stand: ISO-Zeit oder (wo erlaubt) null.
+function zeitpunkt(v, feld, leerErlaubt) {
+  if (v === null && leerErlaubt) return null;
+  if (typeof v !== 'string' || v.length > 40 || !Number.isFinite(Date.parse(v))) throw new Error(feld + ': kein gueltiger Zeitpunkt.');
+  // Grenze: Jahre ausserhalb vierstelliger Form ("+275760-…") sortieren als
+  // Text falsch und liessen ein Angebot sofort abgelaufen erscheinen.
+  const jahr = new Date(v).getUTCFullYear();
+  if (jahr < 2000 || jahr > 2100) throw new Error(feld + ': ausserhalb des erlaubten Bereichs.');
+  return new Date(v).toISOString();
+}
+
+// Ohne `stand`: Status setzen, Zeitpunkt der Zusage bzw. Ablehnung festhalten,
+// ein abgelaufenes Angebot beim Wiederoeffnen um die Standard-Gueltigkeit
+// verlaengern. Mit `stand` (Rueckgaengig): genau diesen vorigen Stand
+// wiederherstellen — Gueltigkeit, beide Zeitpunkte und, wenn die Annahme den
+// Kontakt erst zum Kunden gemacht hatte (stand.lead), auch das.
+function setzeStatus(db, nr, status, stand) {
   if (!['offen', 'angenommen', 'abgelehnt'].includes(status)) {
     throw new Error('Unbekannter Status.');
   }
   const a = lade(db, nr);
   if (!a) throw new Error('Angebot nicht gefunden.');
   if (a.rechnung_nr) throw new Error('Zu diesem Angebot gibt es bereits eine Rechnung.');
-  db.prepare('UPDATE angebote SET status = ? WHERE nr = ?').run(status, nr);
+  const jetzt = new Date();
+  let f;
+  if (stand !== undefined && stand !== null) {
+    if (typeof stand !== 'object' || Array.isArray(stand)) throw new Error('Stand: Objekt erwartet.');
+    f = {
+      gueltig_bis: zeitpunkt(stand.gueltig_bis, 'Gueltig bis', false),
+      angenommen_am: zeitpunkt(stand.angenommen_am === undefined ? null : stand.angenommen_am, 'Angenommen am', true),
+      abgelehnt_am: zeitpunkt(stand.abgelehnt_am === undefined ? null : stand.abgelehnt_am, 'Abgelehnt am', true),
+    };
+    // Zeitpunkt nur zum passenden Status — sonst widerspraeche die Karte sich selbst.
+    if ((f.angenommen_am && status !== 'angenommen') || (f.abgelehnt_am && status !== 'abgelehnt')) {
+      throw new Error('Stand: Zeitpunkt passt nicht zum Status.');
+    }
+  } else {
+    f = { gueltig_bis: a.gueltig_bis, angenommen_am: null, abgelehnt_am: null };
+    if (status === 'angenommen') f.angenommen_am = jetzt.toISOString();
+    if (status === 'abgelehnt') f.abgelehnt_am = jetzt.toISOString();
+    if (status === 'offen' && a.gueltig_bis < jetzt.toISOString()) {
+      const neu = new Date(jetzt);
+      neu.setDate(neu.getDate() + GUELTIG_TAGE_STANDARD);
+      f.gueltig_bis = neu.toISOString();
+    }
+  }
+  // Zwei Einzel-Updates ohne Teilfehler, keine eigene Transaktion noetig —
+  // wie vor der Kanban-Nacharbeit. (Der Konflikt mit dem Ingest, der hier
+  // zuerst auffiel, ist in ingest.js an der Wurzel behoben: schreibeBlock.)
+  db.prepare('UPDATE angebote SET status = ?, gueltig_bis = ?, angenommen_am = ?, abgelehnt_am = ? WHERE nr = ?')
+    .run(status, f.gueltig_bis, f.angenommen_am, f.abgelehnt_am, nr);
+  let kundeGeworden = false;
   // Wer zusagt, ist kein Lead mehr. Laeuft ins Leere, wenn kein Kontakt
   // verknuepft oder er inzwischen geloescht ist — eine Annahme darf daran
   // nicht scheitern.
-  if (status === 'angenommen') kontakte.macheKunde(db, a.kontakt_id);
-  return lade(db, nr);
+  // Zurueck zum Lead nur als Rueckgaengig einer Annahme — nicht bei beliebigem Aufruf.
+  if (stand) { if (stand.lead === true && a.status === 'angenommen' && status !== 'angenommen') kontakte.macheLead(db, a.kontakt_id); }
+  else if (status === 'angenommen') kundeGeworden = kontakte.macheKunde(db, a.kontakt_id);
+  return { ...lade(db, nr), kunde_geworden: kundeGeworden };
 }
 
 // Loeschen ist erlaubt — anders als bei der Rechnung. Ein Angebot ist keine
@@ -228,7 +276,8 @@ function inRechnung(db, nr) {
     bis: new Date().toISOString().slice(0, 10),
     kontaktId: a.kontakt_id,
   });
-  db.prepare("UPDATE angebote SET rechnung_nr = ?, status = 'angenommen' WHERE nr = ?").run(inv.nr, nr);
+  db.prepare("UPDATE angebote SET rechnung_nr = ?, status = 'angenommen', angenommen_am = COALESCE(angenommen_am, ?), abgelehnt_am = NULL WHERE nr = ?")
+    .run(inv.nr, new Date().toISOString(), nr);
   kontakte.macheKunde(db, a.kontakt_id);
   return { angebot: lade(db, nr), rechnung: inv };
 }

@@ -1237,8 +1237,9 @@ function handle(req, res) {
       return leseKoerper(req, (fehler, daten) => {
         if (fehler) return sendJson(res, { error: fehler }, 400);
         try {
-          const ang = angebot.setzeStatus(db, String(daten.nr || ''), String(daten.status || ''));
-          return sendJson(res, { ok: true, nr: ang.nr, status: ang.status });
+          const ang = angebot.setzeStatus(db, String(daten.nr || ''), String(daten.status || ''), daten.stand);
+          return sendJson(res, { ok: true, nr: ang.nr, status: ang.status, gueltig_bis: ang.gueltig_bis,
+            angenommen_am: ang.angenommen_am, abgelehnt_am: ang.abgelehnt_am, kunde_geworden: ang.kunde_geworden });
         } catch (err) {
           return sendJson(res, { error: err.message }, 400);
         }

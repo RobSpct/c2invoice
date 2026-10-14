@@ -71,7 +71,7 @@ Object.assign(EN, {
   'Hintergrunddienste': 'Background services', 'im gewählten Zeitraum': 'in the selected period',
   'Anteile an': 'Shares of', 'USD API-Gegenwert — keine Kosten obendrauf.': 'USD API equivalent — no costs on top.',
   'Hintergrunddienste mit eigener Sitzung — derselbe Verbrauch aus drei Blickwinkeln': 'Background services with their own session — the same usage from three angles', 'Serie': 'Streak', 'Tage in Folge': 'days in a row', 'aktive Stunden je Tag': 'active hours per day', 'Aktivität': 'Activity',
-  'Vom Hub lösen': 'Remove from hub', 'Auf dem Hub anzeigen': 'Show on hub', '+ Hub': '+ Hub', 'Bereich ziehen': 'Drag section',
+  'Vom Hub lösen': 'Remove from hub', 'Auf dem Hub anzeigen': 'Show on hub', '+ Hub': '+ Hub', 'Bereich ziehen': 'Drag section', 'Kachel verschieben': 'Move tile',
   'Gesamt je': 'Total per', 'Gestapelt nach Modell, je': 'Stacked by model, per', 'in USD': 'in USD', 'gesamt': 'total', 'aktiv': 'active',
   'Modell → Projekt → Vorgang · Bandbreite = API-Gegenwert in USD · ohne Werkzeugbetrieb': 'Model → project → job · band width = API equivalent in USD · without tool usage',
   'Verlauf': 'Trend', 'Marge je Woche gegen das Ziel': 'Margin per week vs. target', 'Prozentpunkte über bzw. unter': 'Percentage points above or below',
@@ -96,7 +96,8 @@ const ANA = [
   ['kosten', 'Kosten je Stunde im Verlauf', 'USD je aktive h', '⌁', 'Ob deine Arbeit pro Stunde teurer wird.', 4],
   ['status', 'Vorgänge nach Status', 'offen · abgerechnet', '◧', 'Was noch abzurechnen ist.', 4],
 ];
-RASTER.ana = { standard: ['kpis', 'verlauf', 'akt', 'sankey', 'modelle'], reihe: null, meta: ANA, speicher: 'analyse.raster', felder: [3, 4], an: 'sichtbar ✓', plus: '+ Bereich hinzufügen', min: () => [360, 220] };
+RASTER.ana = { standard: ['kpis', 'verlauf', 'akt', 'sankey', 'modelle'], reihe: null, meta: ANA, speicher: 'analyse.raster', felder: [3, 4], an: 'sichtbar ✓', plus: '+ Bereich hinzufügen', min: () => [360, 220],
+  zusatz: ['analyse.kpi'] };
 
 const REITER = [
   ['verbrauch', 'Verbrauch', 'Kennzahlen, Verlauf, Modelle, Projekte im gewählten Zeitraum'],
@@ -133,9 +134,21 @@ aktion('ana-pin', (id) => {
 });
 const tageDesZeitraums = (S) => (S.days || []).map((d) => d.day);
 
+// Die vier Kennzahlen lassen sich im Bearbeiten einzeln sortieren (eigene
+// Sektion 'kpi', nur innerhalb der Kennzahlen). Gespeichert wird nur die
+// Reihenfolge; "↺ Standard" der Analyse nimmt sie mit zurueck (RASTER.ana.zusatz).
+const KPI_STANDARD = ['kpi-tokens', 'kpi-api', 'kpi-abo', 'kpi-req'];
+function kpiReihe() {
+  const s = liesJson('analyse.kpi', null);
+  const gemerkt = Array.isArray(s) ? s.filter((id) => KPI_STANDARD.includes(id)) : [];
+  return [...new Set(gemerkt.concat(KPI_STANDARD))];
+}
 function kpisInhalt(D) {
-  return ['kpi-tokens', 'kpi-api', 'kpi-abo', 'kpi-req'].map((id) =>
-    '<div class="ana-karte ana-kpi"><div class="ana-kpi-kopf"><span class="label">' + esc(uebersetze(WIDGETS.find((w) => w[0] === id)[1])) + '</span>' + pinKnopf(id) + '</div>' +
+  const ed = !!hubZustand.bearbeiten.ana;
+  return kpiReihe().map((id) =>
+    '<div class="ana-karte ana-kpi' + (ed ? ' bearbeiten' : '') + '" data-sek="kpi" data-id="' + id + '"><div class="ana-kpi-kopf">' +
+      (ed ? '<span class="greif im-kopf" draggable="true" title="' + esc(uebersetze('Kachel verschieben')) + '">⋮⋮</span>' : '') +
+      '<span class="label">' + esc(uebersetze(WIDGETS.find((w) => w[0] === id)[1])) + '</span>' + pinKnopf(id) + '</div>' +
       kpiInhalt(id, D) + '</div>').join('');
 }
 
