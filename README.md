@@ -341,6 +341,10 @@ rather than invented API prices.
   is red in the list, has its own filter and adds to the overdue card. The
   Invoices page also shows the open total, payments received in the period and
   the average time to pay
+- **Table or Kanban** for invoices and quotes. Invoices sit in columns by
+  payment state; dropping a card on *Paid* books the open balance (with undo).
+  Quotes move between open, accepted and declined by drag or menu; *invoiced*
+  only comes from turning a quote into an invoice
 - **Contacts** as a pipeline of leads, open quotes and customers, with a record
   per contact: contact persons, documents, projects with rate, discount and
   time model, jobs, and revenue paid and open
