@@ -26,6 +26,8 @@
     "upstreamUrl": "http://127.0.0.1:11434",
     "//proxyPort": "Port des Proxys. Diesen Port traegst du in der Oberflaeche deines Modell-Werkzeugs ein (Feld \"Local Base URL\" o. ae., Wert http://localhost:11435/v1). Nur ueber diesen Weg wird die Nutzung erfasst.",
     "proxyPort": 11435,
+    "//proxyHosts": "Weitere Namen, unter denen Werkzeuge den Proxy ansprechen duerfen (z. B. \"host.docker.internal\" fuer Container). Andere Namen weist der Proxy mit 421 ab, Schutz gegen DNS-Rebinding aus dem Browser.",
+    "proxyHosts": [],
     "//protokollDir": "Wohin der Proxy seine Zeilen schreibt und woher ingest.js sie liest. Ohne Eintrag gilt data/lokal im Programmverzeichnis. Beide Seiten muessen denselben Ort meinen.",
     "protokollDir": "",
     "//praefix": "Wird dem Modellnamen vorangestellt, damit lokale Modelle in der Auswertung erkennbar bleiben und nie einen Cloud-Preis erben.",

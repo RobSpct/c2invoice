@@ -98,7 +98,27 @@ function istChatPfad(url) {
   return /\/(chat\/completions|completions|embeddings)(\?|$)/.test(url || '');
 }
 
+// DNS-Rebinding: eine fremde Webseite laesst ihren Namen auf 127.0.0.1 zeigen
+// und spricht dann den Proxy an (Modellliste lesen, Chat ausloesen). Ihren
+// Namen schickt der Browser im Host-Header mit. Wie server.js: nur die eigenen
+// Namen; ein fehlender Header kommt nicht aus einem Browser (Toolcheck 15.10., H7).
+const EIGENER_HOST = /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i;
+// Werkzeuge in Containern sprechen den Rechner unter anderem Namen an
+// (host.docker.internal); solche Namen stehen ausdruecklich in config.json.
+const WEITERE_HOSTS = (Array.isArray(EIN.proxyHosts) ? EIN.proxyHosts : [])
+  .filter((h) => typeof h === 'string' && /^[a-z0-9.-]{1,253}$/i.test(h)).map((h) => h.toLowerCase());
+function hostErlaubt(host, weitere = WEITERE_HOSTS) {
+  if (!host || EIGENER_HOST.test(host)) return true;
+  return weitere.includes(String(host).toLowerCase().replace(/:\d+$/, ''));
+}
+
 const server = http.createServer((req, res) => {
+  if (!hostErlaubt(req.headers.host)) {
+    res.writeHead(421, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Unbekannter Host' }));
+    req.resume();
+    return;
+  }
   const teile = [];
   let laenge = 0;
   let zuGross = false;
@@ -240,7 +260,7 @@ function start(port = PORT) {
   });
 }
 
-module.exports = { start, server, usageAusText, clientVon, istChatPfad };
+module.exports = { start, server, usageAusText, clientVon, istChatPfad, hostErlaubt };
 
 if (require.main === module) {
   start().then(() => {

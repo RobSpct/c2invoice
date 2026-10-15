@@ -383,7 +383,7 @@ async function ingestLokalFile(db, filePath, fromOffset, stmts) {
 // muss. Ein exakter Preis und ein kostenfreies Modell sind der Normalfall.
 function preisLuecke(model) {
   const art = pricing.preisArt(model);
-  return art === 'geschaetzt' || art === 'ohne' ? art : null;
+  return art === 'geschaetzt' || art === 'ohne' || art === 'fallback' ? art : null;
 }
 
 // Gleicht die Preis-Kennzeichnung mit der aktuellen Preisliste ab.
@@ -400,7 +400,9 @@ function preisLuecke(model) {
 // - Ein Betrag wird nur besser, nie schlechter. Streicht die Preisliste ein
 //   Modell, bleibt der einmal gerechnete Betrag stehen, statt auf 0 zu fallen.
 function gleichePreiseAb(db) {
-  if (pricing.info().source === 'fallback') return 0;
+  // Ohne geladene Liste ("fallback", oder vor dem ersten refresh "none") nichts tun.
+  if (!['litellm', 'cache', 'cache-stale', 'test'].includes(pricing.info().source)) return 0;
+  const neu = neuBepreisen(db);
   const modelle = db.prepare(
     "SELECT model, preis_art FROM events WHERE source = 'claude' GROUP BY model, preis_art"
   ).all();
@@ -432,7 +434,37 @@ function gleichePreiseAb(db) {
     try { db.exec('ROLLBACK'); } catch { /* Transaktion bereits beendet */ }
     throw err;
   }
-  return geaendert;
+  return geaendert + neu;
+}
+
+// Einmalig je Preislisten-Version: alle exakt bepreisten Requests aus ihren
+// Tokens neu rechnen. Version 2 (15.10.2026, H3): bis dahin gewann bei gleichem
+// Schluessel der letzte Anbieter der LiteLLM-Datei, claude-fable-5 kostete so
+// 11/55 statt 10/50 USD je Mio. Nur mit einer Liste dieser Version, sonst
+// ginge ein alter Speicher als neue Wahrheit durch.
+const PREISE_MERKER = 'preisliste_version';
+function neuBepreisen(db) {
+  const version = String(pricing.info().version || '');
+  if (!version || dbmod.getMeta(db, PREISE_MERKER) === version) return 0;
+  const rows = db.prepare(`SELECT request_id, model, input_tokens, output_tokens, cache_w_5m, cache_w_1h, cache_read, cost_usd
+    FROM events WHERE source = 'claude' AND preis_art IS NULL`).all();
+  const schreibe = db.prepare('UPDATE events SET cost_usd = ? WHERE request_id = ?');
+  let n = 0;
+  db.exec('BEGIN');
+  try {
+    for (const r of rows) {
+      if (pricing.preisArt(r.model) !== 'exakt') continue;
+      const k = pricing.costOf(r.model, r);
+      if (!Number.isFinite(k) || k < 0) continue;
+      if (Math.abs(k - r.cost_usd) > 1e-12) { schreibe.run(k, r.request_id); n++; }
+    }
+    dbmod.setMeta(db, PREISE_MERKER, version);
+    db.exec('COMMIT');
+  } catch (err) {
+    try { db.exec('ROLLBACK'); } catch { /* Transaktion bereits beendet */ }
+    throw err;
+  }
+  return n;
 }
 
 // Einmaliger Nachtrag: Zeilen aus der Zeit vor der Eingabe-Kennung tragen
@@ -568,7 +600,7 @@ async function run({ db, verbose = false } = {}) {
 
 module.exports = {
   run, projectOf, ticketOf, extractUsage, listJsonlFiles, PROJECT_ROOTS,
-  lokalDir, jsonlDir, LOKAL_PROJEKT, istEingabe,
+  lokalDir, jsonlDir, LOKAL_PROJEKT, istEingabe, gleichePreiseAb,
 };
 
 if (require.main === module) {

@@ -765,9 +765,12 @@ function handle(req, res) {
   // Obsidian laedt die Seite unter der Herkunft app://obsidian.md und braucht
   // deshalb eine Freigabe. Bewusst keine Freigabe fuer alle: sonst koennte
   // jede im Browser geoeffnete Webseite die Abrechnungsdaten auslesen.
+  // Andere lokale Ports sind fremde Anwendungen (Toolcheck 15.10., H7): nur die
+  // eigene Herkunft und die Einbettungen. Jarvis liest aus dem Hauptprozess,
+  // ohne Origin, und braucht keine Freigabe.
   const HERKUNFT_ERLAUBT = ['app://obsidian.md', 'capacitor://localhost'];
   const herkunft = req.headers.origin;
-  if (herkunft && (HERKUNFT_ERLAUBT.includes(herkunft) || /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(herkunft))) {
+  if (herkunft && (HERKUNFT_ERLAUBT.includes(herkunft) || (host && herkunft === 'http://' + host))) {
     res.setHeader('access-control-allow-origin', herkunft);
     res.setHeader('vary', 'origin');
   }
@@ -1605,6 +1608,23 @@ function pruefeLogverzeichnis() {
 
 async function main() {
   pruefeLogverzeichnis();
+  // Erst den Port, dann alles andere. Die geplante Aufgabe startet alle zehn
+  // Minuten neu; lief der Dienst schon, las die zweite Instanz bisher trotzdem
+  // die Logs ein und glich mit Jira ab, bevor listen() am belegten Port
+  // scheiterte — mit dem Code, der gerade ausgecheckt war, gegen die echte
+  // Datenbank (gefunden beim Hotfix 2.0.2).
+  try {
+    await new Promise((ok, nein) => {
+      server.once('error', nein);
+      server.listen(config.port, '127.0.0.1', () => { server.off('error', nein); ok(); });
+    });
+  } catch (err) {
+    if (err.code === 'EADDRINUSE') {
+      console.log(`Port ${config.port} ist belegt — c2invoice laeuft schon, diese Instanz endet.`);
+      process.exit(0);
+    }
+    throw err;
+  }
   await refreshData();
   // Beim Start alle offenen: Aenderungen an config.json wirken erst nach einem
   // Neustart, und Logs koennen laenger als 48 h ausgeblieben sein.
@@ -1619,14 +1639,12 @@ async function main() {
     setInterval(syncJira, takt).unref();
   }
 
-  server.listen(config.port, '127.0.0.1', () => {
-    const s = metrics.summary(db);
-    console.log(`c2invoice laeuft auf http://127.0.0.1:${config.port}`);
-    console.log(
-      `Daten: ${s.requests} Requests, ${(s.total_tokens / 1e6).toFixed(0)} Mio Tokens, ` +
-      `$${s.cost_usd.toFixed(2)} (${s.first_day} bis ${s.last_day})`
-    );
-  });
+  const s = metrics.summary(db);
+  console.log(`c2invoice laeuft auf http://127.0.0.1:${config.port}`);
+  console.log(
+    `Daten: ${s.requests} Requests, ${(s.total_tokens / 1e6).toFixed(0)} Mio Tokens, ` +
+    `$${s.cost_usd.toFixed(2)} (${s.first_day} bis ${s.last_day})`
+  );
 }
 
 process.on('SIGINT', () => {

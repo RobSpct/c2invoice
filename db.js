@@ -13,6 +13,8 @@ function open(dbPath = DB_PATH) {
   const db = new DatabaseSync(dbPath);
   db.exec('PRAGMA journal_mode = WAL');
   db.exec('PRAGMA synchronous = NORMAL');
+  // backfill.js oder ein zweiter Prozess neben dem Server: warten statt "database is locked" (H8).
+  db.exec('PRAGMA busy_timeout = 5000');
   migrate(db);
   return db;
 }

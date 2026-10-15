@@ -223,6 +223,7 @@ EN["Englisch"] = "English";
 EN["Rechnungen bleiben deutsch"] = "invoices stay German";
 EN["Steuernummer"] = "Tax number";
 EN["Steuernummer oder USt-IdNr."] = "Tax number or VAT ID";
+EN["Umsatzsteuersatz über 0 oder Kleinunternehmer"] = "VAT rate above 0 or small-business exemption";
 EN["Steuernummer oder USt-IdNr. — eines von beiden genügt."] = "Tax number or VAT ID — either one is enough.";
 EN["Pflichtangabe"] = "Required";
 EN["Pflichtangabe — tippen sucht in den Kontakten"] = "Required — typing searches your contacts";

@@ -34,6 +34,10 @@ function fehlendeStammdaten() {
   if (!a.name) fehlt.push('rechnung.aussteller.name');
   if (!Array.isArray(a.anschrift) || a.anschrift.length === 0) fehlt.push('rechnung.aussteller.anschrift');
   if (!a.steuernummer && !a.ustIdNr) fehlt.push('rechnung.aussteller.steuernummer oder ustIdNr');
+  // Ohne Kleinunternehmerregelung und ohne Satz stuende "zzgl. 0 % Umsatzsteuer"
+  // ohne § 19-Hinweis auf dem Dokument (Toolcheck 15.10., H5).
+  const r = config.rechnung || {};
+  if (!r.kleinunternehmer && !(Number(r.ustSatz) > 0)) fehlt.push('rechnung.ustSatz oder kleinunternehmer');
   return fehlt;
 }
 
@@ -47,8 +51,13 @@ function pruefeStammdaten() {
   }
 }
 
+// Kaufmaennisch auf Cent, halbe Cent vom Null weg. Erst auf 15 Stellen
+// glaetten: 42,50 x 19 / 100 ist als Gleitkommazahl 8,07499999…, ohne das
+// Glaetten wird daraus 8,07 statt 8,08 (Toolcheck 15.10., H1).
 function rund2(n) {
-  return Math.round((Number(n) || 0) * 100) / 100;
+  const x = Number(n) || 0;
+  const cent = Math.round(Number((Math.abs(x) * 100).toPrecision(15)));
+  return (x < 0 ? -cent : cent) / 100;
 }
 
 // --- Abschrift des Empfaengers ------------------------------------------------
@@ -255,7 +264,8 @@ function freiePosition(p, vFaktor) {
     satz,
     basissatz: rund2(basis),
     rabatt_prozent: rabatt,
-    betrag_eur: rund2(stunden * satz),
+    // Aus den gedruckten Stunden (H2): 1,333 h stehen als 1,33 da.
+    betrag_eur: rund2(rund2(stunden) * satz),
     // Nur Zeit, nie ein Vergleichsbetrag — siehe die Begruendung in
     // metrics.mehrwert().
     vergleich_stunden: vFaktor > 1 ? rund2(stunden * vFaktor) : null,
@@ -349,7 +359,7 @@ function baueMitSperre(db, { from, to, tickets, projekte, posten, eintraege, gru
     ohne_vorgangsnummer: t.ticket ? undefined : true,
     von: t.first_day,
     bis: t.last_day,
-    stunden: Math.round(t.active_hours * 100) / 100,
+    stunden: rund2(t.active_hours),
     // Wie die Stunden entstanden sind. Die Abschrift wird nie nachgerechnet,
     // also muss sie selbst sagen, nach welchem Modell gezaehlt wurde.
     zeitmodell: t.zeitmodell,
@@ -358,7 +368,10 @@ function baueMitSperre(db, { from, to, tickets, projekte, posten, eintraege, gru
     satz: rund2(t.stundensatz),
     // Nur der Claude-Anteil: die Stunden oben sind Claude-Stunden. Manuelle
     // Zeit kommt als eigene Position, nie versteckt in diesem Betrag.
-    betrag_eur: rund2(t.arbeitswert_claude),
+    // Aus den gedruckten Werten, wie freiePosition: der Kunde muss die Zeile
+    // nachrechnen koennen (Toolcheck 15.10., H2). Der Arbeitswert in metrics
+    // bleibt ungerundet; die Abweichung ist hoechstens ein halber Cent je Stunde.
+    betrag_eur: rund2(rund2(t.active_hours) * rund2(t.stundensatz)),
     // Nur zur Information auf der Rechnung, keine Berechnungsgrundlage.
     tokens_gesamt: t.gesamt_tokens,
     vergleich_stunden: vFaktor > 1 ? Math.round(t.active_hours * vFaktor * 100) / 100 : null,
@@ -414,7 +427,41 @@ function entwurf(db, { from, to, tickets, projekte, posten, eintraege, gruppieru
     zielTage = zahlungszielTage;
   }
   const { positionen, sperre } = baueMitSperre(db, { from, to, tickets, projekte, posten, eintraege, gruppierung });
+  pruefeDoppelt(db, positionen);
   return { ...dokument(db, { von: from, bis: to, empfaenger, positionen, kontaktId, zielTage }), sperre };
+}
+
+// Claude-Zeit eines Vorgangs darf nur einmal auf einer gestellten Rechnung
+// stehen. Manuelle Zeit sperrt sich ueber zeit_eintrag; Vorgangs- und
+// Projektpositionen hatten keine Sperre (Toolcheck 15.10., H4, Owner: 409).
+// Verglichen werden die Tage, die eine gestellte Position abdeckt, mit den
+// Tagen der neuen Position; getrennte Zeitraeume (Teilabrechnung je Monat)
+// bleiben erlaubt.
+// Nur fuer die Selbstpruefung: aeltere Tests stellen dieselbe Rechnung
+// mehrfach, um anderes zu pruefen. Nicht ueber HTTP erreichbar.
+const pruefung = { doppelt: true };
+function pruefeDoppelt(db, positionen) {
+  if (!pruefung.doppelt) return;
+  const neu = positionen.filter((p) => p.ticket && p.typ !== 'zeit' && p.von && p.bis);
+  if (!neu.length) return;
+  const rows = db.prepare("SELECT nr, leistung_von, leistung_bis, positionen FROM invoices WHERE status = 'erstellt'").all();
+  for (const r of rows) {
+    let liste;
+    try { liste = JSON.parse(r.positionen); } catch { liste = null; }
+    // Unlesbare Abschrift: lieber nicht stellen als still doppelt abrechnen.
+    if (!Array.isArray(liste)) throw new Error('Rechnung ' + r.nr + ': Abschrift der Positionen unlesbar.');
+    for (const alt of liste) {
+      if (!alt || !alt.ticket || alt.typ === 'zeit') continue;
+      const von = alt.von || r.leistung_von;
+      const bis = alt.bis || r.leistung_bis;
+      const treffer = neu.find((p) => p.ticket === alt.ticket && p.von <= bis && p.bis >= von);
+      if (!treffer) continue;
+      const e = new Error((treffer.ohne_vorgangsnummer ? 'Projekt ' : 'Vorgang ') + treffer.ticket + ' steht für ' + von + ' bis ' + bis +
+        ' schon auf Rechnung ' + r.nr + '. Zeitraum so wählen, dass er sich nicht überschneidet, oder die Rechnung stornieren.');
+      e.abweichung = true;
+      throw e;
+    }
+  }
 }
 
 // Gestellt wird nur, was zu sehen war: der Editor schickt die Summe seiner
@@ -483,9 +530,13 @@ function dokument(db, { von, bis, empfaenger, positionen, kontaktId, zielTage = 
 // Schreibt die Abschrift mit der naechsten Nummer und sperrt die enthaltenen
 // Zeiteintraege mit ihrem Satz — beides oder nichts. Hat ein anderer Weg einen
 // Eintrag seit der Vorschau abgerechnet, entsteht keine Rechnung (409).
-function schreibe(db, d) {
+// danach(nr): weitere Schreibvorgaenge in derselben Transaktion (Angebot -> Rechnung).
+function schreibe(db, d, danach = null) {
   const jahr = new Date(d.erstellt_am).getFullYear();
   return kontakte.inTransaktion(db, () => {
+    // Auch hier, nicht nur im Entwurf: Angebot -> Rechnung (ausPositionen)
+    // kommt nicht ueber entwurf() (Security-Review H4).
+    pruefeDoppelt(db, d.positionen);
     const { nr, laufnr } = naechsteNummer(db, jahr);
     db.prepare(`
       INSERT INTO invoices (nr, jahr, laufnr, erstellt_am, leistung_von, leistung_bis,
@@ -506,6 +557,7 @@ function schreibe(db, d) {
         throw e;
       }
     }
+    if (danach) danach(nr);
     return lade(db, nr);
   });
 }
@@ -515,7 +567,7 @@ function schreibe(db, d) {
 // Uebernahme eines Angebots. Der Weg ueber byTicket() ginge dort fehl: die
 // zugesagten Stunden sind eine Schaetzung und muessen so bleiben, auch wenn
 // inzwischen mehr oder weniger Zeit gemessen wurde.
-function ausPositionen(db, { positionen, empfaenger, von, bis, kontaktId } = {}) {
+function ausPositionen(db, { positionen, empfaenger, von, bis, kontaktId, danach } = {}) {
   pruefeStammdaten();
   if (!Array.isArray(positionen) || positionen.length === 0) {
     throw new Error('Keine Positionen uebergeben.');
@@ -523,7 +575,7 @@ function ausPositionen(db, { positionen, empfaenger, von, bis, kontaktId } = {})
   if (!empfaenger || !empfaenger.name) throw new Error('Empfaenger fehlt (Name ist Pflicht).');
   if (!von || !bis) throw new Error('Leistungszeitraum fehlt.');
 
-  return schreibe(db, dokument(db, { von, bis, empfaenger, positionen, kontaktId }));
+  return schreibe(db, dokument(db, { von, bis, empfaenger, positionen, kontaktId }), danach);
 }
 
 // Jede Rechnungsnummer, die von aussen hereinkommt, laeuft hier durch. Der
@@ -834,6 +886,8 @@ function storniere(db, nr) {
     db.prepare("UPDATE invoices SET status = 'storniert' WHERE nr = ?").run(nr);
     // Die Eintraege sind wieder stellbar; die stornierte Abschrift bleibt, wie sie ist.
     db.prepare("UPDATE zeit_eintrag SET status = 'offen', rechnung_nr = NULL, satz_eingefroren = NULL WHERE rechnung_nr = ?").run(nr);
+    // Ein uebernommenes Angebot wird wieder abrechenbar (Toolcheck 15.10., H6).
+    db.prepare('UPDATE angebote SET rechnung_nr = NULL WHERE rechnung_nr = ?').run(nr);
     db.exec('COMMIT');
   } catch (e) {
     db.exec('ROLLBACK');
@@ -1091,6 +1145,7 @@ function erzeugePdf(db, nr, port) {
 }
 
 module.exports = {
+  pruefung,
   erstelle, baue, entwurf, vorschau, schreibe, abgerechnetFuerVorgang, freiePosition, ausPositionen, lade, liste, detail, abrechnung, storniere, renderHtml, erzeugePdf, esc,
   stammdaten, fehlendeStammdaten, pruefeStammdaten, faelligAm,
   statusOf, faelligFestschreiben, bucheZahlung, loescheZahlung, zahlungenZu, kennzahlen, jeKontakt, istTag, pruefeErwartet,

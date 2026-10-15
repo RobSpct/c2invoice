@@ -16,6 +16,26 @@ if (!fs.existsSync(path.join(__dirname, '..', 'config.json'))) {
   process.exit(1);
 }
 
+// Die Tests schreiben ueber schreibeConfig() und configGeschuetzt() in die
+// Konfiguration. Das landet in einer Kopie: bricht der Lauf mittendrin ab,
+// bleibt die echte config.json unberuehrt (Toolcheck 15.10., H8). Lesen geht
+// ebenfalls an die Kopie, sonst saehen Tests ihr eigenes Schreiben nicht.
+// Dasselbe Verfahren wie design/werkzeuge/probe.js.
+{
+  const echt = path.join(__dirname, '..', 'config.json');
+  const kopie = path.join(os.tmpdir(), 'c2invoice-selfcheck-' + process.pid + '-config.json');
+  fs.copyFileSync(echt, kopie);
+  const norm = (p) => (typeof p === 'string' || p instanceof URL ? path.resolve(String(p)).toLowerCase() : null);
+  const um = (p) => (norm(p) === echt.toLowerCase() ? kopie : norm(p) === (echt + '.tmp').toLowerCase() ? kopie + '.tmp' : p);
+  for (const name of ['readFileSync', 'writeFileSync', 'existsSync', 'rmSync', 'statSync']) {
+    const orig = fs[name];
+    fs[name] = (p, ...r) => orig(um(p), ...r);
+  }
+  const benenne = fs.renameSync;
+  fs.renameSync = (a, b) => benenne(um(a), um(b));
+  process.on('exit', () => { for (const f of [kopie, kopie + '.tmp']) try { fs.unlinkSync(f); } catch { /* weg */ } });
+}
+
 const dbmod = require('../db');
 const ingest = require('../ingest');
 const metrics = require('../metrics');
@@ -715,11 +735,13 @@ function testPricing() {
   const cost = pricing.costOf('claude-opus-5', {
     input_tokens: 1_000_000, output_tokens: 0, cache_w_5m: 0, cache_w_1h: 0, cache_read: 0,
   });
-  assert.ok(cost > 10 && cost < 20, 'Opus-Preis pro Mio Input unplausibel: ' + cost);
+  // Listenpreis Opus 5: 5 USD je Mio. Eingabe (LiteLLM, Anthropic). Bis 2.0.1
+  // stand hier 15 — die alte Ersatztabelle (Toolcheck 15.10., H3).
+  assert.ok(Math.abs(cost - 5) < 1e-9, 'Opus-5-Preis pro Mio Input falsch: ' + cost);
 
   // Haiku muss deutlich billiger sein als Opus, sonst stimmt die Zuordnung nicht.
   const haiku = pricing.costOf('claude-haiku-4-5-20251001', { input_tokens: 1_000_000 });
-  assert.ok(haiku < cost / 5, 'Haiku nicht billiger als Opus: ' + haiku + ' vs ' + cost);
+  assert.ok(haiku < cost / 4, 'Haiku nicht billiger als Opus: ' + haiku + ' vs ' + cost);
 
   // Unbekanntes Modell darf nicht stillschweigend 0 kosten, wenn es Claude ist.
   const unknown = pricing.costOf('claude-opus-5-preview-99', { input_tokens: 1_000_000 });
@@ -763,9 +785,11 @@ function testPreisLuecken() {
   const db = dbmod.open(':memory:');
   openDbs.push(db);
   const zeile = (id) => db.prepare('SELECT cost_usd, preis_art FROM events WHERE request_id = ?').get(id);
+  const echtRefresh = pricing.refresh;
 
   return ingest.run({ db }).then(() => {
-    assert.strictEqual(zeile('p1').preis_art, null, 'exakt bepreistes Modell ist markiert');
+    // Ohne Liste traegt auch ein bekanntes Modell die Ersatztabelle (H3).
+    assert.strictEqual(zeile('p1').preis_art, pricing.info().source === 'fallback' ? 'fallback' : null, 'exakt bepreistes Modell ist markiert');
     assert.strictEqual(zeile('p2').preis_art, 'geschaetzt');
     assert.ok(zeile('p2').cost_usd > 0, 'geschaetztes Modell kostet 0');
     assert.strictEqual(zeile('p3').preis_art, 'ohne');
@@ -784,7 +808,15 @@ function testPreisLuecken() {
 
     // Der Preis wird bekannt. Der naechste Lauf muss den Betrag aus den
     // gespeicherten Tokens nachziehen und die Markierung loeschen.
-    pricing.FALLBACK['gpt-9-turbo'] = { in: 2e-6, out: 8e-6, cw5m: 2.5e-6, cw1h: 4e-6, cr: 0.2e-6 };
+    // In die geladene Liste, nicht in die Ersatztabelle: ein Treffer dort gilt
+    // seit H3 selbst als "fallback" und bleibt markiert.
+    // ingest.run laedt die Liste jedes Mal neu, also nach dem Laden ergaenzen.
+    pricing.refresh = async (...a) => {
+      await echtRefresh(...a);
+      const i = pricing.info();
+      pricing.setzeTabelle({ ...(pricing.tabelle() || {}), 'gpt-9-turbo': { in: 2e-6, out: 8e-6, cw5m: 2.5e-6, cw1h: 4e-6, cr: 0.2e-6 } }, i.source, i.version);
+      return pricing.tabelle();
+    };
     return ingest.run({ db });
   }).then(() => {
     // Abgeglichen wird nur mit geladener Preisliste. Ohne Netz und ohne
@@ -809,7 +841,7 @@ function testPreisLuecken() {
       assert.strictEqual(zeile('p2').preis_art, 'geschaetzt', 'Bestandszeile wurde nicht markiert');
     }
   }).finally(() => {
-    delete pricing.FALLBACK['gpt-9-turbo'];
+    pricing.refresh = echtRefresh;
     try { db.close(); } catch { /* bereits geschlossen */ }
     cfg.jsonlDir = origDir;
     cfg.lokaleModelle.protokollDir = origLokal;
@@ -1971,7 +2003,7 @@ function testTicketsOhneDaten() {
 // Rechnungen sind der Punkt, an dem ein Rechenfehler nach aussen geht. Geprueft
 // wird deshalb: fortlaufende Nummer, Unveraenderlichkeit, beide Steuermodi und
 // dass Nutzereingaben nicht als HTML im Dokument landen.
-function rechnungsUmgebung(fn) {
+function rechnungsUmgebung(fn, { doppeltPruefen = false } = {}) {
   const config = require('../config.json');
   const original = JSON.parse(JSON.stringify(config.rechnung || {}));
   config.rechnung = {
@@ -1987,11 +2019,17 @@ function rechnungsUmgebung(fn) {
   // Test wird je nach Rechner rot oder gruen.
   const merkFaktor = config.vergleichsFaktor;
   config.vergleichsFaktor = 0;
+  // Diese Tests stellen dieselbe Rechnung mehrfach; die Sperre gegen doppelte
+  // Abrechnung pruefen die H4-Tests in test/hotfix.js mit eigener Umgebung.
+  const rechnung = require('../rechnung');
+  const merkDoppelt = rechnung.pruefung.doppelt;
+  rechnung.pruefung.doppelt = doppeltPruefen;
   try {
     return fn(config);
   } finally {
     config.rechnung = original;
     config.vergleichsFaktor = merkFaktor;
+    rechnung.pruefung.doppelt = merkDoppelt;
   }
 }
 
@@ -7280,6 +7318,17 @@ async function main() {
   } catch (err) {
     failed++;
     console.log('  FAIL Programmstand: Kennung erlaubt das Erkennen eines Neustarts\n       ' + err.message);
+  }
+
+  // Hotfix 2.0.2 (Toolcheck 15.10.2026), eigene Datei wie test/cira/ auf dem Branch cira.
+  for (const [name, fn] of require('./hotfix')({ dbmod, openDbs, rechnungsUmgebung, rechnungsDb, configGeschuetzt })) {
+    try {
+      await fn();
+      console.log('  ok   ' + name);
+    } catch (err) {
+      failed++;
+      console.log('  FAIL ' + name + '\n       ' + err.message);
+    }
   }
 
   for (const db of openDbs) {

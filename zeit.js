@@ -861,7 +861,8 @@ function ziele(db, q = '') {
 
 // --- Rechnung ----------------------------------------------------------------
 // Positionen aus Eintraegen. Gerechnet wird hier, rechnung.js uebernimmt nur.
-const rund2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+// Dieselbe Rundung wie rechnung.rund2 (halbe Cent sicher, H1).
+const rund2 = (n) => { const x = Number(n) || 0; const c = Math.round(Number((Math.abs(x) * 100).toPrecision(15))); return (x < 0 ? -c : c) / 100; };
 const GRUPPIERUNGEN = ['taetigkeit', 'eintrag'];
 const MAX_EINTRAEGE = 500;
 
@@ -954,7 +955,8 @@ function fuerRechnung(db, ids, gruppierung) {
       von: tage[0], bis: tage[tage.length - 1], tage,
       stunden: rund2(min / 60),
       basissatz: rund2(s.basissatz), rabatt_prozent: rund2(s.rabatt), satz: rund2(s.satz),
-      betrag_eur: rund2((min / 60) * s.satz),
+      // Aus den gedruckten Stunden und dem gedruckten Satz (Toolcheck 15.10., H2).
+      betrag_eur: rund2(rund2(min / 60) * rund2(s.satz)),
       refs,
     };
   });

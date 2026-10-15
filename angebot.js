@@ -50,8 +50,9 @@ function vorgangsPositionen(db, { from, to, tickets }, vFaktor) {
     basissatz: rund2(t.stundensatz_standard),
     rabatt_prozent: t.rabatt_prozent || 0,
     satz: rund2(t.stundensatz),
-    // Claude-Stunden x Satz; manuelle Zeit gehoert nicht in diese Position.
-    betrag_eur: rund2(t.arbeitswert_claude),
+    // Claude-Stunden x Satz aus den gedruckten Werten (wie rechnung.js, H2);
+    // manuelle Zeit gehoert nicht in diese Position.
+    betrag_eur: rund2(rund2(t.active_hours) * rund2(t.stundensatz)),
     vergleich_stunden: vFaktor > 1 ? rund2(t.active_hours * vFaktor) : null,
     vergleich_faktor: vFaktor > 1 ? vFaktor : null,
   }));
@@ -275,10 +276,14 @@ function inRechnung(db, nr) {
     von: a.erstellt_am.slice(0, 10),
     bis: new Date().toISOString().slice(0, 10),
     kontaktId: a.kontakt_id,
+    // In derselben Transaktion wie die Rechnung: sonst gaebe es eine Rechnung,
+    // deren Angebot weiter als offen gilt (Toolcheck 15.10., H6).
+    danach: (rnr) => {
+      db.prepare("UPDATE angebote SET rechnung_nr = ?, status = 'angenommen', angenommen_am = COALESCE(angenommen_am, ?), abgelehnt_am = NULL WHERE nr = ?")
+        .run(rnr, new Date().toISOString(), nr);
+      kontakte.macheKunde(db, a.kontakt_id);
+    },
   });
-  db.prepare("UPDATE angebote SET rechnung_nr = ?, status = 'angenommen', angenommen_am = COALESCE(angenommen_am, ?), abgelehnt_am = NULL WHERE nr = ?")
-    .run(inv.nr, new Date().toISOString(), nr);
-  kontakte.macheKunde(db, a.kontakt_id);
   return { angebot: lade(db, nr), rechnung: inv };
 }
 

@@ -62,6 +62,7 @@ const STAMM_FEHLT = {
   'rechnung.aussteller.name': 'Name',
   'rechnung.aussteller.anschrift': 'Anschrift',
   'rechnung.aussteller.steuernummer oder ustIdNr': 'Steuernummer oder USt-IdNr.',
+  'rechnung.ustSatz oder kleinunternehmer': 'Umsatzsteuersatz über 0 oder Kleinunternehmer',
 };
 const fehltNamen = (liste) => liste.map((f) => uebersetze(Object.hasOwn(STAMM_FEHLT, f) ? STAMM_FEHLT[f] : f)).join(', ');
 
