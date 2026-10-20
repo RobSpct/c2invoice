@@ -54,6 +54,9 @@ function pruefeStammdaten() {
 // Kaufmaennisch auf Cent, halbe Cent vom Null weg. Erst auf 15 Stellen
 // glaetten: 42,50 x 19 / 100 ist als Gleitkommazahl 8,07499999…, ohne das
 // Glaetten wird daraus 8,07 statt 8,08 (Toolcheck 15.10., H1).
+// Netto = Summe der gerundeten Positionen (siehe dokument()).
+const nettoAus = (positionen) => rund2(positionen.reduce((s, p) => s + (Number(p.betrag_eur) || 0), 0));
+
 function rund2(n) {
   const x = Number(n) || 0;
   const cent = Math.round(Number((Math.abs(x) * 100).toPrecision(15)));
@@ -514,7 +517,7 @@ function dokument(db, { von, bis, empfaenger, positionen, kontaktId, zielTage = 
   // Summiert wird ueber die gerundeten Positionen, nicht ueber die
   // ungerundeten Ausgangswerte: sonst weicht die ausgewiesene Summe um Cents
   // von den addierten Zeilen ab, und genau das faellt beim Pruefen auf.
-  const netto = rund2(positionen.reduce((s, p) => s + (Number(p.betrag_eur) || 0), 0));
+  const netto = nettoAus(positionen);
   const { klein, satz, ust, brutto } = steuer(netto);
   const jetzt = new Date().toISOString();
   return {
@@ -837,6 +840,112 @@ function abrechnung(db) {
   return map;
 }
 
+// Bis zu welchem Tag die Claude-Zeit eines Vorgangs (oder ticketlosen
+// Projekts) schon gestellt ist: je Schluessel das spaeteste Positions-Ende.
+// Nur lesen; dient der Teilabrechnung ab dem Folgetag (C4).
+function abgerechnetBis(db) {
+  const map = Object.create(null);
+  for (const r of db.prepare("SELECT leistung_bis, positionen FROM invoices WHERE status = 'erstellt'").all()) {
+    for (const p of JSON.parse(r.positionen) || []) {
+      if (!p || !p.ticket || p.typ === 'zeit') continue;
+      const bis = p.bis || r.leistung_bis;
+      if (bis && (!map[p.ticket] || bis > map[p.ticket])) map[p.ticket] = bis;
+    }
+  }
+  return map;
+}
+
+// Was fuer die genannten Vorgaenge (und ticketlose Projekte) noch offen zum
+// Abrechnen ist: die Nutzlast, die ein Rechnungsentwurf bekommt, ohne
+// Empfaenger. Eine Stelle fuer den Cira-Entwurf und das Board (C7a).
+// Gestellte Claude-Zeit nie ein zweites Mal. Ein Vorgang, der bis zu einem
+// Tag gestellt ist und danach neue Zeit hat, ist "teilweise gestellt": allein
+// angefragt wird ab dem Folgetag abgerechnet, in einer Sammelanfrage wird er
+// ausgelassen und genannt (sonst fehlte seine neue Zeit still).
+// vorgaenge: Zeilen aus metrics.byTicket; kundeId nur bei einer Kunden-Anfrage.
+const ortsTag = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+// vorab: gestellt/bisJe/liste schon gelesen (offenJeVorgang fragt sie fuer viele Vorgaenge nur einmal).
+function offeneDaten(db, { vorgaenge = [], projekte = [], kundeId = null } = {}, vorab = {}) {
+  const gestellt = vorab.gestellt || abrechnung(db);
+  const bisJe = vorab.bisJe || abgerechnetBis(db);
+  const folgetag = (iso) => ortsTag(new Date(new Date(iso + 'T12:00:00').getTime() + 864e5));
+  const teilweise = (schluessel, letzter) => !!gestellt[schluessel] && !!bisJe[schluessel] && letzter > bisJe[schluessel];
+  const schon = vorgaenge.filter((t) => gestellt[t.ticket] && !teilweise(t.ticket, t.last_day));
+  const teil = vorgaenge.filter((t) => teilweise(t.ticket, t.last_day));
+  let offen = vorgaenge.filter((t) => !gestellt[t.ticket]);
+  let ab = null;
+  if (vorgaenge.length === 1 && teil.length === 1) {
+    ab = folgetag(bisJe[teil[0].ticket]);
+    offen = metrics.byTicket(db, { ticket: teil[0].ticket, from: ab, to: teil[0].last_day }).filter((t) => t.ticket === teil[0].ticket);
+  }
+  const ausgelassen = ab ? [] : teil.map((t) => t.ticket + ' (gestellt bis ' + bisJe[t.ticket] + ', neue Zeit danach: einzeln anfordern mit „Rechnung für ' + t.ticket + '“)');
+  const tickets = offen.filter((t) => t.active_hours > 0 || (t.lokal_betrag_eur || 0) > 0);
+  const projektAlle = projekte.length
+    ? metrics.ohneTicket(db, {}).filter((t) => t.art === 'projekt' && projekte.includes(t.gruppe) && (t.active_hours > 0 || (t.lokal_betrag_eur || 0) > 0)) : [];
+  const projektZeilen = projektAlle.filter((t) => !gestellt[t.gruppe]);
+  for (const t of projektAlle) if (teilweise(t.gruppe, t.last_day)) ausgelassen.push('ticketlose Arbeit in ' + t.gruppe + ' (gestellt bis ' + bisJe[t.gruppe] + ', neue Zeit danach im Beleg-Editor)');
+  // Manuelle Zeit sperrt sich je Eintrag: auch auf gestellten Vorgaengen ist offene Zeit abrechenbar.
+  const keys = new Set(vorgaenge.map((t) => t.ticket));
+  const liste = vorab.liste || zeit.liste(db, { status: 'offen' });
+  const basis = { gestellt, schon, teil, vorgaenge: offen, ab, ausgelassen };
+  // zeit.liste liefert hoechstens 2000: dann waere die Auswahl still unvollstaendig.
+  if (liste.length >= 2000) return { ...basis, zuViele: true, daten: null };
+  const passend = liste.filter((e) => e.abrechenbar && (
+    (e.ziel_art === 'vorgang' && keys.has(e.ziel_schluessel))
+    || (e.ziel_art === 'projekt' && projekte.includes(e.ziel_schluessel))
+    || (e.ziel_art === 'kunde' && kundeId !== null && e.ziel_schluessel === String(kundeId))));
+  // Ab dem Folgetag des letzten Belegs: aeltere offene Eintraege laegen sonst mit im ueberlappenden Zeitraum.
+  const eintraege = ab ? passend.filter((e) => e.tag >= ab) : passend;
+  if (eintraege.length < passend.length) ausgelassen.push((passend.length - eintraege.length) + ' offene Zeiteinträge vor dem ' + ab + ' (im Beleg-Editor)');
+  const tage = tickets.flatMap((t) => [t.first_day, t.last_day]).concat(projektZeilen.flatMap((t) => [t.first_day, t.last_day]), eintraege.map((e) => e.tag)).filter(Boolean).sort();
+  const daten = tage.length ? {
+    from: ab && ab < tage[0] ? ab : tage[0], to: tage[tage.length - 1], tickets: tickets.map((t) => t.ticket),
+    ...(projektZeilen.length ? { projekte: projektZeilen.map((t) => t.gruppe) } : {}), ...(eintraege.length ? { eintraege: eintraege.map((e) => e.id) } : {}),
+  } : null;
+  return { ...basis, tickets, projektZeilen, eintraege, daten, zuViele: false };
+}
+
+// Offener Nettobetrag je Vorgang, wie ihn ein Rechnungsentwurf fuer genau
+// diesen Vorgang stellen wuerde. Nichts offen = 0.
+// zeilen: metrics.byTicket(db, {}), falls der Aufrufer sie schon hat (kostet bei
+// grossen Ledgern rund eine Sekunde).
+function offenJeVorgang(db, keys, zeilen = null) {
+  const alle = zeilen || metrics.byTicket(db, {});
+  const vorab = { gestellt: abrechnung(db), bisJe: abgerechnetBis(db), liste: zeit.liste(db, { status: 'offen' }) };
+  const aus = Object.create(null);
+  const buendel = [];
+  for (const key of keys) {
+    const od = offeneDaten(db, { vorgaenge: alle.filter((t) => t.ticket === key) }, vorab);
+    if (od.zuViele) throw new Error('2000 oder mehr offene Zeiteinträge — offener Betrag nicht bestimmbar.');
+    if (!od.daten) aus[key] = 0;
+    else if (od.ab) aus[key] = nettoAus(baueMitSperre(db, od.daten).positionen);   // teilweise gestellt: eigener Zeitraum ab dem Folgetag
+    else buendel.push({ key, daten: od.daten });
+  }
+  // Ohne Teilabrechnung liegt die ganze Zeit eines Vorgangs in seinem eigenen
+  // Zeitraum; ein gemeinsamer Aufbau ueber den umfassenden Zeitraum ergibt
+  // dieselben Positionen je Vorgang. baueMitSperre wertet je Aufruf den ganzen
+  // Zeitraum aus (~150 ms) — einzeln kostete die Erledigt-Spalte sonst Sekunden.
+  for (let i = 0; i < buendel.length; i += 200) {
+    const teil = buendel.slice(i, i + 200);
+    const tage = teil.flatMap((b) => [b.daten.from, b.daten.to]).sort();
+    const eintraege = teil.flatMap((b) => b.daten.eintraege || []);
+    const pos = baueMitSperre(db, { from: tage[0], to: tage[tage.length - 1], tickets: teil.flatMap((b) => b.daten.tickets), ...(eintraege.length ? { eintraege } : {}) }).positionen;
+    for (const { key } of teil) {
+      aus[key] = nettoAus(pos.filter((p) => (p.typ !== 'zeit' && p.ticket === key) || (p.typ === 'zeit' && p.ziel_art === 'vorgang' && p.ziel === key)));
+    }
+  }
+  return aus;
+}
+
+// Billiger Vorfilter: welche Vorgaenge haben ueberhaupt etwas Offenes zum
+// Abrechnen (ohne Positionen zu bauen)? Ein Satz 0 kann den Betrag trotzdem 0
+// machen; wer den Betrag braucht, fragt offenJeVorgang.
+function mitOffenem(db, keys, zeilen = null) {
+  const alle = zeilen || metrics.byTicket(db, {});
+  const vorab = { gestellt: abrechnung(db), bisJe: abgerechnetBis(db), liste: zeit.liste(db, { status: 'offen' }) };
+  return keys.filter((key) => offeneDaten(db, { vorgaenge: alle.filter((t) => t.ticket === key) }, vorab).daten !== null);
+}
+
 // Was zu einem Vorgang insgesamt gestellt ist: Claude-Zeit aus den
 // Vorgangspositionen, manuelle Zeit aus den Zeitpositionen. Fuer die Marge im
 // Vorgangs-Detail — ohne den manuellen Teil laege sie zu niedrig, sobald
@@ -850,6 +959,22 @@ function abgerechnetFuerVorgang(db, key) {
     }
   }
   return rund2(claude + manuell);
+}
+
+// Steht auf diesem Vorgang schon etwas in einer gestellten Rechnung (Claude-Zeit
+// oder manuelle Zeit)? Dann darf er nicht umgebucht werden (C7b "Als Jira
+// anlegen"): die gestellte Zeit waere unter dem neuen Schluessel ein zweites
+// Mal abrechenbar.
+// Ohne Gross-/Kleinschreibung, wie das Umbuchen selbst (COLLATE NOCASE).
+function gestelltAuf(db, key) {
+  const k = String(key).toUpperCase();
+  const gleich = (v) => v != null && String(v).toUpperCase() === k;
+  for (const r of db.prepare("SELECT positionen FROM invoices WHERE status = 'erstellt'").all()) {
+    for (const p of JSON.parse(r.positionen) || []) {
+      if (p && (gleich(p.ticket) || (p.typ === 'zeit' && p.ziel_art === 'vorgang' && gleich(p.ziel)))) return true;
+    }
+  }
+  return !!db.prepare("SELECT 1 FROM zeit_eintrag WHERE ziel_art = 'vorgang' AND ziel_schluessel = ? COLLATE NOCASE AND status = 'abgerechnet' LIMIT 1").get(key);
 }
 
 // --- Storno ------------------------------------------------------------------
@@ -1146,7 +1271,7 @@ function erzeugePdf(db, nr, port) {
 
 module.exports = {
   pruefung,
-  erstelle, baue, entwurf, vorschau, schreibe, abgerechnetFuerVorgang, freiePosition, ausPositionen, lade, liste, detail, abrechnung, storniere, renderHtml, erzeugePdf, esc,
+  erstelle, baue, entwurf, vorschau, schreibe, abgerechnetFuerVorgang, abgerechnetBis, gestelltAuf, offeneDaten, offenJeVorgang, mitOffenem, freiePosition, ausPositionen, lade, liste, detail, abrechnung, storniere, renderHtml, erzeugePdf, esc,
   stammdaten, fehlendeStammdaten, pruefeStammdaten, faelligAm,
   statusOf, faelligFestschreiben, bucheZahlung, loescheZahlung, zahlungenZu, kennzahlen, jeKontakt, istTag, pruefeErwartet,
   // Fuer das Angebotsmodul: dieselbe Steuerlogik, dieselbe Rundung, dasselbe

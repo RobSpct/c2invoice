@@ -5,6 +5,7 @@
    nur Anteile fuer Balkenbreiten und die Formatierung. */
 
 Object.assign(EN, {
+  'Vorgangs-Log': 'Job log', 'neueste zuerst': 'newest first', 'Sitzung · Zusammenfassung des lokalen Modells': 'Session · summary by the local model', 'Vorgangs-Log nicht lesbar.': 'Job log not readable.',
   'Vorgänge im Zeitraum': 'jobs in period', 'Vorgang im Zeitraum': 'job in period', 'Marge im Zeitraum': 'Margin in period', 'nach Sachkosten + eigener Zeit': 'after material costs + own time', 'Spaltenkopf klicken zum Sortieren, Zeile für Details': 'Click a column header to sort, a row for details',
   'CSV exportieren': 'Export CSV', 'alle': 'all', 'offen': 'open', 'abgerechnet': 'invoiced', 'ohne Marge': 'no margin',
   'Verlauf': 'Trend', 'Aktiv': 'Active', 'Arbeitswert': 'Billable value', 'Status': 'Status', 'Budget': 'Budget',
@@ -13,7 +14,9 @@ Object.assign(EN, {
   'Noch keine Vorgänge im Zeitraum': 'No jobs in this period yet',
   'Sobald ein Vorgangsschlüssel (z. B. ABC-123) in Branch oder Sitzung auftaucht, erscheint er hier.': 'As soon as a job key (e.g. ABC-123) shows up in a branch or session, it appears here.',
   'Kein Vorgang passt zum Filter': 'No job matches the filter',
-  'Budget je Vorgang aus angenommenen Angeboten — mit der Pro-Version.': 'Budget per job from accepted quotes — with Pro.',
+  'verbraucht, ganzer Vorgang': 'used, whole job', 'kein Budget': 'no budget', 'von': 'of', 'Budget (EUR)': 'Budget (EUR)',
+  'Speichern': 'Save', 'Entfernen': 'Remove', 'Verbraucht = Arbeitswert des ganzen Vorgangs mit manueller Zeit.': 'Used = billable value of the whole job including manual time.',
+  'Budget nicht gespeichert': 'Budget not saved', 'Budget: Ergebnis unklar, der Stand wird neu geladen.': 'Budget: result unclear, reloading the current state.', 'Budget: eine Zahl über 0 eingeben.': 'Budget: enter a number above 0.',
   '← Vorgänge': '← Jobs', 'Vorgang nicht gefunden': 'Job not found', 'Vorgang lädt …': 'Loading job …',
   'Der Schlüssel taucht in keiner erfassten Sitzung auf.': 'The key does not appear in any recorded session.',
   'Zurück zu den Vorgängen': 'Back to jobs', 'Vorgang konnte nicht geladen werden': 'Job could not be loaded', 'Erneut versuchen': 'Try again', 'Vorgang nicht aktualisiert': 'Job not refreshed', 'Server nicht erreichbar': 'Server not reachable',
@@ -84,7 +87,7 @@ const SPALTEN_V = [
   ['ticket', 'Vorgang', false], ['verlauf', 'Verlauf', null], ['active_hours', 'Aktiv', true], ['agent_hours', 'Agent', true],
   ['api_gegenwert_usd', 'API USD', true], ['arbeitswert', 'Arbeitswert', true],
   ['marge', 'Marge im Zeitraum', true, 'nach Sachkosten + eigener Zeit'], ['zeitmodell', 'Zeitmodell', null],
-  ['status', 'Status', null], ['budget', 'Budget', null],
+  ['status', 'Status', null], ['budget', 'Budget', true, 'verbraucht, ganzer Vorgang'],
 ];
 // Weitere Spalten der bisherigen Tabelle, hinter "Mehr Spalten": fest eingebaut
 // liefe die Tabelle schon bei 1024 px ueber.
@@ -92,12 +95,22 @@ const SPALTEN_MEHR = [
   ['requests', 'Requests', true], ['total_tokens', 'Tokens', true], ['abo_anteil_usd', 'Abo-Anteil USD', true],
   ['lokal_tokens', 'Tokens lokal', true], ['first_day', 'Zeitraum', false],
 ];
-// Budget ist noch nicht gebaut: bei offenem Schalter keine Spalte (R16).
-const spaltenV = () => [...SPALTEN_V.filter((s) => s[0] !== 'budget'), ...(vz.mehr ? SPALTEN_MEHR : []),
-  ...(proAktiv() ? [] : SPALTEN_V.filter((s) => s[0] === 'budget'))];
+const spaltenV = () => [...SPALTEN_V, ...(vz.mehr ? SPALTEN_MEHR : [])];
 // Gemerkte Sortierung aus dem Browser-Speicher nur uebernehmen, wenn sie passt.
 if (!spaltenV().some(([key, , zahl]) => key === vz.sort.k && zahl != null) || ![1, -1].includes(vz.sort.dir)) vz.sort = { k: 'arbeitswert', dir: -1 };
-const sortWert = (t, k) => (k === 'marge' ? (t.wert ? t.wert.marge_prozent : null) : t[k]);
+const sortWert = (t, k) => (k === 'marge' ? (t.wert ? t.wert.marge_prozent : null) : k === 'budget' ? (budgetVon(t.ticket) || {}).prozent : t[k]);
+
+// Budget je Vorgang: Stand kommt fertig vom Server (metrics.budgetStand), hier
+// wird nur nachgeschlagen und gezeichnet. Prozent steht immer als Text daneben,
+// die Farbe allein traegt nichts.
+const budgetVon = (key) => ((state.summary && state.summary.budgets) || []).find((b) => b.vorgang.toUpperCase() === String(key).toUpperCase()) || null;
+function budgetBand(b, duenn) {
+  if (!b) return '<span class="faint">' + esc(uebersetze('kein Budget')) + '</span>';
+  const text = eur(b.verbraucht_eur) + ' ' + uebersetze('von') + ' ' + eur(b.budget_eur) + ' · ' + uebersetze('Rest') + ' ' + eur(b.rest_eur);
+  return '<span class="budget budget-' + b.stufe + (duenn ? '' : ' weit') + '" title="' + esc(text) + '">' +
+    '<span class="band' + (duenn ? ' duenn' : '') + '" aria-hidden="true"><span style="width:' + b.balken + '%"></span></span>' +
+    '<span class="mono">' + num(b.prozent) + ' %</span>' + (duenn ? '' : '<span class="faint">' + esc(text) + '</span>') + '</span>';
+}
 
 function margeZelle(w) {
   if (!w || w.marge_prozent == null) return '<span class="faint">–</span>';
@@ -167,10 +180,10 @@ function zeichneTabelle(w) {
       '<td><span class="pille">' + esc(zmName(t.zeitmodell)) + '</span></td>' +
       '<td><span class="pille status' + (ist ? ' ok' : '') + '"' + (ist ? ' title="' + esc(abr[t.ticket].nummern.join(', ') + ' · ' + eur(abr[t.ticket].betrag_eur)) + '"' : '') + '>' +
         esc(uebersetze(ist ? 'abgerechnet' : 'offen')) + '</span></td>' +
+      '<td>' + budgetBand(budgetVon(t.ticket), true) + '</td>' +
       (vz.mehr ? '<td class="z">' + num(t.requests) + '</td><td class="z">' + num(t.total_tokens) + '</td>' +
         '<td class="z">' + nf2.format(t.abo_anteil_usd || 0) + '</td><td class="z">' + num(t.lokal_tokens || 0) + '</td>' +
         '<td class="faint nowrap">' + esc(t.first_day === t.last_day ? datum(t.first_day) : datum(t.first_day) + ' – ' + datum(t.last_day)) + '</td>' : '') +
-      (proAktiv() ? '' : '<td><span class="pille pro" title="' + esc(uebersetze('Budget je Vorgang aus angenommenen Angeboten — mit der Pro-Version.')) + '">Pro</span></td>') +
     '</tr>';
   };
 
@@ -205,6 +218,25 @@ aktion('v-mehr', () => {
 });
 aktion('v-filter', (f) => { vz.filter = f; merke('vorgaenge.filter', f); zeichneAnsicht(); });
 aktion('v-oeffnen', (key) => geheZu('vorgaenge/' + encodeURIComponent(key)));
+// Budget speichern oder entfernen; danach Auswertung neu (Tabelle, Glocke, Detail).
+async function vBudget(el, vorgang, budget_eur) {
+  await mitLauf(el, async () => {
+    try { await sende('/api/budget', { vorgang, budget_eur }); } catch (e) {
+      // Ohne Antwort (Zeitlimit) kann der Server trotzdem geschrieben haben: dann nicht „nicht gespeichert“ behaupten.
+      if (e.status) { toast(uebersetze('Budget nicht gespeichert') + ': ' + e.message, 'err'); return; }
+      toast(uebersetze('Budget: Ergebnis unklar, der Stand wird neu geladen.'), 'err');
+    }
+    await ladeSummary();
+  });
+}
+aktion('v-budget', (key, el) => {
+  const feld = document.getElementById('v-budget');
+  // Leeres Feld nie senden: JSON macht aus NaN null, und null entfernt das Budget.
+  const v = feld && feld.value.trim() !== '' ? Number(feld.value) : NaN;
+  if (!Number.isFinite(v) || v <= 0) { toast(uebersetze('Budget: eine Zahl über 0 eingeben.'), 'err'); if (feld) feld.focus(); return; }
+  vBudget(el, key, v);
+});
+aktion('v-budget-weg', (key, el) => vBudget(el, key, null));
 // Die Delegation verhindert den Standard-Klick; der Haken folgt deshalb dem Zustand.
 aktion('v-wahl', (key) => {
   if (vz.wahl.has(key)) vz.wahl.delete(key); else vz.wahl.add(key);
@@ -266,7 +298,6 @@ function kopfKarte(d) {
   return '<div class="karte weit detail-kopf">' +
     '<a class="textknopf" href="#/vorgaenge">' + esc(uebersetze('← Vorgänge')) + '</a>' +
     '<div class="detail-titel"><b class="mono">' + esc(d.ticket) + '</b><span class="faint">' + esc(meta.join(' · ')) + '</span>' +
-      (proAktiv() ? '' : '<span class="pille pro" title="' + esc(uebersetze('Budget je Vorgang aus angenommenen Angeboten — mit der Pro-Version.')) + '">' + esc(uebersetze('Budget')) + ' · Pro</span>') +
       '<span class="detail-modus" title="' + esc(uebersetze('Gilt für alle Zahlen dieser Seite: Gauge, Wasserfall, Rechenweg. Rechnung rechnet immer mit manueller Zeit.')) + '">' +
         segment('v-modus', [['claude', 'nur Claude'], ['alle', 'mit manueller Zeit']], detailModus(), 'Zahlen') + '</span></div>' +
     '<div class="detail-chips">' +
@@ -281,6 +312,13 @@ function kopfKarte(d) {
     '<div class="detail-zm"><span class="label">' + esc(uebersetze('Zeitmodell')) + '</span>' +
       zeitmodellSchalter('vorgang', d.ticket, d.zeitmodell_wahl, d.zeitmodell_erbt) +
       '<span class="hinweis">' + esc(uebersetze('Gilt für alle Zahlen dieser Seite.')) + (d.zeitmodell === 'gemischt' ? ' · ' + esc(zmName('gemischt')) : '') + '</span></div>' +
+    // Budget rechnet immer alles (ganzer Vorgang, mit manueller Zeit) und folgt dem Schalter oben nicht.
+    '<div class="detail-budget"><label class="label" for="v-budget">' + esc(uebersetze('Budget (EUR)')) + '</label>' +
+      '<input id="v-budget" class="budget-feld" type="number" min="0.01" max="10000000" step="0.01" inputmode="decimal" value="' + (d.budget ? esc(String(d.budget.budget_eur)) : '') + '">' +
+      '<button type="button" class="knopf klein" data-aktion="v-budget" data-wert="' + esc(d.ticket) + '">' + esc(uebersetze('Speichern')) + '</button>' +
+      (d.budget ? '<button type="button" class="textknopf" data-aktion="v-budget-weg" data-wert="' + esc(d.ticket) + '">' + esc(uebersetze('Entfernen')) + '</button>' : '') +
+      budgetBand(d.budget, false) +
+      '<span class="hinweis">' + esc(uebersetze('Verbraucht = Arbeitswert des ganzen Vorgangs mit manueller Zeit.')) + '</span></div>' +
   '</div>' + zeitstrahl(d);
 }
 
@@ -534,6 +572,7 @@ function sitzungsTabelle(d) {
 
 function zeichneDetail(w, key) {
   ladeVorgang(key);
+  ciraKontext({ art: 'vorgang', id: key, titel: key });
   const D = vz.detail;
   const zurueck = '<a class="knopf klein" href="#/vorgaenge">' + esc(uebersetze('Zurück zu den Vorgängen')) + '</a>';
   if (!D.d) {
@@ -551,7 +590,19 @@ function zeichneDetail(w, key) {
     '<div class="raster detail-drei">' + gaugeKarte(wert) + wasserfallKarte(wert) + tokenRingKarte(d) + '</div>' +
     verlaufKarte(d, wert) + rechenweg(d, wert) +
     '<div class="raster detail-tokens">' + tokenTabelle(d) + modellKarte(d) + '</div>' +
-    sitzungsTabelle(d) + '</div>';
+    logKarte(d) + sitzungsTabelle(d) + '</div>';
+}
+
+// Vorgangs-Log (C6): z. B. Zusammenfassungen aus Sitzungen, neueste zuerst.
+function logKarte(d) {
+  const L = d.log || [];
+  if (!L.length && !d.logFehler) return '';
+  return '<div class="karte weit"><div class="karten-kopf"><h2 class="titel-klein">' + esc(uebersetze('Vorgangs-Log')) + '</h2>' +
+      '<span class="hinweis">' + esc(uebersetze('neueste zuerst')) + '</span></div>' +
+    (d.logFehler ? '<div class="hinweis">' + esc(uebersetze(d.logFehler)) + '</div>' : '') +
+    // Zusammenfassungen schreibt das lokale Modell: als solche kennzeichnen, nicht als Tatsache.
+    '<ol class="vg-log">' + L.map((e) => '<li><span class="z mono">' + esc(datum(e.zeit)) + ' · ' + esc(e.quelle.startsWith('sitzung:') ? uebersetze('Sitzung · Zusammenfassung des lokalen Modells') : e.quelle) + '</span>' +
+      '<p>' + esc(e.text) + '</p></li>').join('') + '</ol></div>';
 }
 
 aktion('v-kopieren', async () => {

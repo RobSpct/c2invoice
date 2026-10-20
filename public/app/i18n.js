@@ -22,6 +22,10 @@ function leseSprache() {
 let SPRACHE = leseSprache();
 const istDE = () => SPRACHE === 'de';
 
+// Name des Assistenten (Masterplan 3.0). Nie hart im Code: ueberall CIRA_NAME.
+// config.cira.name ueberschreibt ihn, sobald der Cira-Kern ihn ausliefert.
+let CIRA_NAME = 'Cira';
+
 const EN = Object.create(null);
 EN["Live"] = "Live";
 EN["Überblick"] = "Overview";
@@ -264,8 +268,9 @@ EN["kein Selbstkostensatz in config.json"] = "no cost rate in config.json";
 EN["keine lokalen Modelle"] = "no local models";
 EN["Auswertung"] = "Reporting";
 EN["Live-Daten"] = "Live data";
-EN["Der Server wurde seit dem Öffnen dieser Seite erneuert. "] = "The server has been updated since this page was opened. ";
-EN["Bitte neu laden (Strg+R), sonst passen Oberfläche und Server nicht zusammen."] = "Please reload (Ctrl+R), otherwise the interface and the server disagree.";
+EN["Seit dem Öffnen dieser Seite gibt es eine neue Version. "] = "A new version is available since this page was opened. ";
+EN["Bitte neu laden, sonst passen Oberfläche und Server nicht zusammen."] = "Please reload, otherwise the interface and the server disagree.";
+EN["Neu laden"] = "Reload";
 EN["Abgerechnet wird die Zeit um deine eigenen Eingaben: je eine halbe Pausenschwelle davor und danach. Liegen zwei Eingaben höchstens so weit auseinander, zählt die Zeit dazwischen ganz; arbeitet die KI länger allein, zählt genau eine Pausenschwelle. Im Zeitmodell „Aktivität“ trennt der Wert stattdessen Arbeit von offenen Fenstern."] = "Billed time is the time around your own inputs: half the idle threshold before and after each one. If two inputs are at most one threshold apart, the time between them counts in full; if the AI works alone for longer, exactly one threshold counts. In the time model “Activity” the value separates work from idle windows instead.";
 EN["Fester Umrechnungskurs. Gestellte Rechnungen behalten den Kurs, der beim Erstellen galt."] = "Fixed exchange rate. Issued invoices keep the rate that applied when they were created.";
 EN["Monatspreis des Claude-Abos. Wird anteilig auf die Vorgänge verteilt."] = "Monthly price of your Claude subscription. Distributed proportionally across jobs.";

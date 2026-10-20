@@ -45,14 +45,14 @@ function liveGauge(b) {
   const nadel = -90 + a * 180;
   return '<svg viewBox="0 0 240 140" class="live-gauge" aria-hidden="true">' +
     '<path d="M30,120 A90,90 0 0 1 210,120" fill="none" stroke="var(--line-soft)" stroke-width="16"/>' +
-    '<path d="M30,120 A90,90 0 0 1 210,120" fill="none" stroke="#57c98a" stroke-opacity=".28" stroke-width="16" stroke-dasharray="94.2 400"/>' +
-    '<path d="M30,120 A90,90 0 0 1 210,120" fill="none" stroke="#e0b355" stroke-opacity=".28" stroke-width="16" stroke-dasharray="0 94.2 94.2 400"/>' +
-    '<path d="M30,120 A90,90 0 0 1 210,120" fill="none" stroke="#ef4444" stroke-opacity=".28" stroke-width="16" stroke-dasharray="0 188.4 94.4 400"/>' +
+    '<path d="M30,120 A90,90 0 0 1 210,120" fill="none" stroke="var(--ok)" stroke-opacity=".28" stroke-width="16" stroke-dasharray="94.2 400"/>' +
+    '<path d="M30,120 A90,90 0 0 1 210,120" fill="none" stroke="var(--warn)" stroke-opacity=".28" stroke-width="16" stroke-dasharray="0 94.2 94.2 400"/>' +
+    '<path d="M30,120 A90,90 0 0 1 210,120" fill="none" stroke="var(--bad)" stroke-opacity=".28" stroke-width="16" stroke-dasharray="0 188.4 94.4 400"/>' +
     '<path d="M30,120 A90,90 0 0 1 210,120" fill="none" stroke="var(--accent)" stroke-width="5" stroke-linecap="round" stroke-dasharray="' + (a * L).toFixed(1) + ' 400" class="gauge-bogen"/>' +
     '<g class="nadel" style="transform-origin:120px 120px;transform:rotate(' + nadel.toFixed(1) + 'deg)"><path d="M118,120 L120,42 L122,120 Z" fill="var(--text)"/></g>' +
     '<circle cx="120" cy="120" r="8" fill="var(--bg)" stroke="var(--text)" stroke-width="3"/>' +
-    '<text x="30" y="138" text-anchor="middle" fill="var(--text-gruppe)" font-size="10">0</text>' +
-    '<text x="210" y="138" text-anchor="middle" fill="var(--text-gruppe)" font-size="10">30</text></svg>';
+    '<text x="30" y="138" text-anchor="middle" fill="var(--text-gruppe)" font-size="11">0</text>' +
+    '<text x="210" y="138" text-anchor="middle" fill="var(--text-gruppe)" font-size="11">30</text></svg>';
 }
 
 function spurHtml(s) {
@@ -157,7 +157,7 @@ function zeichneLive(w) {
           '<div><span class="label">' + esc(uebersetze('Aktiv heute')) + '</span><span class="instr-wert">' + nf1.format(heuteH) + '<span>h</span></span></div>' +
         '</div>' +
         '<div class="strom gross">' + m.map((v, i) => '<span title="' + esc('−' + (59 - i) + ' Min · ' + num(v) + ' Tokens') + '" style="height:' + (v ? Math.max(3, v / mmax * 100) : 1.5).toFixed(1) + '%;background:' +
-          (i === 59 ? 'var(--text)' : i >= 54 ? 'var(--accent)' : 'rgba(249,115,22,.55)') + '"></span>').join('') + '</div>' +
+          (i === 59 ? 'var(--text)' : i >= 54 ? 'var(--accent)' : 'color-mix(in srgb, var(--accent) 55%, transparent)') + '"></span>').join('') + '</div>' +
         '<div class="strom-achse"><span>−60</span><span>−45</span><span>−30</span><span>−15</span><span class="ok">' + esc(uebersetze('jetzt')) + '</span></div></div>' +
       '<div class="karte weit live-ring"><span class="label">' + esc(uebersetze('Modelle, laufende Stunde')) + '</span>' +
         (ringDaten.length ? ringSvg(ringDaten, 140, 14) +
@@ -168,7 +168,7 @@ function zeichneLive(w) {
     '<div class="karte weit">' +
       '<div class="karten-kopf"><h2 class="titel-klein">' + esc(uebersetze('Aktive Sitzungen')) + '</h2><span class="hinweis">' + esc(uebersetze('letzte 60 Minuten')) + '</span>' + infoI('live') +
         '<span class="rechts spur-legende"><span><span class="leg-p" style="width:14px;height:6px;background:var(--accent)"></span>' + esc(uebersetze('abrechenbar — Fenster um deine Eingaben')) + '</span>' +
-        '<span><span class="leg-p" style="width:14px;height:2px;vertical-align:middle;background:#74747e"></span>' + esc(uebersetze('Agentenzeit — nicht abgerechnet')) + '</span></span></div>' +
+        '<span><span class="leg-p" style="width:14px;height:2px;vertical-align:middle;background:var(--spur-agent)"></span>' + esc(uebersetze('Agentenzeit — nicht abgerechnet')) + '</span></span></div>' +
       infoText('live', 'Arbeit ohne Ticket-Branch trägt keinen Vorgang und bleibt damit unabrechenbar. Im Feld Vorgang lässt sich eine Sitzung von Hand buchen — ein Jira-Schlüssel oder ein frei gewählter Name. In der Spalte Zeitmodell legst du je Sitzung fest, wie ihre Zeit zählt. Gedrückt ist, was gilt; ohne eigene Wahl ist das der Standard aus Vorgang, Projekt oder Einstellungen.') +
       (S.length ? '<div class="sitzungen">' + S.map(sitzungHtml).join('') + werkzeugZeile(L) + '</div><div class="strom-achse"><span>−60 Min</span><span>−30</span><span>' + esc(uebersetze('jetzt')) + '</span></div>'
         : leer('uhr', 'Keine Sitzung in der letzten Stunde', 'Starte eine Claude-Code-Sitzung — sie erscheint hier nach dem nächsten Abgleich.') +

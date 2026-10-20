@@ -24,20 +24,63 @@ session logs → active working time → hourly value → margin → invoice PDF
 
 ## What it looks like
 
-A sidebar with pages: **Hub**, **Analysis**, **Live**, **Jobs** and **Time
-tracking** for the work, **Quotes**, **Invoices** and **Contacts** for the
-billing. One period
-selector applies to every page, with an optional comparison to the previous
-period; **Ctrl+K / ⌘K** searches jobs, documents, contacts and settings.
+The sidebar has four groups. **Assistant**: Cira, Sessions, Live and Time
+tracking. **Work**: Board, Jobs and Tools. **Analysis**: Finances and Usage.
+**Billing**: Quotes, Invoices and Contacts. One period selector applies to
+every page, with an optional comparison to the previous period; **Ctrl+K / ⌘K**
+searches jobs, documents, contacts and settings.
 
-The **Hub** is the start page. Revenue for the period up top, then
+**Cira** is the assistant built into c2invoice. Ask in plain words or pick a
+suggestion, such as *Wie lief der Monat?* (how did the month go?), *Was ist
+überfällig?* (what is overdue?) or *Rechnung für PROJ-12* (invoice for
+PROJ-12). Cira speaks German for now, even with the English interface. The
+answer comes in tiers. **T0** answers straight from your own figures, without a model and
+free of charge. **T1** uses local models via Ollama, if you have them, and **T2**
+uses Claude, only if you allow it and only up to a monthly limit you set. Every
+answer shows its tier and source, and *How was this derived?* opens the
+calculation behind a figure. Nothing leaves the tool without your approval:
+an invoice Cira drafts waits under *Needs you* until you release it.
+
+![Cira: the answer to "how did the month go?" as cards with value of work, hours, billed, not yet billed and margin, the chat with tier T0 and source, and on the right today's figures, Needs you and skills to start per workspace](docs/cira.png)
+
+**Sessions** starts Claude Code from c2invoice and books every session onto a
+job, from the git branch or the board card. You follow it like in the
+terminal or as cards; when Claude asks for permission, the question appears
+here and as a notification, with *Allow* and *Deny*. On the right: what this
+session has cost so far, what it loaded, and what to do with the result (a
+summary into the job log, a line on the invoice draft, notes for the next
+session, or *continue in the terminal*). Sessions you start in your own
+terminal show up too, read-only:
+
+![Sessions: a running session on job WS-15 in plan mode, Claude asking for ExitPlanMode with Allow and Deny, the plan in terminal view, and on the right the billing of this session, the loaded plugins and actions for the result](docs/sessions.png)
+
+The **Board** collects tasks from a `TODO.md` per workspace and, if you use it,
+from Jira, as one Kanban with time and value from c2invoice on every card. Drag
+a card to change its status, start it in Claude with ▶, or turn a local task
+into a Jira issue; the time already booked moves along. Filters for sprint and
+backlog, grouping by epic, assignee, priority or workspace:
+
+![Board: tasks from TODO.md of two workspaces in the columns open, in progress, review and done but not billed, with job key, priority, hours and value per card and the button to start in Claude](docs/board.png)
+
+**Tools** lists what Claude Code loads per workspace: skills, agents,
+commands, plugins, mods and MCP servers, with usage and cost over 30 days and
+the context each one costs before your first prompt (*Measure context*). Switch
+a tool on or off per workspace (a backup is written before every change),
+install a skill from your skill store, and let Cira point out tools that cost
+context but are hardly used. The matrix shows where a tool is active and where
+it is inherited:
+
+![Tools, matrix view: tiles for skills, agents, commands, plugins, mods and MCPs, tool operation cost and context per session, and the matrix of tools against global and two workspaces](docs/tools.png)
+
+**Finances** (the Hub of earlier versions) is the overview of the money side.
+Revenue for the period up top, then
 *instruments* that answer "am I on track?" against a target — margin, active
 hours, burn rate, billing ratio, open items. Below them, *my metrics*: your
 own selection of figures and charts, added, reordered and resized as you like.
 In between, today's working time against the daily target, manual time by
 activity and the workload of the next seven days:
 
-![Hub: revenue for the period with comparison to the previous period, live burn rate, instruments for margin, active hours, burn rate, billing ratio and open items, the working-time row with today, manual time and workload, and my metrics](docs/hub.png)
+![Finances: revenue for the period with comparison to the previous period, live burn rate, instruments for margin, active hours, burn rate, billing ratio and open items, the working-time row with today, manual time and workload, and my metrics](docs/hub.png)
 
 Per job — Claude only or with manual time, the job's time model as a switch, a
 timeline from *recorded* to *paid*, a margin gauge against your target, the way
@@ -72,16 +115,19 @@ snapshot of how intensive the current session is, not an hourly cost:
 
 ![Live: burn rate gauge, token stream of the last 60 minutes, models of the current hour, the card You with running timer, working time today and the next blocker, and the running session with its overlap choice](docs/live.png)
 
-Where the tokens actually went — background tools, MCP servers and skills.
-Open a server to see its individual tools, drawn at the same scale as their
-parent. Every figure is a share of the same total, not cost on top of it; this
-view changes no billing figure:
+**Usage** shows tokens, cost and working time per project and model. Where the
+tokens of background tools, MCP servers and skills went now lives on the
+**Tools** page.
 
-![Analysis, Tools: background tools by share, requests per skill as ranked bars, MCP servers as areas proportional to their share](docs/tools.png)
+Light or dark: the interface follows your system by default, or you pick a
+**light theme** or the dark one under Settings → Appearance (per browser).
+Contrast was reworked for both; text meets WCAG AA contrast in either theme:
 
-*Screenshots use anonymised project, job and customer names and sample time
-entries, and show the German interface; switch to English under Settings →
-Appearance.*
+![Finances in the light theme](docs/hub-light.png)
+
+*Screenshots use anonymised project, job and customer names, sample time
+entries, sample workspaces and a sample session, and show the German
+interface; switch to English under Settings → Appearance.*
 
 ## Why this exists
 
@@ -135,6 +181,32 @@ npm test               # self-check of the calculation logic
 node ingest.js         # ingest only, no server
 npm run proxy          # only if you also meter local models via Ollama
 ```
+
+### Pair your browser
+
+c2invoice runs on `127.0.0.1` without a login. Since 3.0, **anything that
+changes data needs a paired device**; reading stays open, so dashboards and
+embeds keep working. The first time you save something, click *Pair device*:
+a code appears on your desktop (a dialog on Windows, the server console
+elsewhere), and you type it into the browser. Do this once per browser; paired
+devices are listed under Settings → Devices and can be removed there. Without
+this, any local process could pose as the browser and write.
+
+### Workspaces
+
+Sessions, Board and Tools work per **workspace**: the folders where you run
+Claude Code. List them under `arbeitsbereiche` in `config.json` (name, short
+code, colour and path; optionally the project name as it appears in the
+ledger, a Jira project key and the path of a `TODO.md`). Short code and colour
+can be changed under Settings → Workspaces; paths stay in the file on purpose.
+
+### Cira's tiers
+
+T0 works out of the box. For T1, run Ollama and set the local models under
+Settings → Cira. T2 (Claude) is off by default; switch it on there and set the
+monthly limit in euros. Sessions in your own terminal can report "waiting for
+you" and their end to c2invoice once you run `node integration/hook-eintragen.js`
+(it backs up `~/.claude/settings.json` and adds one hook; optional).
 
 ## Works with any issue tracker
 
@@ -485,6 +557,11 @@ without a console window. Both are optional; `npm start` is enough.
 
 ## Roadmap
 
+- Briefings and memory from an Obsidian vault, Cira reading aloud and listening
+- Flows: automations with trigger, condition and action, dunning, sending
+  documents, recurring invoices
+- Acceptance links for quotes, a shared mailbox per customer and job
+- A quarterly tax package for your accountant
 - Linear and Trello sync adapters
 - Partial billing of long-running jobs across month boundaries
 - ZUGFeRD: the e-invoice embedded in the PDF

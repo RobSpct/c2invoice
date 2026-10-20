@@ -7,14 +7,76 @@
    Keine Pro-Abschnitte (R16); nicht Gebautes erscheint nicht. */
 
 Object.assign(EN, {
+  'Ungültige Serverantwort': 'Invalid server response',
+  'Verbindung zum Server abgebrochen — ob das Modell vollständig geladen ist, zeigt „Liste aktualisieren“.': 'Connection to the server lost — "Refresh list" shows whether the model downloaded completely.',
+  'Laufzeit nicht erkannt': 'Runtime not detected',
+  'Modellordner nicht bestimmbar': 'Model folder cannot be determined',
+  'Fremdes Repo auf HuggingFace — nur laden, wenn du der Quelle traust.': 'Third-party repo on HuggingFace — only download if you trust the source.',
+  '— keins —': '— none —',
+  'nicht verfügbar': 'not available',
+  'Liste nicht geladen': 'List not loaded',
+  'Modellserver nicht erreichbar': 'Model server unreachable',
+  '{n} Modelle · {art}': '{n} models · {art}',
+  'Ordner und Laden': 'Folder and download',
+  'Lokale Modelle (T1)': 'Local models (T1)',
+  'Liste aktualisieren': 'Refresh list',
+  'Modell Schnell': 'Model Quick',
+  'Modell Text': 'Model Text',
+  'Modell Denken': 'Model Reasoning',
+  'Modell Code': 'Model Code',
+  'kurze Antworten aus den Zahlen · leer = nächstes eingestelltes Modell': 'short answers from the numbers · empty = next configured model',
+  'Entwürfe, Mails, Umformulieren': 'drafts, emails, rewording',
+  'Warum, Vergleich, Analyse · fängt ab, was die anderen abgeben': 'why, comparison, analysis · catches what the others hand off',
+  'Skripte, Regex, Fehlermeldungen': 'scripts, regex, error messages',
+  'Wörter Schnell': 'Words Quick',
+  'Wörter Text': 'Words Text',
+  'Wörter Denken': 'Words Reasoning',
+  'Wörter Code': 'Words Code',
+  'kommagetrennt, ergänzen die eingebauten Wörter': 'comma-separated, add to the built-in words',
+  'z. B. n8n, Kalkulation': 'e.g. n8n, costing',
+  'Eigene Wörter je Rolle und falsch zugeordnete Fragen': 'Own words per role and misrouted questions',
+  'Zuletzt als „falsch zugeordnet“ markiert:': 'Recently marked as \"misrouted\":',
+  'Noch nichts markiert.': 'Nothing marked yet.',
+  'Gegenwert, Modellordner, Modelle laden': 'Equivalent value, model folder, download models',
+  'Der Modellserver läuft nicht auf diesem Rechner — den Ordner legt dort sein Betreiber fest.': 'The model server does not run on this computer — its operator sets the folder there.',
+  'Den Modellordner verwaltet dein Modellserver selbst (nicht Ollama) — dort in den Einstellungen ändern.': 'Your model server (not Ollama) manages its model folder — change it in its settings.',
+  'Systemlaufwerk': 'System drive',
+  'Modellordner ändern': 'Change model folder',
+  'OLLAMA_MODELS für deinen Benutzer auf {p} setzen? Frei: {f}.': 'Set OLLAMA_MODELS for your user to {p}? Free: {f}.',
+  'Das ist das Systemlaufwerk.': 'This is the system drive.',
+  'Gilt nach einem Neustart von Ollama; vorhandene Modelle bleiben im alten Ordner.': 'Takes effect after restarting Ollama; existing models stay in the old folder.',
+  'Ja, setzen': 'Yes, set',
+  'Neuer Modellordner': 'New model folder',
+  'Prüfen': 'Check',
+  'Modellordner': 'Model folder',
+  'Quelle: {q} · frei {f}': 'Source: {q} · free {f}',
+  'Standard von Ollama': 'Ollama default',
+  'Ändern': 'Change',
+  'Modelle laden geht hier nur mit Ollama — LM Studio und andere laden in ihrer eigenen Oberfläche.': 'Downloading models works here only with Ollama — LM Studio and others download in their own app.',
+  'Modelle laden: erst den Modellserver starten.': 'Download models: start the model server first.',
+  'Modell laden': 'Download model',
+  '{n} herunterladen nach {p}? Frei: {f}. Modelle brauchen oft mehrere GB.': 'Download {n} to {p}? Free: {f}. Models often need several GB.',
+  'den Ordner des Modellservers': 'the folder of the model server',
+  'Das ist das Systemlaufwerk — Ordner vorher ändern?': 'This is the system drive — change the folder first?',
+  'Ja, laden': 'Yes, download',
+  'Name aus der Ollama-Bibliothek oder hf.co/nutzer/repo:Q4_K_M': 'Name from the Ollama library or hf.co/user/repo:Q4_K_M',
+  'Modellname': 'Model name',
+  'Laden': 'Download',
+  'Modellserver': 'Model server',
+  'nicht eingerichtet (lokaleModelle in config.json)': 'not set up (lokaleModelle in config.json)',
+  '{n} Modelle': '{n} models',
+  'startet …': 'starting …',
+  '{n} geladen': '{n} downloaded',
+  'Gesetzt': 'Set',
+  'Gilt nach einem Neustart von Ollama. Vorhandene Modelle bleiben im alten Ordner.': 'Takes effect after restarting Ollama. Existing models stay in the old folder.',
   'Einstellung suchen …': 'Search settings …', 'Treffer': 'Results', 'Nichts gefunden.': 'Nothing found.',
   'Allgemein': 'General', 'Zeitmodell und Ziel': 'Time model and target', 'Abrechnung': 'Billing',
   'Sätze & Kosten': 'Rates & costs', 'gelten, wenn Projekt oder Kunde nichts Eigenes haben': 'apply when project or customer have nothing of their own',
   'Stundensätze je Projekt': 'Hourly rates per project', 'Satz, Rabatt und Zeitmodell · auch in der Kontakt-Akte': 'Rate, discount and time model · also in the contact record',
   'Positionsvorlagen': 'Item templates', 'füllen eine Position im Beleg-Editor vor': 'prefill an item in the document editor',
   'Belege': 'Documents', 'Stammdaten': 'Master data', 'stehen auf jedem Beleg · Name und Anschrift sind Pflicht': 'appear on every document · name and address are required',
-  'System': 'System', 'Darstellung': 'Appearance', 'Sprache und Bewegung': 'Language and motion',
-  'Termine aus Google, Outlook, Apple · nur lesen': 'Events from Google, Outlook, Apple · read-only',
+  'System': 'System', 'Darstellung': 'Appearance', 'Sprache, Theme und Bewegung': 'Language, theme and motion', 'Theme': 'Theme', 'Dunkel': 'Dark', 'Hell': 'Light', 'hell, dunkel oder wie das Betriebssystem': 'light, dark or as set by the operating system',
+  'Termine aus Google, Outlook, Apple · nur lesen': 'Events from Google, Outlook, Apple · read-only', 'Kalender': 'Calendar',
   'Lokale Modelle': 'Local models', 'Gegenwert für Modelle ohne API-Preis': 'Equivalent value for models without an API price',
   'Daten & Export': 'Data & export', 'Export, Abgleich und Speicherort': 'Export, sync and storage location',
   'Änderungen speichern sofort': 'Changes save immediately',
@@ -57,11 +119,41 @@ Object.assign(EN, {
   '+ Tätigkeit': '+ Activity', 'Leer = Projektsatz inkl. Rabatt. Begleiten zählt als Fokusarbeit.': 'Empty = project rate incl. discount. Accompanying counts as focus work.',
   'Tätigkeit entfernt': 'Activity removed', 'Tätigkeit nicht entfernt': 'Activity not removed',
   'Rundung manueller Zeit in Minuten': 'Rounding of manual time in minutes',
+  'Startseite': 'Start page', 'öffnet ohne Adresse eines Bereichs': 'opens when the address names no area',
+  'Token-Limit je 5-h-Fenster': 'Token limit per 5-h window',
+  'Cira-Karte: Tokens, die du je 5-h-Fenster von Claude erwartest · deine Schätzung · 0 blendet aus':
+    'Cira card: tokens you expect per 5-h Claude window · your estimate · 0 hides it',
+  'Arbeitsbereiche': 'Workspaces', 'Ordner für Sitzungen, Board und Werkzeuge · Pfade nur in config.json': 'Folders for sessions, board and tools · paths only in config.json',
+  'Arbeitsbereiche nicht geladen': 'Workspaces not loaded', 'Kürzel': 'Short', 'Farbe': 'Colour', 'Projekt': 'Project', 'Jira': 'Jira', 'Ordner': 'Folder',
+  'kein Projekt': 'no project', 'Vault': 'Vault', 'Global': 'Global', 'Chat': 'Chat', 'erreichbar': 'reachable', 'nicht erreichbar': 'not reachable',
+  'Ordner nur in config.json änderbar': 'Folder can only be changed in config.json',
+  'Ordner, Art und neue Arbeitsbereiche nur in config.json — ein Ordner bestimmt, wo Claude Code arbeitet und schreibt.':
+    'Folder, type and new workspaces only in config.json — a folder decides where Claude Code works and writes.',
+  'Noch keine Arbeitsbereiche eingetragen, Sitzungen lassen sich deshalb nicht starten. Unten steht nur ein Vorschlag aus deinen Daten: zum Übernehmen in config.json unter "arbeitsbereiche" einfügen, Pfade prüfen, Server neu starten.':
+    'No workspaces set up yet, so sessions cannot start. Below is only a suggestion from your data: to use it, paste it under "arbeitsbereiche" in config.json, check the paths, restart the server.',
+  'Geräte': 'Devices', 'Gekoppelte Browser und Programme · nur sie dürfen schreiben': 'Paired browsers and programs · only they may write',
+  'Schreiben (Freigaben, Sitzungen, Rechnungen, Einstellungen) geht nur von gekoppelten Geräten. Lesen bleibt frei, auch für Obsidian und Jarvis.': 'Writing (approvals, sessions, invoices, settings) only works from paired devices. Reading stays open, also for Obsidian and Jarvis.',
+  'Dieses Gerät koppeln': 'Pair this device', 'Gerät': 'Device', 'Art': 'Type', 'Gekoppelt': 'Paired', 'Aktion': 'Action',
+  'dieses Gerät': 'this device', 'Programm': 'Program', 'Browser': 'Browser', 'Entfernen': 'Remove', 'Noch kein Gerät gekoppelt.': 'No device paired yet.',
+  'Geräte nicht geladen': 'Devices not loaded', 'Gerät entfernt': 'Device removed', 'Entfernen fehlgeschlagen': 'Removal failed',
+  'Dieses Gerät entfernen? Danach kann dieser Browser erst nach erneutem Koppeln wieder schreiben.': 'Remove this device? This browser can only write again after pairing again.',
+  // Cira (C2)
+  'Assistent': 'Assistant', 'Antwortstufen, Claude-Limit, Nicht stören': 'Answer tiers, Claude limit, quiet hours',
+  'Anrede': 'Form of address', 'wie Cira dich anspricht · leer = ohne Namen': 'how Cira addresses you · empty = no name',
+  'Lokales Modell (T1)': 'Local model (T1)',
+  'Name im Modellserver, z. B. llama3.2:3b · leer = Cira antwortet nur direkt oder über Claude': 'name in the model server, e.g. llama3.2:3b · empty = Cira answers directly or via Claude only',
+  'Claude erlaubt (T2)': 'Claude allowed (T2)',
+  'für Texte und Fragen, die die Zahlen allein nicht beantworten · läuft als Werkzeugbetrieb, nicht auf Kundenvorgänge': 'for texts and questions the numbers alone do not answer · booked as tool overhead, never onto customer jobs',
+  'Claude-Modell': 'Claude model', 'Standard = was die Claude-CLI eingestellt hat': 'Default = whatever the Claude CLI is set to', 'Standard': 'Default',
+  'Monatslimit Claude': 'Monthly Claude limit', '0,50 bis 500 EUR · dieser Monat bisher': '0.50 to 500 EUR · this month so far',
+  'Nicht stören': 'Do not disturb', 'Nicht stören ab': 'Do not disturb from', 'Nicht stören bis': 'Do not disturb until',
+  'in diesem Fenster ist der Orb gedimmt · beide leer = aus': 'the orb is dimmed during this window · both empty = off',
+  'Bewegung reduzieren und Startseite: Darstellung. Pfad zur claude.exe nur in config.json.': 'Reduce motion and start page: Appearance. Path to claude.exe only in config.json.',
 });
 
 // Felder je Abschnitt; Grenzen und Label kommen vom Server.
 const E_ABSCHNITTE = [
-  { id: 'allgemein', l: 'Allgemein', g: '', sub: 'Zeitmodell und Ziel', felder: ['zeitmodell', 'tagessollStunden', 'zielmargeProzent'] },
+  { id: 'allgemein', l: 'Allgemein', g: '', sub: 'Zeitmodell und Ziel', felder: ['zeitmodell', 'tagessollStunden', 'zielmargeProzent', 'limit5hTokens'] },
   { id: 'saetze', l: 'Sätze & Kosten', g: 'Abrechnung', sub: 'gelten, wenn Projekt oder Kunde nichts Eigenes haben',
     felder: ['stundensatz', 'selbstkostenStunde', 'aboPreisMonat', 'usdToEur', 'gapMinutes', 'vergleichsFaktor'] },
   { id: 'projekte', l: 'Stundensätze je Projekt', g: '', sub: 'Satz, Rabatt, Zeitmodell und Rundung · auch in der Kontakt-Akte', kw: 'satz rabatt zeitmodell rundung projekt rate discount rounding' },
@@ -69,10 +161,16 @@ const E_ABSCHNITTE = [
   { id: 'taet', l: 'Tätigkeitsarten & Rundung', g: '', sub: 'für manuelle Zeit · eigener Satz optional', kw: 'tätigkeit meeting konzept review rundung activity rounding' },
   { id: 'vorlagen', l: 'Positionsvorlagen', g: '', sub: 'füllen eine Position im Beleg-Editor vor', kw: 'vorlage position template' },
   { id: 'stammdaten', l: 'Stammdaten', g: 'Belege', sub: 'stehen auf jedem Beleg · Name und Anschrift sind Pflicht', stamm: true },
-  { id: 'darstellung', l: 'Darstellung', g: 'System', sub: 'Sprache und Bewegung', kw: 'sprache englisch deutsch bewegung animation language motion' },
+  // Cira (C2): Stufen T1/T2, Claude-Limit, Nicht stoeren. claude.exe nur in config.json.
+  { id: 'cira', l: 'Cira', g: 'Assistent', sub: 'Antwortstufen, Claude-Limit, Nicht stören', kw: 'cira assistent ollama claude limit modell anrede nicht stören assistant model quiet' },
+  { id: 'darstellung', l: 'Darstellung', g: 'System', sub: 'Sprache, Theme und Bewegung', kw: 'sprache englisch deutsch bewegung animation language motion theme hell dunkel light dark' },
+  // Geraetekopplung (S1): nur gekoppelte Geraete schreiben.
+  { id: 'geraete', l: 'Geräte', g: '', sub: 'Gekoppelte Browser und Programme · nur sie dürfen schreiben', kw: 'gerät geräte koppeln kopplung sicherheit browser device pairing security' },
+  // Masterplan 3.0: Ordner fuer Sitzungen, Board, Werkzeuge. Pfade nur in config.json (Ruling R-Pfade).
+  { id: 'arbeitsbereiche', l: 'Arbeitsbereiche', g: '', sub: 'Ordner für Sitzungen, Board und Werkzeuge · Pfade nur in config.json', kw: 'arbeitsbereich ordner kürzel farbe projekt jira workspace folder' },
   // Dieselbe Ansicht wie der Kalender-Dialog der Zeiterfassung (zeit.js, zKalZeichnen).
   { id: 'kalender', l: 'Kalender', g: '', sub: 'Termine aus Google, Outlook, Apple · nur lesen', kw: 'kalender ics caldav google outlook apple nextcloud termine abo calendar events' },
-  { id: 'lokal', l: 'Lokale Modelle', g: '', sub: 'Gegenwert für Modelle ohne API-Preis', felder: ['lokalEurProMioTokens', 'lokalSelbstkostenStunde', 'lokalZuordnungsfenster'] },
+  { id: 'lokal', l: 'Lokale Modelle', g: '', sub: 'Gegenwert, Modellordner, Modelle laden', kw: 'ollama modell laden download ordner speicherort ollama_models festplatte model folder pull', felder: ['lokalEurProMioTokens', 'lokalSelbstkostenStunde', 'lokalZuordnungsfenster'] },
   { id: 'daten', l: 'Daten & Export', g: '', sub: 'Export, Abgleich und Speicherort', kw: 'csv export jira datenbank database' },
 ];
 const E_HINWEIS = {
@@ -83,11 +181,12 @@ const E_HINWEIS = {
   email: 'Kontaktstelle für die E-Rechnung', land: 'zweistelliges Kürzel, z. B. DE', kleinunternehmer: 'Belege ohne Umsatzsteuer, mit Hinweis',
   zahlungszielTage: 'für neue Rechnungen · gestellte behalten ihr Fälligkeitsdatum',
   tagessollStunden: 'Grundlage für Arbeitszeit heute und Workload',
+  limit5hTokens: 'Cira-Karte: Tokens, die du je 5-h-Fenster von Claude erwartest · deine Schätzung · 0 blendet aus',
 };
 const E_EINHEIT = {
   stundensatz: 'EUR/h', selbstkostenStunde: 'EUR/h', zielmargeProzent: '%', aboPreisMonat: 'EUR', gapMinutes: 'Min', vergleichsFaktor: '×',
   lokalEurProMioTokens: 'EUR', lokalSelbstkostenStunde: 'EUR/h', lokalZuordnungsfenster: 'Min', ustSatz: '%', zahlungszielTage: 'Tage',
-  tagessollStunden: 'h',
+  tagessollStunden: 'h', limit5hTokens: 'Tokens',
 };
 
 const ez = {
@@ -97,6 +196,11 @@ const ez = {
   vNeu: [],                                       // tmp-Ids neuer Vorlagen
   t: { d: null, fehler: null, laedt: false },     // /api/taetigkeitsarten
   tNeu: [],                                       // tmp-Ids neuer Taetigkeiten
+  ab: { d: null, fehler: null, laedt: false },    // /api/arbeitsbereiche
+  cira: { d: null, fehler: null, laedt: false },  // /api/cira/einstellungen
+  mod: { d: null, fehler: null, laedt: false },   // /api/modelle (Liste, Laufzeit, Ordner)
+  falsch: { d: null, fehler: null, laedt: false }, // /api/cira/falsch
+  mv: { ordner: null, ordnerFrage: null, ladeFrage: null, fort: null }, // Ordner aendern / Modell laden
   q: '',
   hl: null,                                       // hervorgehobenes Feld nach einem Suchtreffer
   csv: null,                                      // { von, bis } fuer den Export
@@ -511,11 +615,33 @@ function darstellungHtml() {
   const reduziert = document.documentElement.dataset.motion === 'off';
   return '<div class="einst-feld"><span class="l">' + esc(uebersetze('Sprache')) + '<small>' + esc(uebersetze('Oberfläche; Belege bleiben deutsch')) + '</small></span>' +
       '<div class="w"><div class="zeile">' + segment('e-sprache', [['de', 'Deutsch'], ['en', 'Englisch']], SPRACHE, 'Sprache') + '</div></div></div>' +
+    '<div class="einst-feld"><span class="l">' + esc(uebersetze('Theme')) + '<small>' + esc(uebersetze('hell, dunkel oder wie das Betriebssystem')) + '</small></span>' +
+      '<div class="w"><div class="zeile">' + segment('e-theme', [['system', 'System'], ['dunkel', 'Dunkel'], ['hell', 'Hell']], themeWahl(), 'Theme') + '</div></div></div>' +
     '<div class="einst-feld"><span class="l">' + esc(uebersetze('Bewegung reduzieren')) + '<small>' + esc(uebersetze('keine Einblendungen und Zähl-Animationen')) + '</small></span>' +
       '<div class="w"><div class="zeile"><button type="button" class="kippschalter" role="switch" data-aktion="e-bewegung" aria-checked="' + reduziert + '" aria-label="' + esc(uebersetze('Bewegung reduzieren')) + '">' +
-        '<span class="spur"></span>' + esc(uebersetze(reduziert ? 'an' : 'aus')) + '</button></div></div></div>';
+        '<span class="spur"></span>' + esc(uebersetze(reduziert ? 'an' : 'aus')) + '</button></div></div></div>' +
+    // Startseite (Handoff §4.3): gilt, wenn die Adresse keinen Bereich nennt. Je Browser.
+    '<div class="einst-feld"><span class="l">' + esc(uebersetze('Startseite')) + '<small>' + esc(uebersetze('öffnet ohne Adresse eines Bereichs')) + '</small></span>' +
+      '<div class="w"><div class="zeile">' + segment('e-start', STARTSEITEN.map((k) => [k, seitenName(seiteVon(k))]), lies('start', START_STANDARD), 'Startseite') + '</div></div></div>';
 }
+const STARTSEITEN = ['cockpit', 'sitzungen', 'werkzeuge', 'board', 'hub'];
+aktion('e-start', (k) => {
+  if (!STARTSEITEN.includes(k)) return;
+  merke('start', k);
+  zeichneAnsicht();
+  const el = document.querySelector('[data-aktion="e-start"][data-wert="' + k + '"]');
+  if (el) el.focus();
+});
 aktion('e-sprache', (s) => setzeSprache(s));
+aktion('e-theme', (w) => {
+  if (!THEMES.includes(w)) return;
+  // Ohne Browser-Speicher wenigstens fuer diese Sitzung.
+  themeSitzung = merke('theme', w) ? null : w;
+  setzeTheme();
+  zeichneAnsicht();
+  const el = document.querySelector('[data-aktion="e-theme"][data-wert="' + w + '"]');
+  if (el) el.focus();
+});
 aktion('e-bewegung', () => {
   const neu = document.documentElement.dataset.motion === 'off' ? 'on' : 'off';
   merke('motion', neu);
@@ -523,6 +649,309 @@ aktion('e-bewegung', () => {
   zeichneAnsicht();
   const k = document.querySelector('[data-aktion="e-bewegung"]');
   if (k) k.focus();
+});
+
+/* ---------- Arbeitsbereiche ----------
+   Kuerzel, Farbe, Projekt und Jira-Projekt speichern beim Verlassen des Felds.
+   Ordner, Art und neue Bereiche stehen nur in config.json: ein Pfad bestimmt,
+   wo ein gestarteter Prozess arbeitet und schreibt (Ruling R-Pfade). */
+const AB_ART = { projekt: 'Projekt', vault: 'Vault', global: 'Global', neutral: 'Chat' };
+const ladeArbeitsbereiche = () => eLade(ez.ab, '/api/arbeitsbereiche', (d) => (d && Array.isArray(d.arbeitsbereiche) ? d : null));
+function arbeitsbereicheHtml() {
+  if (!ez.ab.d) {
+    ladeArbeitsbereiche();
+    return ez.ab.fehler ? leer('liste', 'Arbeitsbereiche nicht geladen', ez.ab.fehler, '<button type="button" class="knopf klein" data-aktion="e-neu">' + esc(uebersetze('Erneut versuchen')) + '</button>')
+      : '<div class="leer">' + esc(uebersetze('Lädt …')) + '</div>';
+  }
+  const { arbeitsbereiche: L, vorschlag } = ez.ab.d;
+  if (!L.length) {
+    return '<p class="dim">' + esc(uebersetze('Noch keine Arbeitsbereiche eingetragen, Sitzungen lassen sich deshalb nicht starten. Unten steht nur ein Vorschlag aus deinen Daten: zum Übernehmen in config.json unter "arbeitsbereiche" einfügen, Pfade prüfen, Server neu starten.')) + '</p>' +
+      '<pre class="ab-vorschlag mono" tabindex="0">' + esc('"arbeitsbereiche": ' + JSON.stringify(vorschlag || [], null, 2)) + '</pre>';
+  }
+  const feld = (a, f, extra, label) => {
+    const key = 'ab:' + a.name;
+    const wert = kz.entwurf[key + ':' + f] != null ? kz.entwurf[key + ':' + f] : (a[f] || '');
+    return '<input class="eingabe" data-ab="' + esc(a.name) + '" data-abfeld="' + f + '" value="' + esc(wert) + '" aria-label="' + esc(uebersetze(label) + ' · ' + a.name) + '"' +
+      ' aria-describedby="m-' + esc(key) + '"' + (kz.fehler[key] ? ' aria-invalid="true"' : '') + extra + '>';
+  };
+  return '<div class="ab-tabelle"><div class="ab-kopf"><span>' + esc(uebersetze('Name')) + '</span><span>' + esc(uebersetze('Kürzel')) + '</span><span>' + esc(uebersetze('Farbe')) + '</span>' +
+      '<span>' + esc(uebersetze('Projekt')) + '</span><span>' + esc(uebersetze('Jira')) + '</span><span>' + esc(uebersetze('Ordner')) + '</span></div>' +
+    L.map((a) => '<div class="ab-zeile">' +
+      '<span class="ab-name"><span class="ab-pille" style="color:' + esc(a.farbe || 'var(--text-dim)') + ';border-color:' + esc(a.farbe || 'var(--line)') + '">' + esc(a.kuerzel || '–') + '</span>' +
+        '<span><b>' + esc(a.name) + '</b><small>' + esc(uebersetze(AB_ART[a.art] || a.art)) + '</small></span></span>' +
+      feld(a, 'kuerzel', ' maxlength="3"', 'Kürzel') +
+      feld(a, 'farbe', ' type="color"', 'Farbe').replace('class="eingabe"', 'class="ab-farbe"') +
+      feld(a, 'projekt', ' maxlength="80" placeholder="' + esc(uebersetze('kein Projekt')) + '"', 'Projekt') +
+      feld(a, 'jiraProjekt', ' maxlength="10" placeholder="–"', 'Jira') +
+      '<span class="ab-pfad mono" title="' + esc(uebersetze('Ordner nur in config.json änderbar')) + '"><span class="punkt' + (a.erreichbar ? '' : ' fehler') + '" aria-hidden="true"></span>' +
+        '<span class="t">' + esc(a.pfad || '–') + '</span><span class="nur-sr">' + esc(uebersetze(a.erreichbar ? 'erreichbar' : 'nicht erreichbar')) + '</span></span>' +
+      feldMeldung('ab:' + a.name) + '</div>').join('') +
+    '<p class="faint ab-fuss">' + esc(uebersetze('Ordner, Art und neue Arbeitsbereiche nur in config.json — ein Ordner bestimmt, wo Claude Code arbeitet und schreibt.')) + '</p></div>';
+}
+async function speichereArbeitsbereich(name, feld, wert) {
+  const key = 'ab:' + name;
+  const a = ez.ab.d && ez.ab.d.arbeitsbereiche.find((x) => x.name === name);
+  if (!a || (a[feld] || '') === wert) { delete kz.entwurf[key + ':' + feld]; return; }
+  try {
+    const r = await sende('/api/arbeitsbereich', { name, [feld]: wert });
+    Object.assign(a, r.arbeitsbereich);
+    if (kz.entwurf[key + ':' + feld] === wert) delete kz.entwurf[key + ':' + feld];
+    delete kz.fehler[key];
+    kz.ok[key] = Date.now();
+    blendeOkAus(key, () => zeigeMeldung('m-' + key, key));
+  } catch (err) {
+    kz.fehler[key] = err.message;
+    delete kz.ok[key];
+  }
+  zeigeMeldung('m-' + key, key);
+  for (const i of document.querySelectorAll('[data-abfeld]')) {
+    if (i.dataset.ab !== name) continue;
+    if (kz.fehler[key]) i.setAttribute('aria-invalid', 'true'); else i.removeAttribute('aria-invalid');
+  }
+  if (!kz.fehler[key]) zeichneAnsicht();
+}
+
+/* ---------- Cira ----------
+   Speichert beim Verlassen des Felds; Grenzen prueft der Server (CIRA_FELDER).
+   Der Pfad zur claude.exe bleibt der Datei vorbehalten. */
+const ladeCiraEinst = () => eLade(ez.cira, '/api/cira/einstellungen', (d) => (d && d.cira ? d : null));
+function ciraHtml() {
+  if (!ez.cira.d) {
+    ladeCiraEinst();
+    return ez.cira.fehler ? leer('liste', 'Einstellungen nicht geladen', ez.cira.fehler, '<button type="button" class="knopf klein" data-aktion="e-neu">' + esc(uebersetze('Erneut versuchen')) + '</button>')
+      : '<div class="leer">' + esc(uebersetze('Lädt …')) + '</div>';
+  }
+  const c = ez.cira.d.cira;
+  const zeile = (titel, unter, rechts, key) => '<div class="einst-feld"><span class="l">' + esc(uebersetze(titel)) + '<small>' + unter + '</small></span>' +
+    '<div class="w"><div class="zeile">' + rechts + '</div>' + (key ? feldMeldung(key) : '') + '</div></div>';
+  const feld = (f, extra, label) => {
+    const key = 'cira:' + f;
+    const wert = kz.entwurf[key] != null ? kz.entwurf[key] : (c[f] == null ? '' : c[f]);
+    return '<input class="eingabe" data-cirafeld="' + f + '" value="' + esc(wert) + '" aria-label="' + esc(uebersetze(label)) + '" aria-describedby="m-' + key + '"' +
+      (kz.fehler[key] ? ' aria-invalid="true"' : '') + extra + '>';
+  };
+  const verbraucht = Number(ez.cira.d.verbraucht_eur) || 0;
+  // Modell je Rolle: nur aus der Liste des Modellservers. Ein gespeichertes Modell,
+  // das der Server gerade nicht nennt, bleibt sichtbar statt still zu verschwinden.
+  if (!ez.mod.d) ladeModelle();
+  const M = ez.mod.d;
+  const modellWahl = (f, label) => {
+    const wert = c[f] || '';
+    const ids = M && M.modelle ? M.modelle : [];
+    const opt = (id, text) => '<option value="' + esc(id) + '"' + (id === wert ? ' selected' : '') + '>' + esc(text) + '</option>';
+    return '<select class="eingabe" data-cirafeld="' + f + '" aria-label="' + esc(uebersetze(label)) + '" aria-describedby="m-cira:' + f + '"' + (kz.fehler['cira:' + f] ? ' aria-invalid="true"' : '') + '>' +
+      opt('', uebersetze('— keins —')) + ids.map((m) => opt(m.id, m.id + (m.groesse_gb ? ' · ' + nf1.format(m.groesse_gb) + ' GB' : ''))).join('') +
+      (wert && !ids.some((m) => m.id === wert) ? opt(wert, wert + ' · ' + uebersetze('nicht verfügbar')) : '') + '</select>';
+  };
+  const ROLLE_UNTER = {
+    modellLokal: 'kurze Antworten aus den Zahlen · leer = nächstes eingestelltes Modell',
+    modellText: 'Entwürfe, Mails, Umformulieren',
+    modellDenken: 'Warum, Vergleich, Analyse · fängt ab, was die anderen abgeben',
+    modellCode: 'Skripte, Regex, Fehlermeldungen',
+  };
+  const ROLLE_TITEL = { modellLokal: 'Modell Schnell', modellText: 'Modell Text', modellDenken: 'Modell Denken', modellCode: 'Modell Code' };
+  const status = ez.mod.fehler ? uebersetze('Liste nicht geladen') + ': ' + ez.mod.fehler
+    : !M ? uebersetze('Lädt …') : !M.erreichbar ? (M.fehler || uebersetze('Modellserver nicht erreichbar'))
+      : fuelle('{n} Modelle · {art}', { n: M.modelle.length, art: LAUFZEIT[M.laufzeit] || M.laufzeit });
+  const modellBlock = zeile('Lokale Modelle (T1)', esc(status) + ' · <a href="#/einstellungen/lokal">' + esc(uebersetze('Ordner und Laden')) + '</a>',
+      '<button type="button" class="knopf klein" data-aktion="e-modelle-neu">' + esc(uebersetze('Liste aktualisieren')) + '</button>') +
+    Object.keys(ROLLE_TITEL).map((f) => zeile(ROLLE_TITEL[f], esc(uebersetze(ROLLE_UNTER[f])), modellWahl(f, ROLLE_TITEL[f]), 'cira:' + f)).join('');
+  // Eigene Woerter und Fehlzuordnungen: aufklappbar, sie braucht man selten.
+  if (!ez.falsch.d) eLade(ez.falsch, '/api/cira/falsch', (d) => (d && Array.isArray(d.falsch) ? d.falsch : null));
+  const WT = { woerterSchnell: 'Wörter Schnell', woerterText: 'Wörter Text', woerterDenken: 'Wörter Denken', woerterCode: 'Wörter Code' };
+  const falschListe = (ez.falsch.d || []).map((x) => '<li><span>' + esc(x.frage || '–') + '</span><small class="faint">' + esc(uebersetze(CIRA_ROLLE[x.rolle] || x.rolle)) + ' · ' + esc(x.grund) + '</small></li>').join('');
+  const woerterBlock = '<details class="e-woerter"><summary>' + esc(uebersetze('Eigene Wörter je Rolle und falsch zugeordnete Fragen')) + '</summary>' +
+    Object.keys(WT).map((f) => zeile(WT[f], esc(uebersetze('kommagetrennt, ergänzen die eingebauten Wörter')), feld(f, ' maxlength="300" placeholder="' + esc(uebersetze('z. B. n8n, Kalkulation')) + '" spellcheck="false"', WT[f]), 'cira:' + f)).join('') +
+    '<p class="faint">' + esc(uebersetze('Zuletzt als „falsch zugeordnet“ markiert:')) + '</p>' + (falschListe ? '<ul class="e-falsch">' + falschListe + '</ul>' : '<p class="dim">' + esc(uebersetze('Noch nichts markiert.')) + '</p>') + '</details>';
+  return zeile('Anrede', esc(uebersetze('wie Cira dich anspricht · leer = ohne Namen')), feld('anrede', ' maxlength="40"', 'Anrede'), 'cira:anrede') +
+    modellBlock + woerterBlock +
+    zeile('Claude erlaubt (T2)', esc(uebersetze('für Texte und Fragen, die die Zahlen allein nicht beantworten · läuft als Werkzeugbetrieb, nicht auf Kundenvorgänge')),
+      '<button type="button" class="kippschalter" role="switch" data-aktion="e-cira-claude" aria-checked="' + (c.claudeErlaubt === true) + '" aria-label="' + esc(uebersetze('Claude erlaubt (T2)')) + '">' +
+        '<span class="spur"></span>' + esc(uebersetze(c.claudeErlaubt === true ? 'an' : 'aus')) + '</button>', 'cira:claudeErlaubt') +
+    zeile('Claude-Modell', esc(uebersetze('Standard = was die Claude-CLI eingestellt hat')),
+      segment('e-cira-modell', [['', 'Standard'], ['haiku', 'Haiku'], ['sonnet', 'Sonnet'], ['opus', 'Opus']], c.claudeModell || '', 'Claude-Modell'), 'cira:claudeModell') +
+    zeile('Monatslimit Claude', esc(uebersetze('0,50 bis 500 EUR · dieser Monat bisher') + ' ' + eur(verbraucht)),
+      feld('claudeMonatslimitEur', ' inputmode="decimal" style="max-width:120px"', 'Monatslimit Claude') + '<span class="faint">EUR</span>', 'cira:claudeMonatslimitEur') +
+    zeile('Nicht stören', esc(uebersetze('in diesem Fenster ist der Orb gedimmt · beide leer = aus')),
+      feld('nichtStoerenAb', ' type="time"', 'Nicht stören ab') + '<span class="faint">–</span>' + feld('nichtStoerenBis', ' type="time"', 'Nicht stören bis'), 'cira:nichtStoerenAb') +
+    zeile('Desktop-Benachrichtigung', esc(uebersetze('zusätzlich zur Karte in der Seite, wenn der Tab im Hintergrund liegt · nicht im Nicht-stören-Fenster')),
+      '<button type="button" class="kippschalter" role="switch" data-aktion="e-cira-desktop" aria-checked="' + (c.benachrichtigungDesktop === true) + '" aria-label="' + esc(uebersetze('Desktop-Benachrichtigung')) + '">' +
+        '<span class="spur"></span>' + esc(uebersetze(c.benachrichtigungDesktop === true ? 'an' : 'aus')) + '</button>', 'cira:benachrichtigungDesktop') +
+    zeile('Orb-Stil', esc(uebersetze('Bühne im Cockpit · Partikel oder ruhige Fläche')),
+      segment('e-cira-orb', [['partikel', 'Partikel'], ['flaeche', 'Ruhige Fläche']], c.orbStil || 'partikel', 'Orb-Stil'), 'cira:orbStil') +
+    '<p class="faint ab-fuss">' + esc(uebersetze('Bewegung reduzieren und Startseite: Darstellung. Pfad zur claude.exe nur in config.json.')) + '</p>';
+}
+async function speichereCira(feld, wert) {
+  const key = 'cira:' + feld;
+  const c = ez.cira.d && ez.cira.d.cira;
+  if (!c || String(c[feld] == null ? '' : c[feld]) === String(wert)) { delete kz.entwurf[key]; return; }
+  // Ab und bis teilen sich eine Meldung.
+  const mkey = feld === 'nichtStoerenBis' ? 'cira:nichtStoerenAb' : key;
+  try {
+    const r = await sende('/api/cira/einstellungen', { [feld]: wert });
+    ez.cira.d.cira = r.cira;
+    if (kz.entwurf[key] === wert) delete kz.entwurf[key];
+    delete kz.fehler[mkey];
+    kz.ok[mkey] = Date.now();
+    blendeOkAus(mkey, () => zeigeMeldung('m-' + mkey, mkey));
+    if (typeof ladeCira === 'function') ladeCira();
+  } catch (err) {
+    kz.fehler[mkey] = err.message;
+    delete kz.ok[mkey];
+  }
+  zeigeMeldung('m-' + mkey, mkey);
+  for (const i of document.querySelectorAll('[data-cirafeld="' + feld + '"]')) {
+    if (kz.fehler[mkey]) i.setAttribute('aria-invalid', 'true'); else i.removeAttribute('aria-invalid');
+  }
+  if (!kz.fehler[mkey]) zeichneAnsicht();
+}
+/* ---------- Lokale Modelle: Liste, Ordner, Laden (Modell-Block) ----------
+   Den Ordner bestimmt Ollama (OLLAMA_MODELS) fuer alle Modelle zusammen; ein
+   Ziel je Download gibt es nicht. Aendern und Laden fragen vorher nach. */
+const LAUFZEIT = { ollama: 'Ollama', lmstudio: 'LM Studio', llamacpp: 'llama.cpp', lemonade: 'Lemonade', openai: 'OpenAI-kompatibel', unbekannt: 'Laufzeit nicht erkannt' };
+const ladeModelle = () => eLade(ez.mod, '/api/modelle', (d) => (d && Array.isArray(d.modelle) ? d : null));
+aktion('e-modelle-neu', () => { ez.mod.d = null; ez.mod.fehler = null; ez.falsch.d = null; ez.falsch.fehler = null; ladeModelle(); zeichneAnsicht(); });
+const gbText = (v) => (v == null ? '–' : nf1.format(v) + ' GB');
+function ordnerZeile(o) {
+  if (!o) return '';
+  if (!o.lokal) return '<p class="dim">' + esc(uebersetze('Der Modellserver läuft nicht auf diesem Rechner — den Ordner legt dort sein Betreiber fest.')) + '</p>';
+  if (o.fremd) return '<p class="dim">' + esc(uebersetze('Den Modellordner verwaltet dein Modellserver selbst (nicht Ollama) — dort in den Einstellungen ändern.')) + '</p>';
+  if (o.pfad == null) return '<p class="dim">' + esc(uebersetze('Modellordner nicht bestimmbar') + ': ' + (o.fehler || '')) + '</p>';
+  const warn = o.systemlaufwerk ? ' <span class="pille warn">' + esc(uebersetze('Systemlaufwerk')) + '</span>' : '';
+  const mv = ez.mv;
+  let unten = '';
+  if (mv.ordnerFrage) {
+    const z = mv.ordnerFrage.ziel;
+    unten = '<div class="e-frage" role="group" aria-label="' + esc(uebersetze('Modellordner ändern')) + '"><p>' +
+      esc(fuelle('OLLAMA_MODELS für deinen Benutzer auf {p} setzen? Frei: {f}.', { p: z.pfad, f: gbText(z.frei_gb) })) +
+      (z.systemlaufwerk ? ' <b>' + esc(uebersetze('Das ist das Systemlaufwerk.')) + '</b>' : '') + ' ' +
+      esc(uebersetze('Gilt nach einem Neustart von Ollama; vorhandene Modelle bleiben im alten Ordner.')) + '</p>' +
+      '<button type="button" class="knopf primaer klein" data-aktion="e-ordner-ja">' + esc(uebersetze('Ja, setzen')) + '</button> ' +
+      '<button type="button" class="knopf klein" data-aktion="e-ordner-nein">' + esc(uebersetze('Abbrechen')) + '</button></div>';
+  } else if (mv.ordner != null && o.aendern) {
+    unten = '<div class="zeile"><input class="eingabe mono" id="e-ordner" value="' + esc(mv.ordner) + '" maxlength="200" spellcheck="false" aria-label="' + esc(uebersetze('Neuer Modellordner')) + '" aria-describedby="m-mv:ordner" placeholder="D:\\Ollama\\models">' +
+      '<button type="button" class="knopf klein" data-aktion="e-ordner-pruefen">' + esc(uebersetze('Prüfen')) + '</button></div>';
+  }
+  return '<div class="einst-feld"><span class="l">' + esc(uebersetze('Modellordner')) + '<small>' + esc(fuelle('Quelle: {q} · frei {f}', { q: uebersetze(o.quelle === 'standard' ? 'Standard von Ollama' : 'OLLAMA_MODELS'), f: gbText(o.frei_gb) })) + '</small></span>' +
+    '<div class="w"><div class="zeile"><span class="mono">' + esc(o.pfad) + '</span>' + warn +
+      (o.aendern && mv.ordner == null && !mv.ordnerFrage ? '<button type="button" class="knopf klein" data-aktion="e-ordner-aendern">' + esc(uebersetze('Ändern')) + '</button>' : '') + '</div>' +
+      unten + feldMeldung('mv:ordner') + '</div></div>';
+}
+function ladenZeile(M) {
+  if (!M || M.laufzeit !== 'ollama') {
+    return '<p class="dim">' + esc(uebersetze(M && M.erreichbar ? 'Modelle laden geht hier nur mit Ollama — LM Studio und andere laden in ihrer eigenen Oberfläche.' : 'Modelle laden: erst den Modellserver starten.')) + '</p>';
+  }
+  const mv = ez.mv;
+  let unten = '';
+  if (mv.fort) {
+    const f = mv.fort;
+    const pz = f.gesamt ? Math.round((f.fertig || 0) / f.gesamt * 100) : null;
+    unten = '<div class="e-fort"><label for="e-fort">' + esc(f.name + ' · ' + (f.status || '')) + (pz != null ? ' · ' + pz + ' %' : '') + '</label>' +
+      '<progress id="e-fort"' + (pz != null ? ' max="100" value="' + pz + '"' : '') + '></progress></div>';
+  } else if (mv.ladeFrage) {
+    const z = mv.ladeFrage.ziel || {};
+    unten = '<div class="e-frage" role="group" aria-label="' + esc(uebersetze('Modell laden')) + '"><p>' +
+      esc(fuelle('{n} herunterladen nach {p}? Frei: {f}. Modelle brauchen oft mehrere GB.', { n: mv.ladeFrage.name, p: z.pfad || uebersetze('den Ordner des Modellservers'), f: gbText(z.frei_gb) })) +
+      (mv.ladeFrage.fremd ? ' <b>' + esc(uebersetze('Fremdes Repo auf HuggingFace — nur laden, wenn du der Quelle traust.')) + '</b>' : '') +
+      (z.systemlaufwerk ? ' <b>' + esc(uebersetze('Das ist das Systemlaufwerk — Ordner vorher ändern?')) + '</b>' : '') + '</p>' +
+      '<button type="button" class="knopf primaer klein" data-aktion="e-laden-ja">' + esc(uebersetze('Ja, laden')) + '</button> ' +
+      '<button type="button" class="knopf klein" data-aktion="e-laden-nein">' + esc(uebersetze('Abbrechen')) + '</button></div>';
+  }
+  return '<div class="einst-feld"><span class="l">' + esc(uebersetze('Modell laden')) + '<small>' + esc(uebersetze('Name aus der Ollama-Bibliothek oder hf.co/nutzer/repo:Q4_K_M')) + '</small></span>' +
+    '<div class="w"><div class="zeile"><input class="eingabe mono" id="e-laden" maxlength="160" spellcheck="false" placeholder="qwen3:8b" aria-label="' + esc(uebersetze('Modellname')) + '" aria-describedby="m-mv:laden"' + (mv.fort ? ' disabled' : '') + '>' +
+      '<button type="button" class="knopf klein" data-aktion="e-laden"' + (mv.fort ? ' disabled' : '') + '>' + esc(uebersetze('Laden')) + '</button></div>' + unten + feldMeldung('mv:laden') + '</div></div>';
+}
+function modellVerwaltungHtml() {
+  if (!ez.mod.d) { ladeModelle(); return ez.mod.fehler ? '<p class="dim">' + esc(ez.mod.fehler) + '</p>' : '<div class="leer">' + esc(uebersetze('Lädt …')) + '</div>'; }
+  const M = ez.mod.d;
+  const server = !M.eingerichtet ? uebersetze('nicht eingerichtet (lokaleModelle in config.json)') : M.erreichbar ? (LAUFZEIT[M.laufzeit] || M.laufzeit) + ' · ' + fuelle('{n} Modelle', { n: M.modelle.length }) : (M.fehler || '');
+  return '<div class="einst-feld"><span class="l">' + esc(uebersetze('Modellserver')) + '<small>' + esc(server) + '</small></span><div class="w"><div class="zeile">' +
+      '<button type="button" class="knopf klein" data-aktion="e-modelle-neu">' + esc(uebersetze('Liste aktualisieren')) + '</button></div></div></div>' +
+    ordnerZeile(M.ordner) + ladenZeile(M);
+}
+const mvMeldung = (key, fehler) => { if (fehler) kz.fehler[key] = fehler; else delete kz.fehler[key]; };
+aktion('e-ordner-aendern', () => { ez.mv.ordner = (ez.mod.d && ez.mod.d.ordner && ez.mod.d.ordner.pfad) || ''; zeichneAnsicht(); const i = document.getElementById('e-ordner'); if (i) i.focus(); });
+aktion('e-ordner-nein', () => { ez.mv.ordner = null; ez.mv.ordnerFrage = null; mvMeldung('mv:ordner'); zeichneAnsicht(); });
+aktion('e-ordner-pruefen', (_, el) => mitLauf(el, async () => {
+  const i = document.getElementById('e-ordner');
+  ez.mv.ordner = i ? i.value.trim() : '';
+  if (i) i.blur();
+  try { ez.mv.ordnerFrage = await sende('/api/modelle/ordner', { pfad: ez.mv.ordner }); mvMeldung('mv:ordner'); } catch (err) { mvMeldung('mv:ordner', err.message); }
+  zeichneAnsicht();
+}));
+aktion('e-ordner-ja', (_, el) => mitLauf(el, async () => {
+  try {
+    const r = await sende('/api/modelle/ordner', { pfad: ez.mv.ordnerFrage.ziel.pfad, bestaetigt: true });
+    toast(uebersetze(r.hinweis || 'Gesetzt'), 'ok');
+    ez.mv.ordner = null; ez.mv.ordnerFrage = null; mvMeldung('mv:ordner');
+    ez.mod.d = null;
+  } catch (err) { mvMeldung('mv:ordner', err.message); ez.mv.ordnerFrage = null; }
+  zeichneAnsicht();
+}));
+aktion('e-laden', (_, el) => mitLauf(el, async () => {
+  const i = document.getElementById('e-laden');
+  const name = i ? i.value.trim() : '';
+  if (i) i.blur();
+  try { ez.mv.ladeFrage = await sende('/api/modelle/laden', { name }); mvMeldung('mv:laden'); } catch (err) { mvMeldung('mv:laden', err.message); }
+  zeichneAnsicht();
+}));
+aktion('e-laden-nein', () => { ez.mv.ladeFrage = null; zeichneAnsicht(); });
+aktion('e-laden-ja', async () => {
+  if (!ez.mv.ladeFrage) return;   // Doppelklick
+  const name = ez.mv.ladeFrage.name;
+  ez.mv.ladeFrage = null;
+  ez.mv.fort = { name, status: uebersetze('startet …') };
+  zeichneAnsicht();
+  // NDJSON: eine Zeile je Fortschritt; der Fortschrittsbalken wird direkt aktualisiert, nicht neu gezeichnet.
+  let fehler = null, fertig = false, lesen = null;
+  try {
+    const r = await fetch('/api/modelle/laden', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, bestaetigt: true }) });
+    if (!r.ok || !r.body) { const d = await r.json().catch(() => ({})); throw new Error(d.error || 'HTTP ' + r.status); }
+    lesen = r.body.getReader();
+    const dec = new TextDecoder();
+    let rest = '';
+    for (;;) {
+      const { value, done } = await lesen.read();
+      if (done) break;
+      rest += dec.decode(value, { stream: true });
+      const zeilen = rest.split('\n');
+      rest = zeilen.pop();
+      for (const z of zeilen) {
+        if (!z.trim()) continue;
+        let o;
+        try { o = JSON.parse(z); } catch { fehler = uebersetze('Ungültige Serverantwort') + ': ' + z.slice(0, 80); continue; }
+        if (o.typ === 'fehler') fehler = o.error;
+        else if (o.typ === 'fertig') fertig = true;
+        else if (o.typ === 'fortschritt') {
+          ez.mv.fort = { name, status: o.status, gesamt: o.gesamt, fertig: o.fertig };
+          const p = document.getElementById('e-fort'), l = document.querySelector('label[for="e-fort"]');
+          const pz = o.gesamt ? Math.round((o.fertig || 0) / o.gesamt * 100) : null;
+          if (p && pz != null) { p.max = 100; p.value = pz; }
+          if (l) l.textContent = name + ' · ' + (o.status || '') + (pz != null ? ' · ' + pz + ' %' : '');
+        }
+      }
+    }
+  } catch (err) { fehler = err.message; } finally { if (lesen) lesen.cancel().catch(() => {}); }
+  // Strom zu Ende ohne Abschluss (Server neu gestartet): kein gruener Haken (Silent-Failure H1).
+  if (!fehler && !fertig) fehler = uebersetze('Verbindung zum Server abgebrochen — ob das Modell vollständig geladen ist, zeigt „Liste aktualisieren“.');
+  ez.mv.fort = null;
+  mvMeldung('mv:laden', fehler);
+  if (!fehler) { toast(fuelle('{n} geladen', { n: name }), 'ok'); ez.mod.d = null; }
+  zeichneAnsicht();
+});
+
+aktion('e-cira-claude', () => speichereCira('claudeErlaubt', !(ez.cira.d && ez.cira.d.cira.claudeErlaubt === true)));
+aktion('e-cira-modell', (m) => speichereCira('claudeModell', m));
+aktion('e-cira-orb', (s) => speichereCira('orbStil', s));
+// Einschalten nur mit Erlaubnis des Browsers: sonst stuende "an" da und es kaeme nie etwas.
+aktion('e-cira-desktop', async () => {
+  const an = !(ez.cira.d && ez.cira.d.cira.benachrichtigungDesktop === true);
+  if (an) {
+    if (typeof Notification === 'undefined') { toast(uebersetze('Dieser Browser kennt keine Desktop-Benachrichtigungen.'), 'warn'); return; }
+    const erlaubt = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission();
+    if (erlaubt !== 'granted') { toast(uebersetze('Der Browser erlaubt keine Benachrichtigungen. In den Seiten-Einstellungen freigeben und erneut einschalten.'), 'warn'); return; }
+  }
+  speichereCira('benachrichtigungDesktop', an);
 });
 
 function datenHtml() {
@@ -573,6 +1002,40 @@ aktion('e-springe', (wert) => {
   setTimeout(() => { if (ez.hl === hl) { ez.hl = null; const z = document.querySelector('.einst-feld.hl'); if (z) z.classList.remove('hl'); } }, 2600);
 });
 
+/* ---------- Geraete (S1) ----------
+   Nur gekoppelte Geraete schreiben; der Code zum Koppeln erscheint auf dem
+   Desktop. Entfernen entwertet das Token sofort. */
+const egZ = { d: null, fehler: null, laedt: false };
+const ladeGeraete = () => eLade(egZ, '/api/geraete', (d) => (d && Array.isArray(d.geraete) ? d.geraete : null));
+function geraeteHtml() {
+  if (!egZ.d) {
+    ladeGeraete();
+    return egZ.fehler ? leer('liste', 'Geräte nicht geladen', egZ.fehler, '<button type="button" class="knopf klein" data-aktion="e-geraete-neu">' + esc(uebersetze('Erneut versuchen')) + '</button>')
+      : '<div class="leer">' + esc(uebersetze('Lädt …')) + '</div>';
+  }
+  const dieses = egZ.d.some((g) => g.dieses);
+  return '<p class="dim">' + esc(uebersetze('Schreiben (Freigaben, Sitzungen, Rechnungen, Einstellungen) geht nur von gekoppelten Geräten. Lesen bleibt frei, auch für Obsidian und Jarvis.')) + '</p>' +
+    (dieses ? '' : '<p><button type="button" class="knopf primaer" data-aktion="koppeln">' + esc(uebersetze('Dieses Gerät koppeln')) + '</button></p>') +
+    (egZ.d.length ? '<table class="tabelle eg-tabelle"><thead><tr><th scope="col">' + esc(uebersetze('Gerät')) + '</th><th scope="col">' + esc(uebersetze('Art')) + '</th><th scope="col">' + esc(uebersetze('Gekoppelt')) + '</th><th scope="col">' + esc(uebersetze('Zuletzt')) + '</th><th scope="col" aria-label="' + esc(uebersetze('Aktion')) + '"></th></tr></thead><tbody>' +
+      egZ.d.map((g) => '<tr><td>' + esc(g.name) + (g.dieses ? ' <span class="pille an">' + esc(uebersetze('dieses Gerät')) + '</span>' : '') + '</td><td>' + esc(uebersetze(g.art === 'client' ? 'Programm' : 'Browser')) + '</td>' +
+        '<td class="mono">' + esc(datumKurz(g.erstellt)) + '</td><td class="mono">' + esc(g.zuletzt ? vor(g.zuletzt) : '–') + '</td>' +
+        '<td><button type="button" class="knopf klein" data-aktion="e-geraet-weg" data-wert="' + g.id + '" aria-label="' + esc(uebersetze('Entfernen') + ': ' + g.name) + '">' + esc(uebersetze('Entfernen')) + '</button></td></tr>').join('') +
+      '</tbody></table>' : '<p class="dim">' + esc(uebersetze('Noch kein Gerät gekoppelt.')) + '</p>');
+}
+aktion('e-geraete-neu', () => { egZ.fehler = null; egZ.d = null; zeichneAnsicht(); });
+aktion('e-geraet-weg', async (id, knopf) => {
+  const g = (egZ.d || []).find((x) => String(x.id) === String(id));
+  if (g && g.dieses && !confirm(uebersetze('Dieses Gerät entfernen? Danach kann dieser Browser erst nach erneutem Koppeln wieder schreiben.'))) return;
+  await mitLauf(knopf, async () => {
+    try { await sende('/api/geraet/' + encodeURIComponent(id) + '/entfernen', {}); toast(uebersetze('Gerät entfernt')); } catch (err) { toast(uebersetze('Entfernen fehlgeschlagen') + ': ' + err.message, 'err'); }
+    egZ.d = null;
+    // Eigenes Geraet: sofort "nur lesen" zeigen, nicht erst nach der Nachpruefung.
+    if (g && g.dieses) { state.kopplung = false; zeichneBanner(); pruefeKopplung(); }
+    zeichneAnsicht();
+  });
+});
+window.addEventListener('c2-gekoppelt', () => { egZ.d = null; if (route().name === 'einstellungen') zeichneAnsicht(); });
+
 /* ---------- Seite ---------- */
 function zeichneEinstellungen(w, teile) {
   const gemerkt = lies('einstellungen.abschnitt', 'allgemein');
@@ -605,7 +1068,7 @@ function zeichneEinstellungen(w, teile) {
     let k;
     if (A.felder) {
       k = ez.e.fehler ? leer('liste', 'Einstellungen nicht geladen', ez.e.fehler, '<button type="button" class="knopf klein" data-aktion="e-neu">' + esc(uebersetze('Erneut versuchen')) + '</button>')
-        : !ez.e.d ? '<div class="leer">' + esc(uebersetze('Lädt …')) + '</div>' : A.felder.map((f) => feldZeile(f, false)).join('');
+        : !ez.e.d ? '<div class="leer">' + esc(uebersetze('Lädt …')) + '</div>' : A.felder.map((f) => feldZeile(f, false)).join('') + (A.id === 'lokal' ? modellVerwaltungHtml() : '');
     } else if (A.stamm) {
       k = ez.s.fehler ? leer('liste', 'Stammdaten nicht geladen', ez.s.fehler, '<button type="button" class="knopf klein" data-aktion="e-neu">' + esc(uebersetze('Erneut versuchen')) + '</button>')
         : !ez.s.d ? '<div class="leer">' + esc(uebersetze('Lädt …')) + '</div>' : fehltHtml() + Object.keys(sWerte()).map((f) => feldZeile(f, true)).join('');
@@ -614,6 +1077,9 @@ function zeichneEinstellungen(w, teile) {
     } else if (A.id === 'vorlagen') k = vorlagenHtml();
     else if (A.id === 'taet') k = taetHtml();
     else if (A.id === 'darstellung') k = darstellungHtml();
+    else if (A.id === 'arbeitsbereiche') k = arbeitsbereicheHtml();
+    else if (A.id === 'geraete') k = geraeteHtml();
+    else if (A.id === 'cira') k = ciraHtml();
     else if (A.id === 'kalender') k = '<div id="e-zkal" class="zkal"></div>';
     else k = datenHtml();
     inhalt = '<div class="einst-karte"><div class="einst-kopf"><h2>' + esc(uebersetze(A.l)) + '</h2><span class="sub">' + esc(uebersetze(A.sub)) + '</span>' +
@@ -638,6 +1104,8 @@ function zeichneEinstellungen(w, teile) {
     if (t.dataset.efeld) kz.entwurf[eKey(t.dataset.efeld)] = t.value;
     else if (t.dataset.vorlfeld) kz.entwurf['v:' + t.dataset.vorl + ':' + t.dataset.vorlfeld] = t.value;
     else if (t.dataset.taetfeld) kz.entwurf['ta:' + t.dataset.taet + ':' + t.dataset.taetfeld] = t.value;
+    else if (t.dataset.abfeld) kz.entwurf['ab:' + t.dataset.ab + ':' + t.dataset.abfeld] = t.value;
+    else if (t.dataset.cirafeld) kz.entwurf['cira:' + t.dataset.cirafeld] = t.value;
   });
   wurzel.addEventListener('focusout', (e) => {
     const t = e.target;
@@ -662,6 +1130,9 @@ function zeichneEinstellungen(w, teile) {
     else if (t.dataset.taetfeld) { e.preventDefault(); speichereTaet(t.dataset.taet); }
   });
   wurzel.addEventListener('change', (e) => {
+    // Textfelder melden change beim Verlassen oder Enter, das Farbfeld beim Schliessen der Auswahl.
+    if (e.target.dataset.abfeld) return speichereArbeitsbereich(e.target.dataset.ab, e.target.dataset.abfeld, e.target.value.trim());
+    if (e.target.dataset.cirafeld) return speichereCira(e.target.dataset.cirafeld, e.target.value.trim());
     if (e.target.id !== 'e-csv-von' && e.target.id !== 'e-csv-bis') return;
     const von = document.getElementById('e-csv-von').value, bis = document.getElementById('e-csv-bis').value;
     if (!von || !bis) return;
@@ -669,6 +1140,6 @@ function zeichneEinstellungen(w, teile) {
     document.getElementById('e-csv').href = '/api/export.csv?' + abfrage({ from: von, to: bis });
   });
 }
-aktion('e-neu', () => { ez.e.fehler = null; ez.s.fehler = null; ez.v.fehler = null; ez.t.fehler = null; zeichneAnsicht(); });
+aktion('e-neu', () => { ez.e.fehler = null; ez.s.fehler = null; ez.v.fehler = null; ez.t.fehler = null; ez.ab.fehler = null; zeichneAnsicht(); });
 
 registriere('einstellungen', { zeichne: zeichneEinstellungen });

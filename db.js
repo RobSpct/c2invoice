@@ -409,6 +409,168 @@ function migrate(db) {
   // Lokal angelegt und an Googles Formular uebergeben, aber noch nicht aus dem
   // Kalender zurueck (Zeitpunkt der Uebergabe). Der Abgleich fuehrt zusammen.
   addColumn(db, 'termin', 'google_offen', 'TEXT');
+
+  // Cira (Masterplan 3.0, C2). Gespraech je Kanal, T2-Laeufe mit Kosten,
+  // Freigaben ("Braucht dich") und das Protokoll jeder Schreib-Aktion.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS cira_nachricht (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      zeit         TEXT NOT NULL,
+      kanal        TEXT NOT NULL,           -- dock | cockpit | flow
+      rolle        TEXT NOT NULL,           -- ich | cira
+      text         TEXT NOT NULL,
+      stufe        TEXT,                    -- T0 | T1 | T2
+      kosten_eur   REAL,
+      quelle       TEXT,
+      szene_json   TEXT,
+      sprung_json  TEXT,
+      kontext_json TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_cira_nachricht_zeit ON cira_nachricht(kanal, zeit);
+    -- Ein T2-Lauf (claude -p). session_id fuehrt zu den Zeilen in events.
+    CREATE TABLE IF NOT EXISTS cira_lauf (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      zeit        TEXT NOT NULL,
+      session_id  TEXT,
+      profil      TEXT NOT NULL,
+      ok          INTEGER NOT NULL,
+      kosten_usd  REAL,
+      tokens      INTEGER,
+      fehler      TEXT
+    );
+    CREATE TABLE IF NOT EXISTS freigabe (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      art           TEXT NOT NULL,
+      bezug         TEXT,
+      titel         TEXT NOT NULL,
+      text          TEXT,
+      nutzlast_json TEXT,
+      status        TEXT NOT NULL DEFAULT 'offen',   -- offen | erledigt | abgelehnt | fehler
+      erstellt      TEXT NOT NULL,
+      erledigt_am   TEXT,
+      quelle        TEXT NOT NULL,                   -- cira | flow:<id> | sitzung:<id>
+      hinweis       TEXT,
+      ergebnis_json TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_freigabe_status ON freigabe(status);
+    CREATE TABLE IF NOT EXISTS aktion_log (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      zeit         TEXT NOT NULL,
+      quelle       TEXT NOT NULL,
+      art          TEXT NOT NULL,
+      objekt       TEXT,
+      vorher_json  TEXT,
+      nachher_json TEXT
+    );
+    -- Sitzungen (C5): aus c2invoice gestartete Claude-Code-Prozesse und
+    -- fremde Sitzungen, die sich ueber den Hook gemeldet haben. Die id ist die
+    -- session_id der CLI (--session-id), Kosten kommen aus events.
+    CREATE TABLE IF NOT EXISTS sitzung (
+      id            TEXT PRIMARY KEY,
+      quelle        TEXT NOT NULL,                   -- c2invoice | fremd
+      arbeitsbereich TEXT,
+      vorgang       TEXT,
+      agent         TEXT,
+      status        TEXT NOT NULL,                   -- startet | laeuft | bereit | wartet | beendet | fehler
+      pid           INTEGER,
+      model         TEXT,
+      mode          TEXT,
+      effort        TEXT,
+      ctx_pct       REAL,
+      kosten_usd    REAL,                            -- laut CLI (total_cost_usd), der Ledger rechnet selbst
+      init_json     TEXT,
+      fehler        TEXT,
+      gestartet     TEXT NOT NULL,
+      beendet       TEXT
+    );
+    CREATE TABLE IF NOT EXISTS sitzung_ereignis (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id   TEXT NOT NULL,
+      zeit         TEXT NOT NULL,
+      art          TEXT NOT NULL,                    -- eingabe | say | read | edit | bash | mcp | skill | werkzeug | frage | rechte | zug
+      titel        TEXT,
+      meta         TEXT,
+      kosten_usd   REAL,
+      koerper_json TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_sitzung_ereignis ON sitzung_ereignis(session_id, id);
+    -- Vorgangs-Log (C6): Eintraege je Vorgang, z. B. die Zusammenfassung einer
+    -- Sitzung. quelle: sitzung:<id> | cira | flow:<n>.
+    CREATE TABLE IF NOT EXISTS vorgang_log (
+      id      INTEGER PRIMARY KEY AUTOINCREMENT,
+      vorgang TEXT NOT NULL,
+      zeit    TEXT NOT NULL,
+      quelle  TEXT NOT NULL,
+      text    TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_vorgang_log ON vorgang_log(vorgang, zeit);
+    -- Budget je Vorgang in Euro, von Hand gesetzt (Owner 20.10.2026).
+    CREATE TABLE IF NOT EXISTS vorgang_budget (
+      vorgang      TEXT PRIMARY KEY,
+      budget_eur   REAL NOT NULL,
+      geaendert_am TEXT NOT NULL
+    );
+    -- Skill-Ablauf (C6b): eine Sitzung, Schritte als Eingaben darin.
+    -- schritte_json: [{befehl, ziel, status idle|run|wait|done|stopped, ab, bis, freigabe}];
+    -- ab/bis grenzen die Ereignisse des Schritts in sitzung_ereignis ein.
+    CREATE TABLE IF NOT EXISTS ablauf (
+      id                INTEGER PRIMARY KEY AUTOINCREMENT,
+      vorgang           TEXT,
+      arbeitsbereich    TEXT NOT NULL,
+      sitzung           TEXT NOT NULL,
+      schritte_json     TEXT NOT NULL,
+      aktueller_schritt INTEGER NOT NULL DEFAULT 0,
+      status            TEXT NOT NULL,                -- run | wait | stopped | done
+      hinweise_json     TEXT,
+      stop_grund        TEXT,
+      erstellt          TEXT NOT NULL,
+      aktualisiert      TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_ablauf_sitzung ON ablauf(sitzung, status);
+    -- Jira-Cache fuers Board (C7a): eine Zeile je Ticket, felder_json = das
+    -- abgebildete Ticket (jira-sync.issueAus). Abgleich hoechstens alle 120 s.
+    CREATE TABLE IF NOT EXISTS jira_issue (
+      key         TEXT PRIMARY KEY,
+      projekt     TEXT NOT NULL,
+      status      TEXT,
+      status_kat  TEXT,
+      felder_json TEXT NOT NULL,
+      aktualisiert TEXT,
+      geholt      TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_jira_issue_projekt ON jira_issue(projekt);
+    -- Gekoppelte Geraete (S1): nur wer gekoppelt ist, schreibt. Gespeichert
+    -- wird der SHA-256 des Tokens, nie das Token selbst.
+    CREATE TABLE IF NOT EXISTS geraet (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      name       TEXT NOT NULL,
+      art        TEXT NOT NULL,                      -- browser | client
+      token_hash TEXT NOT NULL UNIQUE,
+      erstellt   TEXT NOT NULL,
+      zuletzt    TEXT
+    );
+    -- Werkzeuge (C8): letzte /context-Messung je Arbeitsbereich ('global' fuer
+    -- die Ebene Global), json = werkzeuge.parseKontext(...).
+    CREATE TABLE IF NOT EXISTS werkzeug_kontext (
+      bereich     TEXT PRIMARY KEY,
+      gemessen_am TEXT NOT NULL,
+      json        TEXT NOT NULL
+    );
+  `);
+  // Modell-Block: welche Rolle/welches Modell antwortete und warum, plus die
+  // Markierung "falsch zugeordnet" aus der Oberflaeche.
+  addColumn(db, 'cira_nachricht', 'route_json', 'TEXT');
+  addColumn(db, 'cira_nachricht', 'falsch', 'INTEGER');
+  // C5: wann der Hook einer fremden Sitzung zuletzt meldete (Status gilt 15 Minuten).
+  addColumn(db, 'sitzung', 'aktualisiert', 'TEXT');
+  // /clear gibt der CLI eine neue Sitzungs-ID (Spike 20.10.). Jede neue ID einer
+  // c2invoice-Sitzung steht hier als Fortsetzung: Vorgang, Liste und
+  // "Im Terminal fortsetzen" folgen ihr.
+  db.exec(`CREATE TABLE IF NOT EXISTS sitzung_folge (
+    folge   TEXT PRIMARY KEY,
+    sitzung TEXT NOT NULL,
+    seit    TEXT NOT NULL
+  )`);
   // Saat genau einmal: eine geloeschte Taetigkeit kaeme sonst bei jedem Start zurueck.
   if (getMeta(db, 'taetigkeiten_gesaet') === null) {
     const ein = db.prepare('INSERT OR IGNORE INTO taetigkeitsart (name, satz, parallel) VALUES (?, NULL, ?)');

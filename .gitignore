@@ -5,3 +5,5 @@ node_modules/
 # Enthaelt Stammdaten, Anschrift und Zugangsangaben — Vorlage ist config.example.json
 config.json
 design/werkzeuge/probe.db*
+design/werkzeuge/probe-config.json
+design/werkzeuge/probe-geraet.txt

@@ -112,7 +112,26 @@ function hostErlaubt(host, weitere = WEITERE_HOSTS) {
   return weitere.includes(String(host).toLowerCase().replace(/:\d+$/, ''));
 }
 
+// Kennung auf jeder Antwort: der Dienst-Status in server.js erkennt daran, dass
+// auf dem Port dieser Proxy laeuft und kein fremdes Programm.
+const KENNUNG = 'x-c2i-proxy';
+// Schreibende Anfrage einer fremden Seite ohne Preflight ("einfacher" POST mit
+// text/plain o. ae.): JSON-Clients im Browser loesen einen Preflight aus, CLI-
+// Clients schicken keinen Origin. Uebrig bleibt genau der Weg, auf dem eine
+// Webseite blind /api/pull oder /api/delete ausloesen koennte (Security-Review M2).
+function einfacherFremdPost(req) {
+  if (!req.headers.origin || ['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return false;
+  return !/^application\/json\b/i.test(String(req.headers['content-type'] || ''));
+}
+
 const server = http.createServer((req, res) => {
+  res.setHeader(KENNUNG, '1');
+  if (einfacherFremdPost(req)) {
+    res.writeHead(403, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Schreibende Anfrage aus dem Browser nur als JSON' }));
+    req.resume();
+    return;
+  }
   if (!hostErlaubt(req.headers.host)) {
     res.writeHead(421, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Unbekannter Host' }));
@@ -253,10 +272,18 @@ const server = http.createServer((req, res) => {
 });
 
 function start(port = PORT) {
-  return new Promise((auf) => {
+  return new Promise((auf, nein) => {
+    // Belegter Port (Proxy laeuft schon) kommt als Ablehnung zurueck statt
+    // als unbehandeltes 'error', das den startenden Server mitreissen wuerde.
+    server.once('error', nein);
     // Ausdruecklich nur auf der Rueckschleife: der Proxy hat keine
     // Zugangspruefung und darf deshalb nie im Netz stehen.
-    server.listen(port, '127.0.0.1', () => auf(server));
+    server.listen(port, '127.0.0.1', () => {
+      server.off('error', nein);
+      // Spaetere Fehler (z. B. EMFILE) protokollieren statt den gemeinsamen Prozess zu beenden.
+      if (!server.listenerCount('error')) server.on('error', (err) => console.error('Proxy:', err.message));
+      auf(server);
+    });
   });
 }
 

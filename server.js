@@ -30,13 +30,76 @@ const angebot = require('./angebot');
 const kontakte = require('./kontakte');
 const zeit = require('./zeit');
 const kalender = require('./kalender');
+const cira = require('./cira');
+const modelle = require('./modelle');
+const freigaben = require('./freigaben');
+const claude = require('./claude');
+const sitzungen = require('./sitzungen');
+const { vorgangLog } = sitzungen;
+const ablauf = require('./ablauf');
+const board = require('./board');
+const werkzeuge = require('./werkzeuge');
+const ereignisse = require('./ereignisse');
+const geraete = require('./geraete');
+const crypto = require('node:crypto');
 
 const db = dbmod.open();
 // Altrechnungen ohne Faelligkeitstag einmal festschreiben (Ampel, Druck).
 try { rechnung.faelligFestschreiben(db); } catch (e) { console.error('Faelligkeit festschreiben:', e); }
 const PUBLIC = path.join(__dirname, 'public');
+// Cira (C2): Router, Freigaben und Ereignis-Strom. Bucht ueber dieselbe
+// Funktion wie /api/buchen.
+const ciraDienst = cira.erzeuge({ db, bucheVorgang, skillOrte: (b) => skillOrte(b) });
 
-let lastIngest = { at: null, ms: 0, events: 0, error: null };
+// Stellt eine Rechnung: ein Weg fuer den Beleg-Editor (POST /api/rechnung)
+// und die Freigabe "Rechnungsentwurf" (C4), damit beide dasselbe tun.
+function stelleRechnung(dbx, daten) {
+  // Die Pruefung gehoert hierher und nicht in rechnung.js: dort waere
+  // ein require auf kontakte.js ein Kreis ueber angebot.js.
+  const kid = kontakte.pruefeId(dbx, daten.kontaktId);
+  const inv = rechnung.erstelle(dbx, { ...daten, kontaktId: kid });
+  // Ab hier ist die Rechnung geschrieben. Was danach scheitert, darf
+  // nicht als Absage zurueckgehen — der Aufrufer hielte sie fuer nicht
+  // erstellt, und ein zweiter Versuch zoege eine zweite Nummer.
+  let erechnungFehlt = [];
+  try {
+    // Wer eine Rechnung bekommt, ist kein Lead mehr.
+    kontakte.macheKunde(dbx, kid);
+    // Gleich sagen, was der E-Rechnung fehlt: eine gestellte Rechnung
+    // laesst sich nicht mehr ergaenzen, nur stornieren.
+    erechnungFehlt = erechnung.pruefe(inv);
+  } catch (err) {
+    console.error('Nach dem Erstellen von', inv.nr, err);
+  }
+  return { nr: inv.nr, brutto_eur: inv.brutto_eur, erechnung_fehlt: erechnungFehlt };
+}
+// Freigabe "rechnung": die Nutzlast hat Cira gebaut (cira.rechnungsEntwurf);
+// erwartetBrutto ist Pflicht, sonst stellte ein Klick etwas anderes als gezeigt.
+const RECHNUNG_NUTZLAST = ['from', 'to', 'tickets', 'projekte', 'eintraege', 'empfaenger', 'kontaktId', 'erwartetBrutto'];
+freigaben.registriere('rechnung', (dbx, n, { freigabe } = {}) => {
+  if (!n || typeof n !== 'object' || typeof n.erwartetBrutto !== 'number') throw new Error('Rechnungsentwurf ohne erwarteten Betrag. Entwurf neu anfordern.');
+  try {
+    return stelleRechnung(dbx, Object.fromEntries(RECHNUNG_NUTZLAST.filter((k) => Object.hasOwn(n, k)).map((k) => [k, n[k]])));
+  } catch (err) {
+    // Abweichung oder Ueberschneidung: nichts gestellt, Freigabe bleibt offen.
+    // Derselbe Klick scheitert wieder; der Weg heraus ist ein neuer Entwurf.
+    if (err.abweichung) {
+      err.status = 409;
+      if (freigabe && freigabe.bezug) err.message += ' Neuen Entwurf anfordern: „Rechnung für ' + freigabe.bezug + '“.';
+    }
+    throw err;
+  }
+});
+// Freigabe "jira_kommentar" (C7a): ein von Cira entworfener Kommentar geht erst
+// nach der Freigabe an Jira. Selbst getippte Kommentare im Board gehen direkt.
+freigaben.registriere('jira_kommentar', async (dbx, n) => {
+  if (!n || typeof n.key !== 'string' || typeof n.text !== 'string' || !n.text.trim()) throw new Error('Kommentar-Entwurf unvollständig.');
+  if (!jira.jiraAn()) { const e = new Error('Jira ist aus oder ohne Zugang.'); e.status = 409; throw e; }
+  await jira.kommentiere(n.key, n.text.slice(0, 4000));
+  return { key: n.key };
+});
+
+let lastIngest ={ at: null, ms: 0, events: 0, error: null };
 let ingesting = false;
 
 // Kennung des laufenden Programmstands. Der Server haelt seinen Code im
@@ -46,20 +109,27 @@ let ingesting = false;
 // die eben noch ging. Aus dem letzten Aenderungszeitpunkt der Programmdateien
 // entsteht deshalb eine Kennung, an der die Oberflaeche einen Versionssprung
 // erkennt und zum Neuladen auffordert, statt einen Fehler zu zeigen.
-const CODE_STAND = (() => {
-  const dateien = ['server.js', 'metrics.js', 'rechnung.js', 'erechnung.js', 'angebot.js', 'ingest.js',
-    'public/index.html'];
-  // Die neue Oberflaeche besteht aus mehreren Dateien; eine Festliste wuerde
-  // bei jeder neuen Datei veralten.
-  try {
-    for (const d of fs.readdirSync(path.join(__dirname, 'public', 'app'))) dateien.push('public/app/' + d);
-  } catch { /* Ordner fehlt: egal */ }
+// Die Oberflaeche liefert der Server direkt aus public/ aus: eine geaenderte
+// Datei dort gilt ohne Neustart, ein offener Tab hat aber noch die alte.
+// Deshalb wird public/ bei jeder Abfrage neu gelesen, der Servercode nur beim
+// Start (ohne Neustart hilft Neuladen dort nicht).
+function neuesteAenderung(dateien) {
   let neuestes = 0;
   for (const d of dateien) {
     try { neuestes = Math.max(neuestes, fs.statSync(path.join(__dirname, d)).mtimeMs); } catch { /* fehlt: egal */ }
   }
-  return String(Math.round(neuestes));
-})();
+  return neuestes;
+}
+const SERVER_STAND = neuesteAenderung(['server.js', 'metrics.js', 'rechnung.js', 'erechnung.js', 'angebot.js', 'ingest.js']);
+function codeStand() {
+  const dateien = ['public/index.html'];
+  // Die Oberflaeche besteht aus mehreren Dateien; eine Festliste wuerde
+  // bei jeder neuen Datei veralten.
+  try {
+    for (const d of fs.readdirSync(path.join(__dirname, 'public', 'app'))) dateien.push('public/app/' + d);
+  } catch { /* Ordner fehlt: egal */ }
+  return String(Math.round(Math.max(SERVER_STAND, neuesteAenderung(dateien))));
+}
 
 // Der Abgleich laeuft im Hintergrund weiter, damit die Oberflaeche ohne
 // Zutun aktuell bleibt. Dank gemerkter Leseposition kostet ein Lauf
@@ -102,6 +172,12 @@ async function refreshData() {
     // haelt sonst den Ingest auf. takt() wirft nie und laeuft nie doppelt.
     kalender.takt(db).catch((err) => console.error('Kalender-Takt:', err));
     lastIngest ={ at: new Date().toISOString(), ms: res.ms, events: res.events, error: null, zeit_fehler: zeitFehler };
+    // Hat jemand die Oberflaeche offen, rechnet der Takt die Zeit vor, statt
+    // den naechsten Klick warten zu lassen (Block L). Ohne neue Daten nur ein
+    // Stand-Vergleich. Ein Fehler hier ist kein Fehler beim Einlesen.
+    if (ereignisse.offen() > 0) {
+      try { metrics.vorrechnen(db); } catch (err) { console.error('Vorrechnen fehlgeschlagen:', err); }
+    }
   } catch (err) {
     // Vollstaendig ins Protokoll, nach aussen nur ein Hinweis: Fehlertexte
     // aus dem Dateisystem enthalten Pfade und gehen ueber die Schnittstelle raus.
@@ -139,10 +215,13 @@ function sendText(res, text, status = 200, type = 'text/plain; charset=utf-8') {
 
 // CSP fuer die Seiten aus public/: Skripte nur aus eigenen Dateien, dazu das
 // eine Inline-Skript der Seite per Hash (<script>start();</script>,
-// selfcheck prueft den Hash). Kein frame-ancestors: Obsidian bettet die Seite ein.
+// selfcheck prueft den Hash). Einbetten nur selbst und in Obsidian: seit das
+// Geraetecookie auch in Einbettungen gilt, koennte eine fremde Seite c2invoice
+// sonst im Frame koppeln lassen und Klicks unterschieben (Review 1008786).
 // Nur fuer HTML — object-src 'none' auf einer PDF-Antwort legte Chromes Anzeige lahm.
 const CSP = "default-src 'self'; script-src 'self' 'sha256-E6jQvrT2ZivWG9GJ4AAEZf4MhI7l3QkLroW4hgvUT4c='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
-  "font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'";
+  "font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'; " +
+  "frame-ancestors 'self' app://obsidian.md capacitor://localhost";
 
 // Statische Dateien nur aus dem public-Ordner ausliefern.
 function serveStatic(res, urlPath) {
@@ -416,6 +495,9 @@ const EINSTELLUNGEN = {
     min: 1, max: 480, pfad: 'lokaleModelle.zuordnungsfensterMinuten',
     label: 'Zuordnungsfenster lokaler Modelle in Minuten',
   },
+  // 5-h-Block in der Cira-Karte (metrics.block5h). Anthropic nennt kein Limit
+  // in Tokens; der Nutzer setzt es aus Erfahrung. 0 blendet die Anzeige aus.
+  limit5hTokens: { min: 1000, max: 1e12, aus: 0, ganz: true, label: 'Token-Limit je 5-h-Fenster' },
 };
 
 // Die einzige Einstellung mit festen Auswahlwerten statt einer Zahl. Sie
@@ -676,18 +758,49 @@ function loescheVorlage(db, id) {
   return true;
 }
 
+// Schluessel, die die Oberflaeche aendern kann und schreibeConfig() deshalb
+// zurueckschreibt. Felder mit `pfad` liegen in einer Gruppe (lokaleModelle) —
+// geschrieben wird die Gruppe, nicht der Feldname. Alles andere in der Datei
+// bleibt, wie es dort steht. Jeder Eintrag gehoert auch in config.example.json
+// (Gate design/werkzeuge/cira-c0-gates.js config).
+const SCHREIBBAR = [...new Set([
+  'projektSaetze', 'stundensatz', 'zeitmodell',
+  'rechnung',          // Stammdaten (verschachtelt)
+  'kalender',          // ICS-Konten aus der Oberflaeche (kalender.verbinde/trenne)
+  'arbeitsbereiche',   // Kuerzel, Farbe, Verweise — Pfade aendert nur die Datei
+  'cira',              // Einstellungen -> Cira (CIRA_FELDER), feldgenau
+  'hook',              // Geheimnis fuer integration/claude-hook.mjs, beim ersten Start erzeugt (C5)
+  ...Object.entries(EINSTELLUNGEN).map(([feld, r]) => (r.pfad ? r.pfad.split('.')[0] : feld)),
+])];
+
 // Die Datei neu schreiben, ohne die uebrigen Einstellungen zu verlieren.
 function schreibeConfig() {
   const pfad = path.join(__dirname, 'config.json');
   const roh = JSON.parse(fs.readFileSync(pfad, 'utf8'));
-  roh.projektSaetze = config.projektSaetze;
-  roh.stundensatz = config.stundensatz;
-  for (const feld of Object.keys(EINSTELLUNGEN)) roh[feld] = config[feld];
-  if (config.zeitmodell !== undefined) roh.zeitmodell = config.zeitmodell;
-  // Verschachtelter Block, der Schleife oben entgeht er deshalb.
-  if (config.rechnung) roh.rechnung = config.rechnung;
-  // Kalender-Konten (ICS aus der Oberflaeche, kalender.verbinde/trenne).
-  if (config.kalender !== undefined) roh.kalender = config.kalender;
+  // Gruppen (lokaleModelle …) und Arbeitsbereiche feldgenau: was nur in der
+  // Datei steht (Pfade, Adressen), bleibt so, wie es dort gerade steht —
+  // auch wenn es seit dem Start von Hand geaendert wurde.
+  const gruppen = new Map();
+  for (const r of Object.values(EINSTELLUNGEN)) {
+    if (!r.pfad) continue;
+    const [g, s] = r.pfad.split('.');
+    gruppen.set(g, (gruppen.get(g) || []).concat(s));
+  }
+  gruppen.set('cira', (gruppen.get('cira') || []).concat(Object.keys(CIRA_FELDER)));
+  for (const k of SCHREIBBAR) {
+    if (config[k] === undefined) continue;
+    if (gruppen.has(k)) {
+      roh[k] = roh[k] && typeof roh[k] === 'object' ? roh[k] : {};
+      for (const s of gruppen.get(k)) if ((config[k] || {})[s] !== undefined) roh[k][s] = config[k][s];
+    } else if (k === 'arbeitsbereiche') {
+      if (!Array.isArray(roh.arbeitsbereiche)) continue;   // neue Eintraege nur in der Datei
+      for (const a of roh.arbeitsbereiche) {
+        const m = a && arbeitsbereiche().find((x) => x.name === a.name);
+        if (!m) continue;
+        for (const f of Object.keys(ARBEITSBEREICH_FELDER)) { if (m[f] === undefined) delete a[f]; else a[f] = m[f]; }
+      }
+    } else roh[k] = config[k];
+  }
   const tmp = pfad + '.tmp';
   try {
     fs.writeFileSync(tmp, JSON.stringify(roh, null, 2) + '\n', 'utf8');
@@ -697,6 +810,357 @@ function schreibeConfig() {
     try { fs.rmSync(tmp, { force: true }); } catch { /* bleibt liegen, Fehler unten zaehlt */ }
     throw err;
   }
+}
+
+// Arbeitsbereiche (Masterplan 3.0, Ruling R-Arbeitsbereich): ein benannter
+// Ordner mit Farbe, in dem Claude Code arbeitet — ein Projekt, der Vault, die
+// globale Claude-Konfiguration oder ein neutraler Chat-Ordner. `projekt`
+// verweist auf den Ledger-Projektnamen (Verbrauch, Saetze, Jira).
+// Ruling R-Pfade: pfad und todo stehen nur in config.json. Die Oberflaeche
+// aendert Kuerzel, Farbe und Verweise eines vorhandenen Eintrags — ein Pfad
+// ist ein Schreibziel fuer einen gestarteten Prozess, also ein Zugang.
+const ARBEITSBEREICH_ARTEN = ['projekt', 'vault', 'global', 'neutral'];
+const ARBEITSBEREICH_FELDER = {
+  kuerzel: { re: /^[A-Za-z0-9]{1,3}$/, label: 'Kuerzel', gross: true },
+  farbe: { re: /^#[0-9a-fA-F]{6}$/, label: 'Farbe', klein: true },
+  projekt: { re: /^[^\u0000-\u001f\u007f]{1,80}$/, label: 'Projekt', leer: true },
+  jiraProjekt: { re: /^[A-Z][A-Z0-9]{1,9}$/, label: 'Jira-Projekt', leer: true },
+};
+const arbeitsbereiche = () => (Array.isArray(config.arbeitsbereiche) ? config.arbeitsbereiche : [])
+  .filter((a) => a && typeof a === 'object' && typeof a.name === 'string');
+
+function setzeArbeitsbereich(daten) {
+  const ab = typeof daten.name === 'string' ? arbeitsbereiche().find((a) => a.name === daten.name) : null;
+  if (!ab) throw new Error('Arbeitsbereich unbekannt. Neue Bereiche und Pfade nur in config.json.');
+  for (const k of Object.keys(daten)) {
+    if (k !== 'name' && !Object.hasOwn(ARBEITSBEREICH_FELDER, k)) {
+      throw new Error(/pfad|todo|path|dir|art/i.test(k) ? k + ': nur in config.json aenderbar.' : 'Unbekanntes Feld: ' + k);
+    }
+  }
+  const neu = {};
+  for (const [k, r] of Object.entries(ARBEITSBEREICH_FELDER)) {
+    if (!Object.hasOwn(daten, k)) continue;
+    const w = daten[k] == null ? '' : daten[k];
+    if (typeof w !== 'string') throw new Error(r.label + ': Text erwartet.');
+    const s = w.trim();
+    if (s === '' && r.leer) { neu[k] = null; continue; }
+    if (!r.re.test(s)) throw new Error(r.label + ': ungueltig.');
+    neu[k] = r.gross ? s.toUpperCase() : r.klein ? s.toLowerCase() : s;
+  }
+  if (!Object.keys(neu).length) throw new Error('Kein bekanntes Feld uebergeben.');
+  const alt = { ...ab };
+  for (const [k, v] of Object.entries(neu)) { if (v === null) delete ab[k]; else ab[k] = v; }
+  try {
+    schreibeConfig();
+  } catch (err) {
+    for (const k of Object.keys(ab)) delete ab[k];
+    Object.assign(ab, alt);
+    throw err;
+  }
+  return { arbeitsbereich: arbeitsbereichAnzeige(ab) };
+}
+
+// Einstellungen -> Cira (BACKEND §13). Whitelist mit Grenzen; der Pfad zur
+// claude.exe (cira.claudeExe) bleibt der Datei vorbehalten.
+const UHRZEIT_RE = /^(|([01]\d|2[0-3]):[0-5]\d)$/;
+// Buchstaben, Ziffern, Leerzeichen, Bindestrich, Komma; je Wort 2 bis 40 Zeichen.
+const WOERTER_RE = /^(|[\p{L}\p{N} -]{2,40}(, ?[\p{L}\p{N} -]{2,40}){0,29})$/u;
+const CIRA_FELDER = {
+  anrede: { art: 'text', re: /^[^\u0000-\u001f\u007f<>]{0,40}$/, label: 'Anrede', standard: cira.STANDARD.anrede },
+  // Modell je Rolle (Modell-Block): gespeichert wird nur, was der Modellserver
+  // gerade auflistet (setzeCira, bekannte) — ein Tippfehler kommt nicht durch.
+  // modellLokal ist der alte Schluessel und heisst jetzt Rolle "Schnell".
+  modellLokal: { art: 'modell', label: 'Modell Schnell', standard: cira.STANDARD.modellLokal },
+  modellText: { art: 'modell', label: 'Modell Text', standard: cira.STANDARD.modellText },
+  modellDenken: { art: 'modell', label: 'Modell Denken', standard: cira.STANDARD.modellDenken },
+  modellCode: { art: 'modell', label: 'Modell Code', standard: cira.STANDARD.modellCode },
+  // Eigene Woerter je Rolle, kommagetrennt.
+  woerterSchnell: { art: 'text', re: WOERTER_RE, label: 'Eigene Wörter Schnell', standard: cira.STANDARD.woerterSchnell },
+  woerterText: { art: 'text', re: WOERTER_RE, label: 'Eigene Wörter Text', standard: cira.STANDARD.woerterText },
+  woerterDenken: { art: 'text', re: WOERTER_RE, label: 'Eigene Wörter Denken', standard: cira.STANDARD.woerterDenken },
+  woerterCode: { art: 'text', re: WOERTER_RE, label: 'Eigene Wörter Code', standard: cira.STANDARD.woerterCode },
+  claudeErlaubt: { art: 'bool', label: 'Claude erlaubt', standard: cira.STANDARD.claudeErlaubt },
+  claudeModell: { art: 'wahl', wahl: ['', 'haiku', 'sonnet', 'opus'], label: 'Claude-Modell', standard: cira.STANDARD.claudeModell },
+  claudeMonatslimitEur: { art: 'zahl', min: 0.5, max: 500, label: 'Monatslimit Claude in EUR', standard: cira.STANDARD.claudeMonatslimitEur },
+  nichtStoerenAb: { art: 'text', re: UHRZEIT_RE, label: 'Nicht stören ab', standard: cira.STANDARD.nichtStoerenAb },
+  nichtStoerenBis: { art: 'text', re: UHRZEIT_RE, label: 'Nicht stören bis', standard: cira.STANDARD.nichtStoerenBis },
+  // Buehne im Cockpit: Partikel-Orb oder Flaeche (siri-orb), README §5.2.
+  orbStil: { art: 'wahl', wahl: ['partikel', 'flaeche'], label: 'Orb-Stil', standard: cira.STANDARD.orbStil },
+  // Desktop-Benachrichtigung (Notification API) zusaetzlich zur Karte in der Seite; Owner 15.10.: Standard aus.
+  benachrichtigungDesktop: { art: 'bool', label: 'Desktop-Benachrichtigung', standard: cira.STANDARD.benachrichtigungDesktop },
+};
+const CIRA_FELDER_ANZEIGE = Object.fromEntries(Object.entries(CIRA_FELDER).map(([k, r]) =>
+  [k, { art: r.art, label: r.label, ...(r.wahl ? { wahl: r.wahl } : {}), ...(r.art === 'zahl' ? { min: r.min, max: r.max } : {}) }]));
+function ciraEinstellungen() {
+  const c = config.cira && typeof config.cira === 'object' ? config.cira : {};
+  return Object.fromEntries(Object.entries(CIRA_FELDER).map(([k, r]) => [k, c[k] === undefined ? r.standard : c[k]]));
+}
+// bekannte: Modellnamen, die der Server gerade auflistet (nur noetig, wenn ein Modell gesetzt wird).
+function setzeCira(daten, bekannte = null) {
+  for (const k of Object.keys(daten)) if (!Object.hasOwn(CIRA_FELDER, k)) throw new Error(/exe|pfad|path/i.test(k) ? k + ': nur in config.json aenderbar.' : 'Unbekanntes Feld: ' + k);
+  const neu = {};
+  for (const [k, r] of Object.entries(CIRA_FELDER)) {
+    if (!Object.hasOwn(daten, k)) continue;
+    const w = daten[k];
+    if (r.art === 'bool') { if (typeof w !== 'boolean') throw new Error(r.label + ': ja oder nein.'); neu[k] = w; }
+    else if (r.art === 'modell') {
+      if (typeof w !== 'string') throw new Error(r.label + ': Name oder leer.');
+      if (w.trim() && !(bekannte || []).includes(w.trim())) throw new Error(r.label + ': „' + w.trim().slice(0, 80) + '“ kennt der Modellserver nicht. Liste aktualisieren oder das Modell laden.');
+      neu[k] = w.trim();
+    }
+    else if (r.art === 'wahl') { if (!r.wahl.includes(w)) throw new Error(r.label + ': ' + r.wahl.filter(Boolean).join(', ') + (r.wahl.includes('') ? ' oder leer.' : '.')); neu[k] = w; }
+    else if (r.art === 'zahl') {
+      const n = alsZahl(w);
+      if (!Number.isFinite(n) || n < r.min || n > r.max) throw new Error(r.label + ': zwischen ' + r.min + ' und ' + r.max + '.');
+      neu[k] = Math.round(n * 100) / 100;
+    } else {
+      if (typeof w !== 'string' || !r.re.test(w.trim())) throw new Error(r.label + ': ungueltig.');
+      neu[k] = w.trim();
+    }
+  }
+  if (!Object.keys(neu).length) throw new Error('Kein bekanntes Feld uebergeben.');
+  if (!config.cira || typeof config.cira !== 'object') config.cira = {};
+  const alt = { ...config.cira };
+  Object.assign(config.cira, neu);
+  try {
+    schreibeConfig();
+  } catch (err) {
+    for (const k of Object.keys(config.cira)) delete config.cira[k];
+    Object.assign(config.cira, alt);
+    throw err;
+  }
+  return ciraEinstellungen();
+}
+
+// Claude-Code-Konfiguration (Skills, spaeter Agenten/Plugins in C8). Ohne
+// Claude Code fehlt der Ordner: dann gibt es schlicht keine Skills.
+const claudeOrdner = () => process.env.CLAUDE_CONFIG_DIR || path.join(require('node:os').homedir(), '.claude');
+// Ein Skill ist ein Ordner mit SKILL.md. Nur Namen, kein Inhalt.
+// ponytail: liest bei jedem Aufruf; Cache erst, wenn C8 das Inventar oft braucht.
+function skillNamen(ordner) {
+  let eintraege;
+  try { eintraege = fs.readdirSync(ordner, { withFileTypes: true }); } catch (err) {
+    if (err.code !== 'ENOENT' && err.code !== 'ENOTDIR') console.error('Skills lesen', ordner + ':', err.message);
+    return [];
+  }
+  // Verlinkte Skill-Ordner (Symlink, Junction) zaehlen mit: isDirectory() folgt Links nicht.
+  const ordnerArtig = (e) => e.isDirectory() || (e.isSymbolicLink() && (() => { try { return fs.statSync(path.join(ordner, e.name)).isDirectory(); } catch { return false; } })());
+  return eintraege.filter((e) => /^[\w.:-]{1,80}$/.test(e.name) && ordnerArtig(e) && fs.existsSync(path.join(ordner, e.name, 'SKILL.md'))).map((e) => e.name);
+}
+// Skills eines Arbeitsbereichs: global aus ~/.claude/skills, projekt aus <pfad>/.claude/skills (gewinnt).
+function skillsIn(ab) {
+  const je = new Map(skillNamen(path.join(claudeOrdner(), 'skills')).map((n) => [n, 'global']));
+  const heim = ab && ab.pfad ? ingest.loeseHeim(ab.pfad) : null;
+  if (heim) for (const n of skillNamen(path.join(heim, '.claude', 'skills'))) je.set(n, 'projekt');
+  return [...je].map(([n, quelle]) => ({ name: n, quelle })).sort((a, b) => (a.quelle === b.quelle ? a.name.localeCompare(b.name) : a.quelle === 'projekt' ? -1 : 1));
+}
+// Fuer den Skill-Ablauf (C6b): Namen je Arbeitsbereich bzw. die Arbeitsbereiche, die einen Skill kennen.
+function skillNamenIn(name) {
+  const ab = arbeitsbereiche().find((a) => a.name === name);
+  if (!ab) throw Object.assign(new Error('Arbeitsbereich unbekannt.'), { status: 404 });
+  return skillsIn(ab).map((s) => s.name);
+}
+const skillOrte = (befehl) => arbeitsbereiche().filter((a) => skillsIn(a).some((s) => s.name === befehl)).map((a) => a.name);
+
+function arbeitsbereichAnzeige(a) {
+  const ziel = ingest.loeseHeim(a.pfad);
+  // Von Hand eingetragene Werte gelten erst nach derselben Pruefung wie aus
+  // der Oberflaeche: die Farbe landet in einem style-Attribut.
+  const gilt = (f) => (typeof a[f] === 'string' && ARBEITSBEREICH_FELDER[f].re.test(a[f]) ? a[f] : '');
+  return {
+    name: a.name, kuerzel: gilt('kuerzel').toUpperCase(), farbe: gilt('farbe').toLowerCase(), art: ARBEITSBEREICH_ARTEN.includes(a.art) ? a.art : 'neutral',
+    projekt: a.projekt || null, jiraProjekt: a.jiraProjekt || null, pfad: a.pfad || null, todo: a.todo || null,
+    erreichbar: !!ziel && fs.existsSync(ziel),
+  };
+}
+
+// Ohne Eintrag in config.json: Vorschlag aus den Daten (je Projekt der
+// haeufigste Ordner, auf den Projektordner gekuerzt) plus "Global". Nur zum
+// Kopieren in die Datei — geschrieben wird hier nichts.
+const VORSCHLAG_FARBEN = ['#f97316', '#57c98a', '#e0b355', '#9aa8ec', '#c084fc', '#52e0b1'];
+function arbeitsbereichVorschlag() {
+  const zeilen = db.prepare(`SELECT project, cwd, COUNT(*) AS n FROM events
+    WHERE cwd IS NOT NULL AND cwd <> '' AND COALESCE(source, '') <> 'lokal'
+    GROUP BY project, cwd ORDER BY n DESC`).all();
+  const jeProjekt = new Map();
+  for (const z of zeilen) {
+    if (jeProjekt.size >= VORSCHLAG_FARBEN.length) break;
+    if (jeProjekt.has(z.project) || metrics.isOverhead(z.project)) continue;
+    const teile = z.cwd.split(/[\\/]/);
+    const i = teile.lastIndexOf(z.project);
+    jeProjekt.set(z.project, i > 0 ? teile.slice(0, i + 1).join(path.sep) : z.cwd);
+  }
+  const kuerzelVon = (p) => (String(p).replace(/[^A-Za-z0-9]/g, '').slice(0, 2) || 'P').toUpperCase();
+  return [...jeProjekt].map(([projekt, pfad], i) => ({
+    name: projekt, kuerzel: kuerzelVon(projekt), farbe: VORSCHLAG_FARBEN[i], art: 'projekt', projekt, pfad,
+  })).concat([{ name: 'Global', kuerzel: 'GL', farbe: '#9c9ca6', art: 'global', pfad: '~/.claude' }]);
+}
+
+// Sitzungen (C5): Vorgang einer Sitzung buchen wie /api/buchen. Eine eben
+// gestartete Sitzung hat noch kein Ereignis im Ledger; dann wird nur der
+// Override vorgemerkt, der Backfill zieht ihn beim naechsten Abgleich.
+function vormerkeVorgang(dbx, sid, vorgang) {
+  const roh = typeof vorgang === 'string' ? vorgang.trim() : '';
+  if (roh && !VORGANG_RE.test(roh)) {
+    throw new Error('Vorgang: 2 bis 40 Zeichen, erlaubt sind Buchstaben, Ziffern, Punkt, Unterstrich und Bindestrich.');
+  }
+  if (dbx.prepare('SELECT 1 FROM events WHERE session_id = ? LIMIT 1').get(sid)) return bucheVorgang(dbx, { session_id: sid, vorgang: roh }).ticket;
+  if (!roh) { dbx.prepare('DELETE FROM overrides WHERE session_id = ?').run(sid); return null; }
+  const ticket = roh.toUpperCase();
+  dbx.prepare(
+    'INSERT INTO overrides (session_id, ticket, note, created_at) VALUES (?,?,?,?) ' +
+    'ON CONFLICT(session_id) DO UPDATE SET ticket = excluded.ticket, note = excluded.note, created_at = excluded.created_at'
+  ).run(sid, ticket, 'Sitzung aus c2invoice', new Date().toISOString());
+  return ticket;
+}
+const sitzungDienst = sitzungen.erzeuge({
+  db, arbeitsbereiche, heim: ingest.loeseHeim, vormerken: (sid, v) => vormerkeVorgang(db, sid, v), werkzeug: (p) => metrics.isOverhead(p),
+  exe: () => claude.findeClaude(config.cira && config.cira.claudeExe),
+  zusammenfassen: (verlauf) => ciraDienst.zusammenfassen(verlauf),
+  // Nur aus der Datei (oeffnet einen Prozess): nicht ueber die Oberflaeche aenderbar.
+  // Fehlt der Schluessel, gilt unter Windows der Standard aus config.example.json; ein leerer Wert schaltet "Zum Terminal" bewusst ab.
+  terminalBefehl: () => (config.terminal && typeof config.terminal.befehl === 'string' ? config.terminal.befehl : (process.platform === 'win32' ? 'wt -d "{pfad}" "{claude}" --resume {sitzung}' : '')),
+});
+// Skill-Ablauf (C6b): Schritte als Eingaben in einer Sitzung.
+const ablaufDienst = ablauf.erzeuge({ db, sitzungen: sitzungDienst, skills: skillNamenIn });
+// Board (C7a): TODO.md je Arbeitsbereich und Jira. Neue @id-Praefixe nie gleich
+// einem Jira-Projektschluessel (sonst kommentierte der Jira-Abgleich fremde Tickets).
+const boardDienst = board.erzeuge({ db, bereiche: arbeitsbereiche, loeseHeim: ingest.loeseHeim, jira,
+  gesperrt: () => [...((config.jira && config.jira.projectKeys) || []), ...arbeitsbereiche().map((a) => a.jiraProjekt).filter(Boolean)] });
+// Werkzeuge (C8): Claude-Code-Konfiguration je Arbeitsbereich. Der Bereich der
+// Art 'global' ist die Spalte Global; Pfade und Lager nur aus der Datei.
+const werkzeugDienst = werkzeuge.erzeuge({
+  db,
+  bereiche: () => arbeitsbereiche().filter((a) => a.art !== 'global').map((a) => {
+    const pfad = a.pfad ? ingest.loeseHeim(a.pfad) : null;
+    return { name: a.name, pfad: pfad && fs.existsSync(pfad) ? pfad : null, projekt: a.projekt || null };
+  }),
+  heim: () => ingest.loeseHeim('~'),
+  lager: () => (config.claudeConfig && config.claudeConfig.lager ? ingest.loeseHeim(config.claudeConfig.lager) : null),
+  // Sicherungen zentral in data/ statt neben der Datei: eine Kopie von
+  // settings.local.json im Projektordner landete sonst mit `git add .` im Repo.
+  sicherung: () => path.join(__dirname, 'data', 'sicherungen', 'werkzeuge'),
+  exe: () => claude.findeClaude(config.cira && config.cira.claudeExe),
+  env: () => claude.kindUmgebung(),
+});
+// Geraetekopplung (S1): nur gekoppelte Geraete schreiben. Immer an; abschalten
+// nur ausdruecklich (C2I_GERAETESCHUTZ=aus setzt allein der Selfcheck fuer
+// seine alten HTTP-Tests) — main() warnt dann im Protokoll.
+let geraeteDienst = geraete.erzeuge({ db });
+let geraeteSchutz = process.env.C2I_GERAETESCHUTZ !== 'aus';
+// Ohne Geraet erlaubt: der Hook (eigenes Geheimnis) und die Kopplung selbst.
+const OHNE_GERAET = new Set(['/api/hook', '/api/kopplung/start', '/api/kopplung/bestaetigen']);
+
+// Beim Ende des Servers die eigenen Claude-Prozesse mitnehmen (synchron).
+process.on('exit', () => sitzungDienst.beendeAlle());
+
+// Absturz sichtbar machen: die Aufgabe TokenLedger verwirft stdout/stderr, ein
+// unbehandelter Fehler beendete den Server bisher spurlos (20.10.). Der Stack
+// kommt nach data/absturz.log, beendet wird wie vorher; die Aufgabe startet neu.
+function absturz(art, err) {
+  try { fs.appendFileSync(path.join(__dirname, 'data', 'absturz.log'), new Date().toISOString() + ' ' + art + ' (PID ' + process.pid + ')\n' + ((err && err.stack) || String(err)) + '\n\n'); } catch { /* Platte weg: dann wenigstens stderr */ }
+  console.error(art + ':', err);
+  process.exit(1);
+}
+// Nur als eigener Prozess: der Selfcheck laedt server.js per require und hat eigene Regeln.
+if (require.main === module) {
+  process.on('uncaughtException', (err) => absturz('uncaughtException', err));
+  process.on('unhandledRejection', (err) => absturz('unhandledRejection', err));
+}
+
+// Hook fremder Sitzungen (integration/claude-hook.mjs): kommt nicht aus dem
+// Browser, deshalb ein eigenes Geheimnis (hook.geheimnis, beim ersten Start
+// erzeugt). Verglichen werden die Hashes, in fester Zeit.
+function hookErlaubt(req) {
+  const soll = config.hook && typeof config.hook.geheimnis === 'string' ? config.hook.geheimnis : '';
+  const ist = req.headers['x-c2invoice-geheimnis'];
+  if (soll.length < 32 || typeof ist !== 'string') return false;
+  const h = (s) => crypto.createHash('sha256').update(s).digest();
+  return crypto.timingSafeEqual(h(soll), h(ist));
+}
+
+// Dienst-Status fuer die Kopfzeile (Shell v2). Muster aus Jarvis
+// core/vitals.js: jeder Punkt muss rot werden koennen, 4 s Zeitlimit.
+// Angezeigt wird nur, was eingerichtet ist; Ledger und Claude immer.
+// Abgefragt werden ausschliesslich Adressen aus config.json, nie aus der
+// Anfrage — sonst waere die Route ein offener Weiterleiter.
+let letzterJira = null;   // { at, ok, grund } aus syncJira()
+const hostVon = (u) => { try { return new URL(u).host; } catch { return ''; } };
+async function holeDienst(url) {
+  const r = await fetch(url, { signal: AbortSignal.timeout(4000), redirect: 'error' });
+  // Koerper verwerfen, sonst bleibt die Verbindung offen (wie modelle.holeJson).
+  if (!r.ok) { await r.body?.cancel().catch(() => {}); throw new Error('HTTP ' + r.status); }
+  return r.json().catch(() => ({}));
+}
+// Angemeldet ist Claude Code, wenn ~/.claude.json ein Konto traegt. Die Datei
+// kann gross sein: gelesen wird nur, wenn sie sich geaendert hat.
+let claudeStand = { mtime: -1, ok: false };
+function claudeStatus() {
+  const datei = path.join(ingest.loeseHeim('~'), '.claude.json');
+  try {
+    const m = fs.statSync(datei).mtimeMs;
+    if (m !== claudeStand.mtime) claudeStand = { mtime: m, ok: !!JSON.parse(fs.readFileSync(datei, 'utf8')).oauthAccount };
+    return claudeStand.ok ? { ok: true, detail: 'angemeldet' } : { ok: false, detail: 'nicht angemeldet' };
+  } catch {
+    return { ok: false, detail: 'keine Anmeldung gefunden' };
+  }
+}
+// 10 s zwischengespeichert, eine laufende Pruefung wird geteilt: eine fremde
+// Seite kann die Route per no-cors beliebig oft ausloesen (Security-Review B).
+let dienstStand = { zeit: 0, laeuft: null, wert: null };
+function dienste() {
+  if (dienstStand.laeuft) return dienstStand.laeuft;
+  if (dienstStand.wert && Date.now() - dienstStand.zeit < 10000) return Promise.resolve(dienstStand.wert);
+  dienstStand.laeuft = diensteJetzt().then((w) => { dienstStand = { zeit: Date.now(), laeuft: null, wert: w }; return w; },
+    (err) => { dienstStand.laeuft = null; throw err; });
+  return dienstStand.laeuft;
+}
+// Der Proxy traegt auf jeder Antwort die Kennung x-c2i-proxy. Ohne sie antwortet
+// ein fremdes Programm auf dem Port — dann erreicht Cira kein Modell, auch wenn
+// "etwas" antwortet. Ein Fehlerstatus mit Kennung (502) kommt vom Proxy selbst:
+// er laeuft, nur der Modellserver dahinter nicht (der steht dann rot daneben).
+let proxyStartFehler = null;   // aus starteModellProxy, fuer den Dienst-Status
+async function proxyStatus(port) {
+  let r;
+  try {
+    r = await fetch('http://127.0.0.1:' + port + '/v1/models', { signal: AbortSignal.timeout(4000), redirect: 'error' });
+    await r.arrayBuffer().catch(() => null);
+  } catch {
+    return { ok: false, detail: proxyStartFehler ? 'nicht gestartet · ' + proxyStartFehler : 'nicht erreichbar · Port ' + port };
+  }
+  if (r.headers.get('x-c2i-proxy') !== '1') return { ok: false, detail: 'Port ' + port + ' belegt, kein c2invoice-Proxy' };
+  return { ok: true, detail: 'Port ' + port + (r.ok ? '' : ' · Modellserver antwortet nicht') };
+}
+const LAUFZEIT_NAME = { ollama: 'Ollama', lmstudio: 'LM Studio', lemonade: 'Lemonade', llamacpp: 'llama.cpp', openai: 'OpenAI-kompatibel', unbekannt: 'Laufzeit unbekannt' };
+async function diensteJetzt() {
+  const lm = config.lokaleModelle;
+  const n8n = config.dienste && config.dienste.n8nUrl;
+  const basis = (u) => String(u).replace(/\/+$/, '');
+  const proxyPort = lm && (Number(lm.proxyPort) || 11435);
+  const [modellserver, proxy, n8nStand] = await Promise.all([
+    // Dieselbe Liste wie Einstellungen → Lokale Modelle, damit beide dasselbe sagen.
+    // Ohne Modell kann Cira lokal nichts beantworten: erreichbar allein ist nicht gruen.
+    lm && lm.upstreamUrl ? modelle.liste({ cfg: config }).then((l) => {
+      const art = LAUFZEIT_NAME[l.laufzeit] || l.laufzeit;
+      if (!l.erreichbar) return { ok: false, detail: 'nicht erreichbar · ' + hostVon(lm.upstreamUrl) };
+      if (!l.modelle.length) return { ok: false, detail: art + ' · kein Modell' };
+      return { ok: true, detail: art + ' · ' + l.modelle.length + (l.modelle.length === 1 ? ' Modell' : ' Modelle') };
+    }).catch((err) => ({ ok: false, detail: 'Prüfung fehlgeschlagen · ' + String(err.message).slice(0, 80) })) : null,
+    // Ohne laufenden Proxy erreicht Cira kein lokales Modell und lokale Arbeit bleibt unerfasst.
+    lm && lm.upstreamUrl ? proxyStatus(proxyPort) : null,
+    n8n ? holeDienst(basis(n8n) + '/healthz').then(() => ({ ok: true, detail: 'läuft' }), () => ({ ok: false, detail: 'nicht erreichbar · ' + hostVon(n8n) })) : null,
+  ]);
+  const liste = [];
+  if (modellserver) liste.push({ name: 'Modellserver', ...modellserver }, { name: 'Modell-Proxy', ...proxy });
+  liste.push({ name: 'Claude', ...claudeStatus() });
+  liste.push({ name: 'Ledger', ok: !lastIngest.error, detail: '127.0.0.1:' + config.port + (lastIngest.error ? ' · Einlesen gestört' : '') });
+  if (config.jira && config.jira.enabled) {
+    liste.push({ name: 'Jira', ok: !!(letzterJira && letzterJira.ok),
+      detail: !letzterJira ? 'noch kein Abgleich'
+        : letzterJira.ok ? 'Abgleich ' + new Date(letzterJira.at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : letzterJira.grund });
+  }
+  if (n8nStand) liste.push({ name: 'n8n', ...n8nStand });
+  return liste;
 }
 
 function opts(u) {
@@ -785,17 +1249,102 @@ function handle(req, res) {
   // setzen — CORS verhindert nur das Lesen der Antwort, nicht das Absenden.
   // Den Header setzt der Browser selbst, Javascript kann ihn nicht faelschen.
   const ziel = req.headers['sec-fetch-site'];
-  if (req.method === 'POST' && ziel && ziel !== 'same-origin' && ziel !== 'none') {
+  const schreibt = req.method !== 'GET' && req.method !== 'HEAD';
+  if (schreibt && ziel && ziel !== 'same-origin' && ziel !== 'none') {
     return sendJson(res, { error: 'Fremde Herkunft' }, 403);
   }
   // Aeltere Browser schicken Sec-Fetch-Site nicht, Origin aber bei jedem POST.
   // Erlaubt: die eigene Seite und die freigegebenen Einbettungen. Ohne Origin
   // (curl, Skripte) bleibt der Aufruf wie bisher moeglich.
-  if (req.method === 'POST' && herkunft && herkunft !== 'http://' + host && !HERKUNFT_ERLAUBT.includes(herkunft)) {
+  if (schreibt && herkunft && herkunft !== 'http://' + host && !HERKUNFT_ERLAUBT.includes(herkunft)) {
     return sendJson(res, { error: 'Fremde Herkunft' }, 403);
   }
 
+  // Schreiben nur von gekoppelten Geraeten. Die Kopfzeilen oben haelt eine
+  // fremde Webseite ab, das hier auch einen lokalen Prozess, der sie faelscht.
+  if (schreibt && geraeteSchutz && !OHNE_GERAET.has(p)) {
+    let g;
+    // Ein DB-Fehler ist kein "nicht gekoppelt": sonst saehe man einen Kopplungsdialog statt der Ursache.
+    try { g = geraeteDienst.geraet(req); } catch (err) {
+      console.error('Geraetepruefung fehlgeschlagen (' + p + '):', err);
+      req.resume();
+      return sendJson(res, { error: 'Geräteprüfung fehlgeschlagen, Details im Serverprotokoll.' }, 500);
+    }
+    if (!g) {
+      req.resume();
+      res.setHeader('x-c2invoice-kopplung', 'noetig');
+      return sendJson(res, { error: 'Dieses Gerät ist nicht gekoppelt. Zum Schreiben bitte zuerst koppeln.', kopplung: true }, 401);
+    }
+  }
+
   try {
+    if (p === '/api/kopplung/status' && req.method === 'GET') {
+      const g = geraeteDienst.geraet(req);
+      return sendJson(res, { gekoppelt: !!g || !geraeteSchutz, geraet: g ? g.name : null, schutz: geraeteSchutz });
+    }
+    if (p === '/api/kopplung/start' && req.method === 'POST') {
+      return leseKoerper(req, (fehler, d) => {
+        if (fehler) return sendJson(res, { error: fehler }, 400);
+        geraeteDienst.starte(d && typeof d === 'object' ? d : {}).then(
+          (r) => sendJson(res, { ok: true, ...r }),
+          (err) => sendJson(res, { error: err.message }, err.status || 400));
+      });
+    }
+    if (p === '/api/kopplung/bestaetigen' && req.method === 'POST') {
+      return leseKoerper(req, (fehler, d) => {
+        if (fehler) return sendJson(res, { error: fehler }, 400);
+        try {
+          const r = geraeteDienst.bestaetige(d && typeof d === 'object' ? d : {});
+          // Browser: Token nur als HttpOnly-Cookie; Programme (client) bekommen es einmal im Koerper.
+          if (r.geraet.art === 'client') return sendJson(res, { ok: true, geraet: r.geraet, token: r.token });
+          res.setHeader('set-cookie', geraeteDienst.cookie(r.token));
+          return sendJson(res, { ok: true, geraet: r.geraet });
+        } catch (err) { return sendJson(res, { error: err.message }, err.status || 400); }
+      });
+    }
+    if (p === '/api/geraete' && req.method === 'GET') return sendJson(res, { geraete: geraeteDienst.liste(geraeteDienst.geraet(req)) });
+    const mg = req.method === 'POST' && p.match(/^\/api\/geraet\/(\d{1,9})\/entfernen$/);
+    if (mg) {
+      req.resume();
+      try {
+        const id = Number(mg[1]);
+        const selbst = geraeteDienst.geraet(req);
+        geraeteDienst.entferne(id);
+        if (selbst && selbst.id === id) res.setHeader('set-cookie', geraeteDienst.cookieWeg());
+        return sendJson(res, { ok: true, id });
+      } catch (err) { return sendJson(res, { error: err.message }, err.status || 400); }
+    }
+    if (ciraDienst.routen(req, res, p, u, { sendJson, leseKoerper })) return;
+    if (sitzungDienst.routen(req, res, p, u, { sendJson, leseKoerper })) return;
+    if (ablaufDienst.routen(req, res, p, u, { sendJson, leseKoerper })) return;
+    if (boardDienst.routen(req, res, p, u, { sendJson, leseKoerper })) return;
+    if (werkzeugDienst.routen(req, res, p, u, { sendJson, leseKoerper })) return;
+    if (p === '/api/hook' && req.method === 'POST') {
+      // Vor dem Lesen des Koerpers: ohne Geheimnis entsteht nichts.
+      if (!hookErlaubt(req)) { req.resume(); return sendJson(res, { error: 'Nicht berechtigt' }, 401); }
+      return antworte(req, res, (d) => sitzungDienst.hook(d));
+    }
+    if (p === '/api/cira/einstellungen' && req.method === 'POST') {
+      // Ein gesetztes Modell wird gegen die Liste des Modellservers geprueft (async), alles andere wie bisher.
+      return leseKoerper(req, async (fehler, roh) => {
+        if (fehler) return sendJson(res, { error: fehler }, 400);
+        const d = roh && typeof roh === 'object' && !Array.isArray(roh) ? roh : {};
+        try {
+          const mitModell = Object.entries(d).some(([k, w]) => CIRA_FELDER[k] && CIRA_FELDER[k].art === 'modell' && typeof w === 'string' && w.trim());
+          const bekannte = mitModell ? await modelle.bekannteModelle({ cfg: config }) : null;
+          sendJson(res, { ok: true, cira: setzeCira(d, bekannte) });
+        } catch (err) { sendJson(res, { error: err.message }, 400); }
+      });
+    }
+    if (modelle.routen(req, res, p, { sendJson, leseKoerper, cfg: config })) return;
+    if (p === '/api/cira/einstellungen') {
+      return sendJson(res, {
+        cira: ciraEinstellungen(), felder: CIRA_FELDER_ANZEIGE,
+        name: (config.cira && typeof config.cira.name === 'string' && config.cira.name.trim().slice(0, 40)) || 'Cira',
+        verbraucht_eur: metrics.ciraKostenMonatEur(db),
+      });
+    }
+
     if (p === '/api/summary') {
       const o = opts(u);
       const tickets = metrics.byTicket(db, o);
@@ -829,6 +1378,9 @@ function handle(req, res) {
         // Hub-Kennzahlen: eine Rechnung kann Zeit ausserhalb des Zeitraums
         // enthalten. Das Detail rechnet mit dem gestellten Betrag.
         tickets: tickets.map((t) => ({ ...t, wert: metrics.mehrwert(t, 0) })),
+        // Alle Budgets, nicht nur die Vorgaenge im Zeitraum: die Glocke meldet
+        // auch einen Vorgang, an dem diesen Monat niemand gearbeitet hat.
+        budgets: metrics.budgets(db),
         // Dollar je Tag und Vorgang fuer die Sparklines der Vorgangstabelle.
         ticket_verlauf: metrics.verlaufJeVorgang(db, o),
         projekt_verlauf: metrics.verlaufJeProjekt(db, o),
@@ -876,10 +1428,12 @@ function handle(req, res) {
           // erscheint erst gar nicht.
           jiraBaseUrl: config.jira && config.jira.enabled ? config.jira.baseUrl || null : null,
           jiraProjectKeys: config.jira && config.jira.enabled ? config.jira.projectKeys || [] : [],
+          // Navigation zeigt Bereiche spaeterer Bloecke nur damit (kern.js navSeiten).
+          geplanteBereiche: !!(config.oberflaeche && config.oberflaeche.geplanteBereiche === true),
         },
         pricing: pricing.info(),
         lastIngest,
-        codeStand: CODE_STAND,
+        codeStand: codeStand(),
       });
     }
 
@@ -887,7 +1441,20 @@ function handle(req, res) {
       // Begrenzen, damit unsinnige Werte kein ungueltiges Datum erzeugen.
       const raw = Number(u.searchParams.get('minutes'));
       const minutes = Number.isFinite(raw) && raw > 0 ? Math.min(raw, 60 * 24 * 31) : 60;
-      return sendJson(res, { ...metrics.live(db, { minutes }), timer: zeit.timerAktuell(db), lastIngest });
+      return sendJson(res, {
+        ...metrics.live(db, { minutes }), timer: zeit.timerAktuell(db), lastIngest,
+        block5h: metrics.block5h(db, { limit: config.limit5hTokens }),
+      });
+    }
+
+    // Shell v2: Badges der Navigation aus einer Quelle (BACKEND §1). Weitere
+    // Felder kommen je Block dazu (freigaben C2, sitzungen C5 …).
+    if (p === '/api/zaehler') return sendJson(res, { live: metrics.liveSitzungen(db), freigaben: freigaben.offenAnzahl(db), sitzungen: sitzungDienst.anzahlOffen() });
+    if (p === '/api/dienste') {
+      return dienste().then((d) => sendJson(res, { dienste: d }), (err) => {
+        console.error('Dienst-Status:', err);
+        sendJson(res, { error: 'Interner Fehler, Details im Serverprotokoll' }, 500);
+      });
     }
 
     if (p === '/api/tickets') return sendJson(res, metrics.byTicket(db, opts(u)));
@@ -967,10 +1534,14 @@ function handle(req, res) {
         // Zahlensaetze vom Server, die Oberflaeche waehlt nur aus.
         wert_nur_claude: metrics.mehrwert({ ...row, arbeitswert: row.arbeitswert_claude, manuell_hours: 0, manuell_nicht_hours: 0 }, abr ? abr.betrag_eur : 0),
         manuelle_eintraege: zeit.liste(db, { ziel_art: 'vorgang', ziel_schluessel: key }),
+        budget: metrics.budgetFuer(db, key),
+        // Modul ueber vorgangLog, nicht sitzungen.*: die lokale Liste oben heisst auch sitzungen.
+        // Ein Fehler im Log reisst die Kennzahlen nicht mit, steht aber da (log null + logFehler).
+        ...(() => { try { return { log: vorgangLog(db, key) }; } catch (err) { console.error('Vorgangs-Log ' + key + ':', err.message); return { log: null, logFehler: 'Vorgangs-Log nicht lesbar.' }; } })(),
       });
     }
 
-    if (p === '/api/refresh') {
+    if (p === '/api/refresh' && req.method === 'POST') {
       refreshData();
       return sendJson(res, { ok: true, lastIngest });
     }
@@ -1007,6 +1578,18 @@ function handle(req, res) {
 
     // Zeitmodell je Vorgang oder Sitzung. Wirkt sofort: die Zeit wird bei
     // jeder Auswertung neu verteilt, ein Nachtrag ist nicht noetig.
+    // Budget je Vorgang setzen oder mit null entfernen. Grenzen in metrics.setzeBudget.
+    if (p === '/api/budget' && req.method === 'POST') {
+      return leseKoerper(req, (fehler, daten) => {
+        if (fehler) return sendJson(res, { error: fehler }, 400);
+        try {
+          return sendJson(res, { ok: true, ...metrics.setzeBudget(db, daten || {}) });
+        } catch (err) {
+          return sendJson(res, { error: err.message }, 400);
+        }
+      });
+    }
+
     if (p === '/api/zeitmodell' && req.method === 'POST') {
       return leseKoerper(req, (fehler, daten) => {
         if (fehler) return sendJson(res, { error: fehler }, 400);
@@ -1108,6 +1691,24 @@ function handle(req, res) {
       return sendJson(res, { werte, waehrung: config.waehrung, pfad: 'config.json' });
     }
 
+    // Arbeitsbereiche: lesen mit Erreichbarkeit des Ordners; schreiben nur
+    // Kuerzel, Farbe und Verweise (Pfade bleiben der Datei vorbehalten).
+    if (p === '/api/arbeitsbereich' && req.method === 'POST') return antworte(req, res, setzeArbeitsbereich);
+    // Skill-Kacheln im Cockpit (C4): Namen je Arbeitsbereich, gestartet als Ablauf (C6b).
+    if (p === '/api/cira/skills' && req.method === 'GET') {
+      const alle = arbeitsbereiche();
+      const name = u.searchParams.get('arbeitsbereich');
+      const ab = name ? alle.find((a) => a.name === name) : alle[0];
+      if (name && !ab) return sendJson(res, { error: 'Arbeitsbereich unbekannt.' }, 404);
+      const skills = skillsIn(ab);
+      return sendJson(res, { arbeitsbereich: ab ? ab.name : null, arbeitsbereiche: alle.map((a) => a.name), skills: skills.slice(0, 60), mehr: Math.max(0, skills.length - 60) });
+    }
+
+    if (p === '/api/arbeitsbereiche') {
+      const liste = arbeitsbereiche().map(arbeitsbereichAnzeige);
+      return sendJson(res, { arbeitsbereiche: liste, vorschlag: liste.length ? null : arbeitsbereichVorschlag(), pfad: 'config.json' });
+    }
+
     // --- Rechnungen ---------------------------------------------------------
     // Alle POSTs laufen bereits durch die Herkunftspruefung weiter oben.
     if (p === '/api/rechnungen') {
@@ -1149,30 +1750,14 @@ function handle(req, res) {
     if (p === '/api/rechnung' && req.method === 'POST') {
       return leseKoerper(req, (fehler, daten) => {
         if (fehler) return sendJson(res, { error: fehler }, 400);
-        let inv, kid;
+        let r;
         try {
-          // Die Pruefung gehoert hierher und nicht in rechnung.js: dort waere
-          // ein require auf kontakte.js ein Kreis ueber angebot.js.
-          kid = kontakte.pruefeId(db, daten.kontaktId);
-          inv = rechnung.erstelle(db, { ...daten, kontaktId: kid });
+          r = stelleRechnung(db, daten || {});
         } catch (err) {
           // 409: der Betrag weicht von der Vorschau ab, nichts geschrieben.
           return sendJson(res, { error: err.message }, err.abweichung ? 409 : 400);
         }
-        // Ab hier ist die Rechnung geschrieben. Was danach scheitert, darf
-        // nicht als Absage zurueckgehen — der Editor hielte sie fuer nicht
-        // erstellt, und ein zweiter Versuch zoege eine zweite Nummer.
-        let erechnungFehlt = [];
-        try {
-          // Wer eine Rechnung bekommt, ist kein Lead mehr.
-          kontakte.macheKunde(db, kid);
-          // Gleich sagen, was der E-Rechnung fehlt: eine gestellte Rechnung
-          // laesst sich nicht mehr ergaenzen, nur stornieren.
-          erechnungFehlt = erechnung.pruefe(inv);
-        } catch (err) {
-          console.error('Nach dem Erstellen von', inv.nr, err);
-        }
-        return sendJson(res, { ok: true, nr: inv.nr, brutto_eur: inv.brutto_eur, erechnung_fehlt: erechnungFehlt });
+        return sendJson(res, { ok: true, ...r });
       });
     }
 
@@ -1560,6 +2145,11 @@ const server = http.createServer(handle);
 // Jira-Abgleich laeuft nur, wenn er in der Konfiguration eingeschaltet ist
 // und ein Zugangstoken bereitsteht. Fehler beenden den Server nicht.
 async function syncJira() {
+  const r = await syncJiraLauf();
+  letzterJira = { at: new Date().toISOString(), ok: r.ok, grund: r.grund || '' };
+  return r;
+}
+async function syncJiraLauf() {
   if (!config.jira || !config.jira.enabled) {
     return { ok: false, grund: 'Jira-Abgleich ist ausgeschaltet.' };
   }
@@ -1606,6 +2196,28 @@ function pruefeLogverzeichnis() {
   );
 }
 
+// Der Modell-Proxy laeuft mit dem Server (Owner 15.10.2026, Q3): ohne ihn
+// erreicht Cira kein lokales Modell und lokale Arbeit bleibt unerfasst. Laeuft
+// er schon (Autostart, npm run proxy), ist der Port belegt — das ist kein
+// Fehler. Die Probe startet ihn nie, sie wuerde dem echten Proxy den Port nehmen.
+async function starteModellProxy({ start = (port) => require('./ollama-proxy').start(port) } = {}) {
+  const lm = config.lokaleModelle;
+  if (!(lm && lm.upstreamUrl) || process.env.C2I_PROBE === '1') return null;
+  const port = Number(lm.proxyPort) || 11435;
+  proxyStartFehler = null;
+  try {
+    await start(port);
+    console.log('Modell-Proxy laeuft auf 127.0.0.1:' + port);
+    return 'eigen';
+  } catch (err) {
+    // Ob auf dem belegten Port wirklich der Proxy laeuft, zeigt der Dienst-Status (Kennung).
+    if (err && err.code === 'EADDRINUSE') { console.log('Modell-Proxy: Port ' + port + ' belegt, Proxy laeuft extern.'); return 'extern'; }
+    proxyStartFehler = String((err && (err.code || err.message)) || 'unbekannt').slice(0, 60);
+    console.error('Modell-Proxy nicht gestartet:', err && err.message);
+    return null;
+  }
+}
+
 async function main() {
   pruefeLogverzeichnis();
   // Erst den Port, dann alles andere. Die geplante Aufgabe startet alle zehn
@@ -1625,6 +2237,19 @@ async function main() {
     }
     throw err;
   }
+  // Erst nach listen(): eine zweite Instanz (oder der Selfcheck, der server.js
+  // laedt) darf die Sitzungen der laufenden nicht als beendet markieren.
+  try { sitzungDienst.aufraeumen(); } catch (e) { console.error('Sitzungen aufraeumen:', e); }
+  try { ablaufDienst.aufraeumen(); } catch (e) { console.error('Ablaeufe aufraeumen:', e); }
+  if (!geraeteSchutz) console.warn('WARNUNG: Geraeteschutz ist aus (C2I_GERAETESCHUTZ=aus) — jeder lokale Prozess kann schreiben.');
+  // Geheimnis fuer den Hook fremder Sitzungen (C5): einmal erzeugen, steht
+  // nur in config.json und geht in keine Antwort.
+  if (!config.hook || typeof config.hook.geheimnis !== 'string' || config.hook.geheimnis.length < 32) {
+    config.hook = { ...(config.hook || {}), geheimnis: crypto.randomBytes(32).toString('base64url') };
+    // Scheitert das Schreiben, findet integration/claude-hook.mjs kein Geheimnis und meldet still nichts.
+    try { schreibeConfig(); } catch (e) { console.error('Hook-Geheimnis nicht gespeichert, der Hook meldet nichts:', e.message); }
+  }
+  await starteModellProxy();
   await refreshData();
   // Beim Start alle offenen: Aenderungen an config.json wirken erst nach einem
   // Neustart, und Logs koennen laenger als 48 h ausgeblieben sein.
@@ -1647,19 +2272,29 @@ async function main() {
   );
 }
 
-process.on('SIGINT', () => {
-  server.close();
-  db.close();
-  process.exit(0);
-});
+// SIGTERM/SIGHUP wie SIGINT: process.exit loest 'exit' aus, und das beendet
+// die eigenen Claude-Sitzungen mit (sitzungDienst.beendeAlle).
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+  process.on(sig, () => {
+    server.close();
+    db.close();
+    process.exit(0);
+  });
+}
 
 if (require.main === module) main();
 
 module.exports = {
   server, refreshData,
-  setzeEinstellungen, EINSTELLUNGEN,
+  setzeEinstellungen, EINSTELLUNGEN, SCHREIBBAR,
+  setzeArbeitsbereich, ARBEITSBEREICH_FELDER,
+  setzeCira, CIRA_FELDER, ciraEinstellungen,
+  diensteCacheLeeren: () => { dienstStand = { zeit: 0, laeuft: null, wert: null }; },
+  starteModellProxy,
   setzeStammdaten, STAMMDATEN,
   vorlagenListe, setzeVorlage, loescheVorlage,
-  bucheVorgang, eRechnungAntwort,
+  bucheVorgang, eRechnungAntwort, vormerkeVorgang, hookErlaubt,
+  // Tests: Schutz einschalten und einen Dienst mit eigener DB einsetzen.
+  setzeGeraeteSchutz: (an) => { geraeteSchutz = !!an; }, setzeGeraeteDienst: (d) => { geraeteDienst = d; },
   setzeSatz, setzeZeitmodell, csvExport,
 };

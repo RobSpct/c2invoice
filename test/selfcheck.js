@@ -16,6 +16,10 @@ if (!fs.existsSync(path.join(__dirname, '..', 'config.json'))) {
   process.exit(1);
 }
 
+// Die aelteren HTTP-Tests schreiben ohne gekoppeltes Geraet (S1). Ausdruecklich
+// nur hier abgeschaltet; test/cira/s1.js schaltet den Schutz fuer sich wieder ein.
+process.env.C2I_GERAETESCHUTZ = 'aus';
+
 // Die Tests schreiben ueber schreibeConfig() und configGeschuetzt() in die
 // Konfiguration. Das landet in einer Kopie: bricht der Lauf mittendrin ab,
 // bleibt die echte config.json unberuehrt (Toolcheck 15.10., H8). Lesen geht
@@ -3905,6 +3909,20 @@ async function testCodeStandKennung() {
     const mtime = Math.round(fs.statSync(path.join(__dirname, '..', 'server.js')).mtimeMs);
     assert.ok(Number(d.codeStand) >= mtime,
       'Kennung (' + d.codeStand + ') ist aelter als server.js (' + mtime + ')');
+
+    // Die Oberflaeche kommt ohne Neustart aus public/: eine dort geaenderte
+    // Datei muss die Kennung sofort verschieben, sonst bleibt ein alter Tab
+    // unbemerkt auf dem alten Stand.
+    const probe = path.join(__dirname, '..', 'public', 'app', '.stand-probe.tmp');
+    try {
+      fs.writeFileSync(probe, '');
+      const spaeter = Date.now() / 1000 + 3600;
+      fs.utimesSync(probe, spaeter, spaeter);
+      const d3 = await (await fetch(`http://127.0.0.1:${port}/api/summary`)).json();
+      assert.notStrictEqual(d3.codeStand, d.codeStand, 'Oberflaechen-Aenderung ohne Neustart verschiebt die Kennung nicht');
+    } finally { fs.rmSync(probe, { force: true }); }
+    const d4 = await (await fetch(`http://127.0.0.1:${port}/api/summary`)).json();
+    assert.strictEqual(d4.codeStand, d.codeStand, 'Kennung kehrt nach Entfernen der Probe nicht zurueck');
   } finally {
     if (!lauscht) await new Promise((ok) => server.close(ok));
   }
@@ -5269,6 +5287,8 @@ async function testSicherheitsHeader() {
     const csp = seite.headers.get('content-security-policy') || '';
     assert.ok(/script-src 'self'/.test(csp) && /object-src 'none'/.test(csp), 'CSP fehlt oder zu weit: ' + csp);
     assert.ok(!/unsafe-(inline|eval)'[^;]*;?/.test((csp.match(/script-src[^;]*/) || [''])[0]), 'script-src erlaubt Inline/Eval');
+    // Einbetten nur selbst und in Obsidian: sonst koppelt eine fremde Seite per Frame (Clickjacking, Review 1008786).
+    assert.strictEqual((csp.match(/frame-ancestors[^;]*/) || [''])[0].trim(), "frame-ancestors 'self' app://obsidian.md capacitor://localhost", 'frame-ancestors fehlt oder zu weit: ' + csp);
     const inline = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
     assert.ok(inline.length >= 1, 'kein Inline-Skript gefunden, Muster kaputt?');
     for (const code of inline) {
@@ -5304,6 +5324,21 @@ function testBewegung() {
   for (const roh of ['on', null, undefined, '', 'OFF', ' off', '<img>', 1, {}, ['off']]) {
     assert.strictEqual(bewegungAus(roh), 'on', 'durchgelassen: ' + JSON.stringify(roh));
   }
+}
+
+// Release 3.0.0: geplante Bereiche nur mit oberflaeche.geplanteBereiche === true.
+function testNavGeplant() {
+  const { navSeiten } = require('../public/app/kern.js');
+  const seiten = [{ k: 'cockpit' }, { k: 'flows', block: 'C11' }, { k: 'board' }];
+  const ks = (g) => navSeiten(seiten, g).map((s) => s.k).join(',');
+  assert.strictEqual(ks(true), 'cockpit,flows,board');
+  for (const g of [false, undefined, null, 'true', 1]) assert.strictEqual(ks(g), 'cockpit,board', 'durchgelassen: ' + JSON.stringify(g));
+  // Die Vorlage blendet aus: ein frischer Nutzer sieht keine leeren Bereiche.
+  const vorlage = require('../config.example.json');
+  assert.notStrictEqual((vorlage.oberflaeche || {}).geplanteBereiche, true, 'config.example.json zeigt geplante Bereiche');
+  // Die Shell filtert ueber navSeiten, nicht an ihr vorbei.
+  const shell = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'public', 'app', 'shell.js'), 'utf8');
+  assert.match(shell, /const sichtbareSeiten = \(\) => navSeiten\(SEITEN, /);
 }
 
 // --- Zeiterfassung (Block Z1) ----------------------------------------------
@@ -7182,6 +7217,7 @@ async function main() {
   test('Ansprechpartner: einmalige Übernahme, Grenzen, Kontakt muss existieren', testAnsprechpartner);
   test('Kontakte: Kennzahlen je Kontakt zählen nur gestellte Rechnungen', testKennzahlenJeKontakt);
   test('Darstellung: Bewegung reduzieren nur an oder aus', testBewegung);
+  test('Navigation: geplante Bereiche nur mit Schalter, Vorlage blendet aus', testNavGeplant);
   test('Kontakte: Grenzen halten, Teileingabe bleibt harmlos, Lead wird einmal zum Kunden', testKontakte);
   test('Vorlagen: Grenzen halten, fehlender Satz bleibt leer statt null Euro', testVorlagen);
   test('Vorgang traegt Satz und Projekt aus derselben Wahl', testTicketProjekt);
@@ -7310,6 +7346,34 @@ async function main() {
   } catch (err) {
     failed++;
     console.log('  FAIL Zeiterfassung: Routen pruefen und lehnen ab\n       ' + err.message);
+  }
+
+  // Masterplan 3.0 (Cira): je Block eine Datei unter test/cira/, damit diese
+  // Datei nicht weiter waechst. Jede liefert [Name, Funktion]-Paare.
+  for (const [name, fn] of [
+    ...require('./cira/c0')({ configGeschuetzt }),
+    ...require('./cira/c1')({ configGeschuetzt, dbmod, openDbs }),
+    ...require('./cira/c2')({ configGeschuetzt, dbmod, openDbs }),
+    ...require('./cira/c3')({ configGeschuetzt, dbmod, openDbs }),
+    ...require('./cira/modelle')({ configGeschuetzt, dbmod, openDbs }),
+    ...require('./cira/m2')({ configGeschuetzt, dbmod, openDbs }),
+    ...require('./cira/c4')({ configGeschuetzt, dbmod, openDbs }),
+    ...require('./cira/c5')({ configGeschuetzt, dbmod, openDbs }),
+    ...require('./cira/s1')({ configGeschuetzt, dbmod, openDbs }),
+    ...require('./cira/c6')({ configGeschuetzt, dbmod, openDbs }),
+    ...require('./cira/c6b')({ dbmod, openDbs }),
+    ...require('./cira/c7')({ dbmod, openDbs }),
+    ...require('./cira/l')({ dbmod, openDbs }),
+    ...require('./cira/budget')({ dbmod, openDbs }),
+    ...require('./cira/c8')({ dbmod, openDbs }),
+  ]) {
+    try {
+      await fn();
+      console.log('  ok   ' + name);
+    } catch (err) {
+      failed++;
+      console.log('  FAIL ' + name + '\n       ' + err.message);
+    }
   }
 
   try {

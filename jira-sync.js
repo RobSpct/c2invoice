@@ -2,6 +2,7 @@
 // Schreibt die Kennzahlen automatisch an die Jira-Vorgaenge.
 // Je Ticket entsteht genau EIN Kommentar, der bei spaeteren Laeufen
 // aktualisiert wird. So bleibt die Historie am Ticket lesbar statt zugespammt.
+const crypto = require('node:crypto');
 const config = require('./config.json');
 const metrics = require('./metrics');
 
@@ -435,9 +436,157 @@ async function markiereTicketsOhneDaten({ db, verbose = false, dryRun = false } 
   return { skipped: false, results };
 }
 
+// --- Lesen fuers Board (C7a) -------------------------------------------------
+// Jira ist die Wahrheit, sobald es im Spiel ist (Owner 20.10.). Gelesen wird
+// nur auf Anfrage des Boards; geschrieben nur auf ausdrueckliche Handlung.
+
+const jiraAn = () => !!(config.jira && config.jira.enabled && auth());
+const KEY_RE = /^[A-Z][A-Z0-9]{0,9}-\d{1,9}$/;
+const PROJEKT_RE = /^[A-Z][A-Z0-9]{0,9}$/;
+
+// Sprint und Story Points haben je Jira-Instanz andere Feld-IDs; einmal je
+// Instanz nach Namen suchen.
+const feldCache = new Map();
+async function felderIds() {
+  const basis = config.jira.baseUrl;
+  if (!feldCache.has(basis)) {
+    const liste = await jiraFetch('/rest/api/3/field');
+    const id = (namen) => ((liste || []).find((f) => namen.includes(f.name)) || {}).id || null;
+    feldCache.set(basis, { sprint: id(['Sprint']), punkte: id(['Story point estimate', 'Story Points']) });
+  }
+  return feldCache.get(basis);
+}
+
+// ADF (Atlassian Document Format) als Klartext; Aufgabenlisten getrennt.
+function adfText(knoten) {
+  if (!knoten) return '';
+  if (knoten.type === 'text') return knoten.text || '';
+  if (knoten.type === 'taskList') return '';
+  const innen = (knoten.content || []).map(adfText).join('');
+  return ['paragraph', 'heading', 'listItem', 'codeBlock', 'blockquote'].includes(knoten.type) ? innen + '\n' : innen;
+}
+function adfKriterien(knoten, aus = []) {
+  if (!knoten) return aus;
+  if (knoten.type === 'taskItem') aus.push({ text: adfText({ content: knoten.content }).trim(), erledigt: (knoten.attrs || {}).state === 'DONE' });
+  else for (const k of knoten.content || []) adfKriterien(k, aus);
+  return aus;
+}
+
+function issueAus(roh, ids) {
+  const f = roh.fields || {};
+  const sprints = ids.sprint && Array.isArray(f[ids.sprint]) ? f[ids.sprint] : [];
+  const sprint = sprints.find((s) => s.state === 'active') || sprints[sprints.length - 1];
+  // Leer heisst „nicht geschaetzt“, nicht 0 (Number(null) und Number('') ergaeben 0).
+  const punkteRoh = ids.punkte ? f[ids.punkte] : null;
+  const punkte = punkteRoh == null || punkteRoh === '' ? NaN : Number(punkteRoh);
+  // Epic = Elternvorgang der Ebene 1 (Scrum-Gruppierung); Unteraufgaben haben eine Story als Eltern.
+  const p = f.parent && f.parent.fields ? f.parent : null;
+  const epic = p && p.fields.issuetype && (p.fields.issuetype.hierarchyLevel === 1 || /^(epic|epos)$/i.test(p.fields.issuetype.name || ''))
+    ? { key: p.key, titel: p.fields.summary || '' } : null;
+  return {
+    key: roh.key, projekt: roh.key.split('-')[0], titel: f.summary || '',
+    status: (f.status && f.status.name) || '', statusKat: (f.status && f.status.statusCategory && f.status.statusCategory.key) || 'new',
+    typ: (f.issuetype && f.issuetype.name) || null, zugewiesen: (f.assignee && f.assignee.displayName) || null,
+    gemeldet: (f.reporter && f.reporter.displayName) || null, prio: (f.priority && f.priority.name) || null,
+    labels: Array.isArray(f.labels) ? f.labels : [], sprint: sprint ? sprint.name : null, sprintStatus: sprint && ['active', 'future', 'closed'].includes(sprint.state) ? sprint.state : null,
+    epic, punkte: Number.isFinite(punkte) ? punkte : null,
+    beschreibung: adfText(f.description).trim(), kriterien: adfKriterien(f.description), aktualisiert: f.updated || null,
+  };
+}
+
+async function suche(jql, ids) {
+  const fields = ['summary', 'status', 'assignee', 'reporter', 'priority', 'labels', 'issuetype', 'updated', 'description', 'parent', ids.sprint, ids.punkte].filter(Boolean).join(',');
+  const aus = [];
+  let token = null;
+  do {
+    const q = new URLSearchParams({ jql, fields, maxResults: '100' });
+    if (token) q.set('nextPageToken', token);
+    const data = await jiraFetch(`/rest/api/3/search/jql?${q}`);
+    for (const roh of (data && data.issues) || []) aus.push(issueAus(roh, ids));
+    token = (data && data.nextPageToken) || null;
+  } while (token);
+  return aus;
+}
+
+// Alle offenen Tickets des Projekts (Backlog und Sprint, Owner 20.10.) und
+// dazu die erledigten, auf denen noch offene Zeit liegt (doneKeys).
+async function holeIssues(projekt, { doneKeys = [] } = {}) {
+  if (!PROJEKT_RE.test(projekt)) throw new Error('Jira-Projektschlüssel ungültig.');
+  const ids = await felderIds();
+  const aus = await suche(`project = "${projekt}" AND statusCategory != Done ORDER BY updated DESC`, ids);
+  const keys = doneKeys.filter((k) => KEY_RE.test(k) && k.startsWith(projekt + '-'));
+  for (let i = 0; i < keys.length; i += 50) aus.push(...await suche(`key in (${keys.slice(i, i + 50).join(',')}) AND statusCategory = Done`, ids));
+  return aus;
+}
+
+const initialen = (name) => String(name || '?').split(/\s+/).filter(Boolean).map((t) => t[0]).join('').slice(0, 2).toUpperCase();
+
+async function holeIssue(key) {
+  if (!KEY_RE.test(String(key))) throw new Error('Jira-Schlüssel ungültig.');
+  const ids = await felderIds();
+  const roh = await jiraFetch(`/rest/api/3/issue/${key}`);
+  const k = await jiraFetch(`/rest/api/3/issue/${key}/comment?orderBy=-created&maxResults=50`);
+  const kommentare = ((k && k.comments) || []).map((c) => {
+    const autor = (c.author && c.author.displayName) || 'Unbekannt';
+    return { autor, initialen: initialen(autor), zeit: c.created || null, text: adfText(c.body).trim() };
+  });
+  return { ...issueAus(roh, ids), kommentare };
+}
+
+// --- Schreiben fuers Board: nur auf ausdrueckliche Handlung des Nutzers -------
+
+async function transitions(key) {
+  if (!KEY_RE.test(String(key))) throw new Error('Jira-Schlüssel ungültig.');
+  const d = await jiraFetch(`/rest/api/3/issue/${key}/transitions`);
+  return ((d && d.transitions) || []).map((t) => ({
+    id: String(t.id), name: t.name || '', nach: (t.to && t.to.name) || '', nachKat: (t.to && t.to.statusCategory && t.to.statusCategory.key) || 'new',
+  }));
+}
+
+async function transition(key, id) {
+  if (!KEY_RE.test(String(key)) || !/^\d{1,9}$/.test(String(id))) throw new Error('Jira-Übergang ungültig.');
+  await jiraFetch(`/rest/api/3/issue/${key}/transitions`, { method: 'POST', body: { transition: { id: String(id) } } });
+}
+
+// Ein Absatz je Zeile; Leerzeilen fallen weg.
+async function kommentiere(key, text) {
+  if (!KEY_RE.test(String(key))) throw new Error('Jira-Schlüssel ungültig.');
+  const absaetze = String(text).split(/\r?\n/).map((z) => z.trim()).filter(Boolean)
+    .map((z) => ({ type: 'paragraph', content: [{ type: 'text', text: z }] }));
+  return jiraFetch(`/rest/api/3/issue/${key}/comment`, { method: 'POST', body: { body: { type: 'doc', version: 1, content: absaetze } } });
+}
+
+// "Als Jira-Ticket anlegen" (C7b). Der Typ kommt aus dem Projekt: Jira ist oft
+// lokalisiert ("Aufgabe"), und nicht jedes Projekt kennt "Task".
+async function legeAn(projekt, { titel, kriterien = [] }) {
+  if (!PROJEKT_RE.test(String(projekt))) throw new Error('Jira-Projektschlüssel ungültig.');
+  const summary = String(titel || '').trim();
+  if (!summary || summary.length > 255) throw new Error('Titel: 1 bis 255 Zeichen.');
+  const p = await jiraFetch(`/rest/api/3/project/${projekt}`);
+  const typen = ((p && p.issueTypes) || []).filter((t) => !t.subtask);
+  const typ = typen.find((t) => /^(task|aufgabe)$/i.test(t.name)) || typen.find((t) => t.hierarchyLevel === 0);
+  if (!typ) throw new Error('Jira-Projekt ' + projekt + ' hat keinen Vorgangstyp für Aufgaben.');
+  const content = kriterien.length ? [{ type: 'taskList', attrs: { localId: crypto.randomUUID() }, content: kriterien.map((k) => ({
+    type: 'taskItem', attrs: { localId: crypto.randomUUID(), state: k.erledigt ? 'DONE' : 'TODO' }, content: [{ type: 'text', text: String(k.text) }] })) }] : [];
+  let r;
+  try {
+    r = await jiraFetch('/rest/api/3/issue', { method: 'POST', body: { fields: {
+      project: { key: projekt }, issuetype: { id: typ.id }, summary, description: { type: 'doc', version: 1, content } } } });
+  } catch (e) {
+    // Abgebrochen heisst nicht "nicht angelegt": Jira kann das Ticket schon haben.
+    if (/abort|timeout|ECONNRESET|socket/i.test(e.message)) throw new Error('Ergebnis unklar (' + e.message + ') — bitte in Jira nachsehen, bevor du es erneut versuchst.');
+    throw e;
+  }
+  if (!r || !KEY_RE.test(String(r.key))) throw new Error('Jira hat keinen Schlüssel zurückgegeben.');
+  return { key: r.key };
+}
+
 module.exports = {
   run, buildComment, fingerprint, MARKER, MARKER_NODATA, istJiraKey,
   markiereTicketsOhneDaten, ticketsOhneDaten, nodataKommentar,
+  jiraAn, holeIssues, holeIssue, transitions, transition, kommentiere, legeAn, KEY_RE,
+  // Nur fuer die Live-Gates (Testticket anlegen, aufraeumen).
+  jiraFetch,
 };
 
 if (require.main === module) {

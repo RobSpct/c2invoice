@@ -9,6 +9,54 @@
       "kunde": "Beispielkunde"
     }
   },
+  "//arbeitsbereiche": "Ordner, in denen Claude Code arbeitet: Sitzungen, Board, Werkzeuge und Skills zeigen je Arbeitsbereich. Je Eintrag: name (eindeutig), kuerzel (1-3 Zeichen), farbe (#rrggbb), art ('projekt', 'vault', 'global' oder 'neutral'), pfad, optional projekt (Projektname wie im Ledger, verbindet Verbrauch, Saetze und Jira), jiraProjekt (Schluessel wie ABC) und todo (Pfad einer TODO.md). 'global' ist die Claude-Konfiguration (~/.claude), 'vault' ein Notiz-Ordner (z. B. Obsidian), 'neutral' ein Ordner fuer allgemeine Chats. pfad und todo stehen nur hier: sie bestimmen, wo ein gestarteter Prozess arbeitet und schreibt, deshalb aendert die Oberflaeche sie nicht. Kuerzel, Farbe und Verweise sind in den Einstellungen aenderbar. Ohne Eintrag schlaegt die Oberflaeche eine Liste aus deinen Daten vor. '~' steht fuer dein Benutzerverzeichnis.",
+  "arbeitsbereiche": [
+    { "name": "Beispielprojekt", "kuerzel": "BP", "farbe": "#f97316", "art": "projekt", "projekt": "Beispielprojekt", "pfad": "~/Dev/Beispielprojekt", "todo": "~/Dev/Beispielprojekt/TODO.md" },
+    { "name": "Notizen", "kuerzel": "NO", "farbe": "#6b7fd7", "art": "vault", "pfad": "~/Notizen" },
+    { "name": "Global", "kuerzel": "GL", "farbe": "#9c9ca6", "art": "global", "pfad": "~/.claude" },
+    { "name": "Chat", "kuerzel": "CH", "farbe": "#57c98a", "art": "neutral", "pfad": "~/Chat" }
+  ],
+  "//cira": "Der Assistent in c2invoice. name: wie er heisst (Standard 'Cira'). Antworten laufen in Stufen: T0 direkt aus den eigenen Zahlen (ohne Modell), T1 lokale Modelle ueber den Proxy der lokalen Modelle, je Rolle eines: modellLokal (Rolle Schnell, z. B. 'llama3.2:3b'), modellText, modellDenken, modellCode; leer = die Rolle nimmt das naechste eingestellte Modell, alle leer = T1 aus. Gespeichert wird aus der Oberflaeche nur, was der Modellserver unter /v1/models auflistet. woerterSchnell/Text/Denken/Code: eigene Woerter je Rolle, kommagetrennt, ergaenzen die eingebauten. Gibt ein Modell ab oder nennt Zahlen ausserhalb der Fakten, fragt Cira die Rolle Denken; Claude nur auf Knopfdruck. T2 Claude Code headless (claudeErlaubt, claudeModell haiku|sonnet|opus oder leer fuer den Standard der CLI, claudeMonatslimitEur 0.5 bis 500). T2 laeuft im Ordner data/cira und erscheint im Verbrauch als Werkzeugbetrieb '(cira)'. claudeExe: Pfad zur claude.exe, nur falls sie nicht gefunden wird (nur in dieser Datei). nichtStoerenAb/Bis: Uhrzeiten HH:MM, in denen der Orb gedimmt ist. Alles ausser name und claudeExe auch unter Einstellungen -> Cira.",
+  "cira": {
+    "name": "Cira",
+    "anrede": "",
+    "modellLokal": "",
+    "modellText": "",
+    "modellDenken": "",
+    "modellCode": "",
+    "woerterSchnell": "",
+    "woerterText": "",
+    "woerterDenken": "",
+    "woerterCode": "",
+    "claudeErlaubt": false,
+    "claudeModell": "sonnet",
+    "claudeMonatslimitEur": 5,
+    "claudeExe": "",
+    "nichtStoerenAb": "22:00",
+    "nichtStoerenBis": "07:00",
+    "orbStil": "partikel",
+    "benachrichtigungDesktop": false
+  },
+  "//vault": "Optionen fuer den Arbeitsbereich mit art 'vault' (Briefings, Gedaechtnis). Der Ordner selbst steht dort unter pfad. briefingsOrdner: Unterordner mit den Berichten.",
+  "vault": {
+    "briefingsOrdner": "Briefings"
+  },
+  "//claudeConfig": "Claude-Code-Konfiguration fuer den Bereich Werkzeuge. lager: Ordner mit nicht installierten Skills, aus dem sich Skills in einen Arbeitsbereich kopieren lassen (z. B. ~/.claude/skills-library, ~ steht fuer dein Benutzerverzeichnis). Nur hier aenderbar, nicht ueber die Oberflaeche. Leer = kein Lager.",
+  "claudeConfig": {
+    "lager": ""
+  },
+  "//terminal": "Befehl fuer 'Zum Terminal' in Sitzungen, ohne Shell gestartet. {pfad} = Ordner des Arbeitsbereichs, {sitzung} = Claude-Sitzung zum Fortsetzen, {claude} = Pfad zu claude.exe (wie fuer Sitzungen gefunden; ein npm-Shim 'claude' startet ohne Shell nicht). Windows Terminal: wt -d \"{pfad}\" \"{claude}\" --resume {sitzung}. macOS z. B.: open -a Terminal \"{pfad}\" (Fortsetzen dann von Hand).",
+  "terminal": {
+    "befehl": "wt -d \"{pfad}\" \"{claude}\" --resume {sitzung}"
+  },
+  "//oberflaeche": "geplanteBereiche: true zeigt Bereiche, die erst mit einer spaeteren Version kommen (Briefings, Postfach, Flows, ...), als leere Seiten in der Navigation. Standard: aus.",
+  "oberflaeche": {
+    "geplanteBereiche": false
+  },
+  "//hook": "Geheimnis fuer integration/claude-hook.mjs (meldet 'wartet auf dich' aus Sitzungen im eigenen Terminal). Leer lassen: c2invoice erzeugt es beim ersten Start und traegt es hier ein. Nie weitergeben.",
+  "hook": {
+    "geheimnis": ""
+  },
   "//selbstkostenStunde": "Was eine Arbeitsstunde kostet, bevor Gewinn entsteht: eigene Arbeitszeit zu Marktwert plus anteilige Sachkosten. Basis fuer die Marge — steht hier 0, wird nur der Deckungsbeitrag ausgewiesen. Eigene Herleitung empfohlen: (a) Lohnkosten = Vergleichsbrutto plus rund 20 % Arbeitgeberanteil, geteilt durch die produktiven Jahresstunden. (b) Sachkosten = Arbeitszimmer, Strom, Internet, Hardware-AfA, Software-Abos, Versicherungen, Fortbildung, Verwaltung, geteilt durch die abrechenbaren Stunden. Das Claude-Abo gehoert NICHT hinein — es steckt bereits im Abo-Anteil je Vorgang, sonst wird es doppelt gezaehlt.",
   "selbstkostenStunde": 0,
   "//zielmargeProzent": "Optionaler Sollwert: welchen Anteil am Erloes du als Gewinn anstrebst. Rein zum Vergleichen (Soll/Ist je Vorgang, Angebotskalkulation) — beeinflusst keine Rechnung. 0 blendet den Vergleich aus.",
@@ -45,6 +93,12 @@
   "gapMinutes": 5,
   "//tagessollStunden": "Zeiterfassung: geplante Arbeitszeit je Tag. Massstab fuer Arbeitszeit heute und den Workload der naechsten Tage. In den Einstellungen aenderbar (0 bis 24).",
   "tagessollStunden": 8,
+  "//limit5hTokens": "Cira-Karte in der Seitenleiste: wie viele Tokens (Ein-/Ausgabe plus Cache, ohne lokale Modelle) du je 5-Stunden-Fenster von Claude erwartest. Anthropic nennt dafuer keine Zahl; der Wert ist deine Schaetzung, die Anzeige traegt deshalb ein '≈'. 0 blendet den 5-h-Block aus. In den Einstellungen aenderbar.",
+  "limit5hTokens": 0,
+  "//dienste": "Weitere Dienste fuer den Status in der Kopfzeile. n8nUrl: Adresse einer n8n-Instanz (geprueft wird /healthz). Leer = nicht angezeigt. Ollama erscheint, sobald lokaleModelle.upstreamUrl gesetzt ist, Jira bei jira.enabled.",
+  "dienste": {
+    "n8nUrl": ""
+  },
   "//rundungMinuten": "Zeiterfassung: manuelle Zeit wird beim Buchen auf diesen Schritt aufgerundet (ganze Minuten, 1 bis 60). Die Rohzeit bleibt gespeichert. Je Projekt abweichend ueber projektSaetze.<Projekt>.rundung.",
   "rundungMinuten": 5,
   "//kalender": "Zeiterfassung: Kalender, die alle 5 Minuten gelesen werden (nur lesen). Je Eintrag: id (a-z, 0-9, - und _), name, art 'ics' oder 'caldav', url. ICS: die geheime Abo-Adresse, z. B. Google Kalender -> Einstellungen -> Kalender -> 'Privatadresse im iCal-Format' (webcal:// geht auch). CalDAV (Apple, Nextcloud, Fastmail): url der Kalender-Sammlung, nur https, dazu benutzer und passwortEnvVar = Name der Umgebungsvariable mit dem (App-)Passwort, nie das Passwort selbst. Die Adresse ist ein Zugang: sie wird nie angezeigt. ICS-Adressen lassen sich auch in der Oberflaeche einfuegen (Zeiterfassung -> Kalender verbinden oder Einstellungen -> Kalender), die Oberflaeche schreibt sie dann hierher. CalDAV nur hier. Nach einer Aenderung von Hand Server neu starten. Leer = kein Kalender.",

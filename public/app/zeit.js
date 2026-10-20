@@ -769,6 +769,8 @@ function zEintraege() {
 function zeichneZeit(w, teile, neu) {
   if (['woche', 'monat', 'ziele'].includes(teile[0]) && teile[0] !== zt.ansicht) { zt.ansicht = teile[0]; merke('zeit.ansicht', zt.ansicht); }
   if (!zt.montag) zt.montag = zMontag(new Date());
+  const t = zTimer();
+  ciraKontext({ art: 'zeit', id: t ? 'timer' : zt.montag, titel: t ? uebersetze('Timer läuft') + ' · ' + t.ziel_schluessel : uebersetze('Woche ab') + ' ' + datum(zt.montag) });
   const z = aktuellerZeitraum();
   const schluessel = [z.von, z.bis, zt.montag, zt.ansicht].join('|');
   if (neu || zt.schluessel !== schluessel) {
@@ -905,7 +907,8 @@ async function zeitStart(knopf) {
   const f = zt.form;
   if (!f.ziel) { zeitPicker('timer'); return; }
   const tats = (zt.d.taet || []).map((x) => x.name);
-  const taetigkeit = tats.includes(f.taetigkeit) ? f.taetigkeit : tats.includes('Entwicklung') ? 'Entwicklung' : tats[0];
+  // Ohne geladene Liste (Start aus dem Cockpit) die gemerkte Taetigkeit; der Server prueft sie.
+  const taetigkeit = !tats.length ? f.taetigkeit || 'Entwicklung' : tats.includes(f.taetigkeit) ? f.taetigkeit : tats.includes('Entwicklung') ? 'Entwicklung' : tats[0];
   await mitLauf(knopf, async () => {
     try {
       const r = await sende('/api/zeit/timer-start', { ziel_art: f.ziel.art, ziel_schluessel: f.ziel.schluessel, taetigkeit, notiz: f.notiz || '', abrechenbar: f.ziel.art !== 'intern' });
@@ -1206,6 +1209,8 @@ function zeitPicker(fuer) {
   grund.innerHTML = '<div class="dialog formular zt-picker" role="dialog" aria-modal="true" aria-label="' + esc(uebersetze('Buchen auf …')) + '">' +
     '<div class="dialog-kopf"><div class="zp-kopf"><h2>' + esc(uebersetze('Buchen auf …')) + '</h2><span class="hinweis" id="zp-hinweis"></span></div>' +
       '<button type="button" class="mini-knopf" data-aktion="zp-zu" aria-label="' + esc(uebersetze('Schließen')) + '">×</button></div>' +
+    // Start aus dem Cockpit: die Taetigkeit gleich hier waehlen, das Ziel startet dann.
+    (fuer === 'timer-start' ? '<div class="zt-chips" id="zp-taet" role="group" aria-label="' + esc(uebersetze('Tätigkeit')) + '"></div>' : '') +
     '<input id="zp-q" class="zt-eingabe gross" autocomplete="off" spellcheck="false" placeholder="' + esc(uebersetze('Nummer, Titel, Projekt oder Kunde — z. B. NW-12 oder Kundenportal')) + '" aria-label="' + esc(uebersetze('Buchen auf …')) + '">' +
     '<div id="zp-liste" class="zp-liste"></div>' +
     '<span class="hinweis">' + esc(uebersetze('Enter wählt den ersten Treffer · Esc schließt')) + '</span></div>';
@@ -1218,7 +1223,21 @@ function zeitPicker(fuer) {
   inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); if (zp.erster) zpWaehle(zp.erster); } });
   inp.focus();
   if (!zp.daten) zpLaden(); else zpZeichnen();
+  if (fuer === 'timer-start') {
+    if (zt.d.taet) zpTaetZeichnen();
+    else hole('/api/taetigkeitsarten').then((t) => { zt.d.taet = t; zpTaetZeichnen(); }, (e) => { const el = document.getElementById('zp-taet'); if (el) el.innerHTML = '<span class="dialog-fehler">' + esc(e.message) + '</span>'; });
+  }
 }
+// Gewaehlt ist die gemerkte Taetigkeit der Timer-Karte; fehlt sie in der Liste, Entwicklung bzw. die erste.
+function zpTaetZeichnen() {
+  const el = document.getElementById('zp-taet');
+  if (!el) return;
+  const tats = (zt.d.taet || []).map((x) => x.name);
+  if (!tats.includes(zt.form.taetigkeit)) zt.form.taetigkeit = tats.includes('Entwicklung') ? 'Entwicklung' : tats[0];
+  el.innerHTML = '<span class="hinweis">' + esc(uebersetze('Tätigkeit')) + '</span>' + tats.map((n) =>
+    '<button type="button" class="chip" data-aktion="zp-taet" data-wert="' + esc(n) + '" aria-pressed="' + (n === zt.form.taetigkeit) + '">' + esc(n) + '</button>').join('');
+}
+aktion('zp-taet', (n) => { zt.form.taetigkeit = n; merke('zeit.timer', zt.form); zpTaetZeichnen(); const q = document.getElementById('zp-q'); if (q) q.focus(); });
 async function zpLaden() {
   if (!zp) return;
   const lauf = ++zp.lauf;
@@ -1237,7 +1256,7 @@ function zpZeichnen() {
   const el = document.getElementById('zp-liste');
   if (!el || !zp) return;
   const alle = zZiele(zp.daten);
-  const aktuell = zp.fuer === 'timer' ? zt.form.ziel : zp.fuer === 'termin' ? zk && zk.ziel : zd && zd.ziel;
+  const aktuell = zp.fuer === 'timer' || zp.fuer === 'timer-start' ? zt.form.ziel : zp.fuer === 'termin' ? zk && zk.ziel : zd && zd.ziel;
   const q = zp.q.trim();
   const SEK = [['vorgang', 'Vorgänge'], ['projekt', 'Projekte'], ['kunde', 'Kunden'], ['intern', 'Intern']];
   zp.erster = null;
@@ -1285,6 +1304,11 @@ function zpWaehle(z) {
     zt.form.ziel = z;
     merke('zeit.timer', zt.form);
     zeichneAnsicht();
+  } else if (fuer === 'timer-start') {
+    // Aus dem Cockpit: Ziel waehlen startet sofort, ohne Seitenwechsel.
+    zt.form.ziel = z;
+    merke('zeit.timer', zt.form);
+    zeitStart(null);
   } else if (fuer === 'termin') {
     if (zk) zkZielGewaehlt(z);
   } else if (zd) {
@@ -1847,7 +1871,7 @@ function zHinweise() {
     const f = ZFALL[h.fall] || ZFALL.manuell;
     const z = zTerminZiel(h.termin);
     return {
-      id: zHinweisId(h), heute: true, icon: '◷', c: h.fall === 'claude' ? 'var(--ok)' : 'var(--accent)',
+      id: zHinweisId(h), heute: true, icon: '◷', c: h.fall === 'claude' ? 'var(--ok)' : 'var(--accent-text)',
       t: uebersetze('Blocker hat begonnen') + ': ' + h.termin.titel,
       s: uebersetze(f[0]) + (z ? ' (' + (h.termin.ziel_von_hand ? '' : uebersetze('vermutet') + ' ') + z.l + ')' : ''),
       wann: zhm(h.termin.start), aktion: f[1], aktionName: 'zeit-hinweis-timer', ziel: zHinweisId(h), weg: 'zeit-hinweis-weg',

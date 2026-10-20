@@ -53,7 +53,7 @@ Object.assign(EN, {
   'Zahlung gebucht': 'Payment booked', 'Rückgängig': 'Undo', 'Zahlung entfernt': 'Payment removed',
   'Zahlung nicht gebucht': 'Payment not booked', 'Zahlung nicht entfernt': 'Payment not removed',
   'Storno erzeugt': 'Credit note created', 'Storno fehlgeschlagen': 'Cancellation failed',
-  'PDF erzeugt': 'PDF created', 'Öffnen': 'Open', 'PDF fehlgeschlagen': 'PDF failed',
+  'PDF erzeugt': 'PDF created', 'Öffnen': 'Open', 'PDF fehlgeschlagen': 'PDF failed', 'Details': 'Details',
   'E-Rechnung noch nicht vollständig': 'E-invoice not complete yet', 'XRechnung fehlgeschlagen': 'XRechnung failed',
   'Diese Angaben fehlen für die E-Rechnung. Ergänze sie im Kontakt oder in den Stammdaten und lade die Datei dann erneut.':
     'These details are missing for the e-invoice. Add them to the contact or the master data, then load the file again.',
@@ -262,7 +262,13 @@ function menue(nr, eintraege) {
 }
 const menueLink = (href, text, neuesFenster) => '<a role="menuitem" href="' + esc(href) + '"' + (neuesFenster ? ' target="_blank" rel="noopener"' : '') + '>' + esc(uebersetze(text)) + '</a>';
 const menueKnopf = (aktionName, wert, text, gefahr) => '<button type="button" role="menuitem"' + (gefahr ? ' class="gefahr"' : '') + ' data-aktion="' + aktionName + '" data-wert="' + esc(wert) + '">' + esc(uebersetze(text)) + '</button>';
-aktion('beleg-menue', (nr) => { bz.menu = bz.menu === nr ? null : nr; bz.frage = null; zeichneAnsicht(); });
+aktion('beleg-menue', (nr) => {
+  bz.menu = bz.menu === nr ? null : nr; bz.frage = null;
+  // Cira sieht mit: das Objekt, an dem zuletzt gearbeitet wurde.
+  if (bz.menu && route().name === 'angebote') ciraKontext({ art: 'angebot', id: nr, titel: nr + ' ' + uebersetze('ausgewählt') });
+  else if (bz.menu) ciraKontext({ art: 'rechnung', id: nr, titel: nr + ' ' + uebersetze('ausgewählt') });
+  zeichneAnsicht();
+});
 // Klick ausserhalb schliesst das Menue. Nur das Menue-Element geht weg, kein
 // Neuzeichnen: sonst traefe der Klick ein schon ersetztes Element und ginge verloren.
 function menueZu() {
@@ -429,8 +435,9 @@ function rechnungZeile(r) {
     menueKnopf('r-xml', r.nr, 'XRechnung laden')];
   if (r.status === 'erstellt') eintraege.push(menueKnopf('r-storno-frage', r.nr, 'Stornieren …', true));
   return '<div class="b-eintrag' + (auf ? ' auf' : '') + (weg ? ' weg' : '') + '">' +
-    '<div class="b-zeile" data-aktion="r-auf" data-wert="' + esc(r.nr) + '" aria-expanded="' + auf + '">' +
-      '<span class="b-nr"><span class="pfeil" aria-hidden="true">' + (auf ? '▾' : '▸') + '</span><span class="mono strich">' + esc(r.nr) + '</span></span>' +
+    // Zeile per Maus, Pfeil-Knopf per Tastatur und Screenreader (K1, Lighthouse aria-allowed-attr).
+    '<div class="b-zeile" data-aktion="r-auf" data-wert="' + esc(r.nr) + '">' +
+      '<span class="b-nr"><button type="button" class="pfeil" data-aktion="r-auf" data-wert="' + esc(r.nr) + '" aria-expanded="' + auf + '" aria-label="' + esc(uebersetze('Details') + ' ' + r.nr) + '">' + (auf ? '▾' : '▸') + '</button><span class="mono strich">' + esc(r.nr) + '</span></span>' +
       '<span class="b-wer"><span class="t ell">' + esc(r.empfaenger || '—') + '</span><span class="s ell">' + esc(sub) + '</span></span>' +
       '<span class="mono dim">' + esc(datum(ortsTag(r.erstellt_am))) + '</span>' +
       '<span class="mono rechts strich">' + nf2.format(r.brutto_eur) + '</span>' +
@@ -457,9 +464,11 @@ function ladeDetail(nr) {
     if (e.d) toast(uebersetze('Rechnung nicht geladen') + ': ' + err.message, 'err'); else e.fehler = err.message;
   }).then(() => { if (route().name === 'rechnungen') zeichneAnsicht(); });
 }
-aktion('r-auf', (nr) => {
-  if (bz.auf[nr]) delete bz.auf[nr]; else ladeDetail(nr);
+aktion('r-auf', (nr, el) => {
+  if (bz.auf[nr]) delete bz.auf[nr]; else { ladeDetail(nr); ciraKontext({ art: 'rechnung', id: nr, titel: nr + ' ' + uebersetze('ausgewählt') }); }
   bz.menu = null;
+  // Fokus vor dem Neuzeichnen auf den Pfeil, das Zeichnen gibt ihn weiter (auch per Maus geklickt).
+  if (el.classList.contains('pfeil')) el.focus();
   zeichneAnsicht();
 });
 
@@ -539,18 +548,20 @@ function zeichneRechnungen(w) {
     .filter((r) => rTreffer(r, q))
     .sort((a, b) => { const x = schluessel(a), y = schluessel(b); return (x < y ? -1 : x > y ? 1 : 0) * dir || (a.nr < b.nr ? 1 : -1); });
   const sortKnopf = (key, text, titel, rechts) => '<button type="button" class="th-knopf' + (rechts ? ' rechts' : '') + '" data-aktion="r-sort" data-wert="' + key + '" title="' + esc(uebersetze(titel)) + '"' +
-    ' aria-sort="' + (k === key ? (dir > 0 ? 'ascending' : 'descending') : 'none') + '">' + esc(uebersetze(text)) + (k === key ? (dir > 0 ? ' ↑' : ' ↓') : '') + '</button>';
+    ' aria-pressed="' + (k === key) + '">' + esc(uebersetze(text)) + (k === key ? (dir > 0 ? ' ↑' : ' ↓') : '') + '</button>';
   const summe = zeilen.filter((r) => r.status === 'erstellt').reduce((s, r) => s + r.brutto_eur, 0);
 
   const tabelle = !L.length ? leer('beleg', 'Noch keine Rechnung gestellt')
     : !zeilen.length ? leer('beleg', 'Keine Rechnung passt zu Filter oder Suche')
-    : '<div class="b-huelle"><div class="b-tabelle rech" role="table">' +
-      '<div class="b-kopf" role="row"><span>' + esc(uebersetze('Nummer')) + '</span><span>' + esc(uebersetze('Kunde · Leistung')) + '</span>' +
+    : '<div class="b-huelle"><div class="b-tabelle rech">' +
+      '<div class="b-kopf"><span>' + esc(uebersetze('Nummer')) + '</span><span>' + esc(uebersetze('Kunde · Leistung')) + '</span>' +
         sortKnopf('datum', 'Datum', 'Nach Datum sortieren') + sortKnopf('brutto', 'Brutto €', 'Nach Betrag sortieren', true) + sortKnopf('faellig', 'Fällig', 'Nach Fälligkeit sortieren') +
         '<span>' + esc(uebersetze('Bezahlt')) + '</span><span>' + esc(uebersetze('Status')) + '</span><span class="rechts">' + esc(uebersetze('Aktion')) + '</span></div>' +
       zeilen.map(rechnungZeile).join('') + '</div></div>' +
       '<div class="b-summe hinweis">' + num(zeilen.length) + ' ' + esc(uebersetze(zeilen.length === 1 ? 'Rechnung im Filter' : 'Rechnungen im Filter')) + ' · ' + eur(summe) + ' ' + esc(uebersetze('brutto')) + '</div>';
 
+  // Neuzeichnen (Aufklappen, Detail geladen, 15-s-Takt) behaelt den Fokus auf dem Pfeil.
+  const fokus = document.activeElement && document.activeElement.matches('.b-nr .pfeil') ? document.activeElement.dataset.wert : null;
   w.innerHTML = '<div class="beleg-seite">' + kpis + abrechenbareAngebote() +
     '<div class="karte weit"><div class="beleg-leiste">' +
       // Im Board sind die Spalten der Filter — die Chips stehen nur an der Tabelle.
@@ -563,6 +574,7 @@ function zeichneRechnungen(w) {
     '</div>' +
     (proAktiv() ? '' : '<div class="karte eingelassen sperre-huelle">' + sperre('Mahnen, Versand und Kontoauszug', 'Zahlungserinnerung und Mahnung, Versand per E-Mail, Zahlungen aus dem Kontoauszug zuordnen — mit der Pro-Version.') + '</div>') +
   '</div>';
+  if (fokus) { const k = w.querySelector('.b-nr .pfeil[data-wert="' + CSS.escape(fokus) + '"]'); if (k) k.focus(); }
   verdrahteSuche(w, 'r-suche', (v) => { bz.rq = v; }, suche);
   verdrahteBoard(w, 'rechnungen', (sp) => sp === 'bez' || sp === 'teil', rAblegen);
 }
@@ -829,8 +841,8 @@ function zeichneAngebote(w) {
   const summe = zeilen.reduce((s, a) => s + a.brutto_eur, 0);
   const tabelle = !L.length ? leer('beleg', 'Noch kein Angebot')
     : !zeilen.length ? leer('beleg', 'Kein Angebot passt zu Filter oder Suche')
-    : '<div class="b-huelle"><div class="b-tabelle ang" role="table">' +
-      '<div class="b-kopf" role="row">' + ['Nummer', 'Kunde', 'Erstellt', 'Gültig bis'].map((t) => '<span>' + esc(uebersetze(t)) + '</span>').join('') +
+    : '<div class="b-huelle"><div class="b-tabelle ang">' +
+      '<div class="b-kopf">' + ['Nummer', 'Kunde', 'Erstellt', 'Gültig bis'].map((t) => '<span>' + esc(uebersetze(t)) + '</span>').join('') +
         '<span class="rechts">' + esc(uebersetze('Brutto €')) + '</span><span>' + esc(uebersetze('Status')) + '</span><span class="rechts">' + esc(uebersetze('Aktion')) + '</span></div>' +
       zeilen.map(angebotZeile).join('') + '</div></div>' +
       '<div class="b-summe hinweis">' + num(zeilen.length) + ' ' + esc(uebersetze(zeilen.length === 1 ? 'Angebot im Filter' : 'Angebote im Filter')) + ' · ' + eur(summe) + ' ' + esc(uebersetze('brutto')) + '</div>';

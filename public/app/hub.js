@@ -6,7 +6,7 @@
 
 Object.assign(EN, {
   'Erlös im Zeitraum': 'Revenue in period', 'Arbeitswert — (Claude + manuelle Zeit) × Stundensatz': 'Work value — (Claude + manual time) × hourly rate',
-  'ggü.': 'vs.', 'in': 'in', 'Vorgängen': 'jobs', 'Sitzung': 'session', 'Sitzungen': 'sessions',
+  'ggü.': 'vs.', 'in': 'in', 'Vorgängen': 'jobs',
   'USD/h Verbrauchsrate': 'USD/h burn rate', 'Listenpreis, letzte 60 Min hochgerechnet': 'List price, last 60 min extrapolated',
   'Tokens je Minute': 'Tokens per minute', 'jetzt': 'now', 'verbunden': 'connected', 'nicht lesbar': 'not readable', 'Fehler': 'Error',
   'eingeschaltet': 'enabled', 'aus': 'off', 'aktuell': 'current', 'Letzter Abgleich': 'Last sync', 'Dauer': 'Duration',
@@ -43,9 +43,9 @@ Object.assign(EN, {
   'Abo-Kosten': 'Subscription cost', 'API-Gegenwert': 'API equivalent', 'Modell-Anteile': 'Model shares', 'API-Gegenwert in USD': 'API equivalent in USD',
   'Keine Modelle im Zeitraum': 'No models in this period', 'andere': 'other',
   'Aktive Stunden': 'Active hours', 'heute': 'today', 'diese Woche': 'this week', 'aktive Zeit im Zeitraum': 'active time in period',
-  'Agentenzeit': 'agent time', 'Abrechenbar offen': 'Billable open', 'Claude: Aktivität': 'Claude: activity',
+  'Agentenzeit': 'agent time', 'Noch nicht abgerechnet': 'Not yet invoiced', 'noch nicht abgerechnet': 'not yet invoiced', 'Claude: Aktivität': 'Claude: activity',
   'Verbrauchsrate': 'Burn rate', 'USD/h · Skala 0–30': 'USD/h · scale 0–30', 'Abrechnungsquote': 'Invoicing ratio',
-  'Arbeitswert abgerechnet vs. offen': 'Work value invoiced vs. open', 'abgerechnet': 'invoiced',
+  'Arbeitswert abgerechnet vs. noch nicht abgerechnet': 'Work value invoiced vs. not yet invoiced', 'abgerechnet': 'invoiced',
   'Agentenzeit vs. aktive Zeit': 'Agent time vs. active time', 'wie viel der KI-Laufzeit abrechenbar ist': 'how much of the AI runtime is billable',
   'der Agentenzeit ist aktive Zeit': 'of agent time is active time', 'aktive Zeit': 'active time', 'Agentenzeit gesamt': 'total agent time',
   'Monatsziel Umsatz': 'Monthly revenue goal', 'Erlös im laufenden Monat gegen Ziel': 'Revenue this month against goal', 'Ziel ändern': 'Change goal',
@@ -71,8 +71,8 @@ Object.assign(EN, {
     'Start a Claude Code session — it appears here after the next sync. Then set your hourly rate and master data in Settings.',
   'Kennzahl': 'Figure', 'Ring': 'Ring', 'Doppelring': 'Double ring', 'Gauge mit Zielmarke': 'Gauge with target mark', 'Gauge, live': 'Gauge, live',
   'Gauge, Ziel änderbar': 'Gauge, editable goal', 'Zahl + Puls': 'Number + pulse', 'Claude · manuell · Agent': 'Claude · manual · agent',
-  'abgerechnet vs. offen': 'invoiced vs. open', 'fällig · überfällig · bezahlt': 'due · overdue · paid', 'Balken mit Werten': 'Bars with values',
-  'Ring + Anteile': 'Ring + shares', 'nur Werkzeugdaten': 'tool data only', 'USD je aktive h': 'USD per active h', 'offen · abgerechnet': 'open · invoiced',
+  'abgerechnet vs. noch nicht abgerechnet': 'invoiced vs. not yet invoiced', 'fällig · überfällig · bezahlt': 'due · overdue · paid', 'Balken mit Werten': 'Bars with values',
+  'Ring + Anteile': 'Ring + shares', 'nur Werkzeugdaten': 'tool data only', 'USD je aktive h': 'USD per active h', 'noch nicht abgerechnet · abgerechnet': 'not yet invoiced · invoiced',
   'Heatmap + Serie': 'Heatmap + streak', 'Anteil API-Gegenwert': 'Share of API equivalent', 'Status & Betrag': 'Status & amount', 'offen / angenommen': 'open / accepted',
   'gegenüber der gleich langen Vorperiode': 'vs. the previous period of equal length', 'Erklärung': 'Explanation',
   'Claude: Eigene Zeit': 'Claude: own time', 'Min um Eingaben': 'min around inputs',
@@ -162,7 +162,7 @@ function sparkFlaeche(werte, farbe, id) {
 const legende = (farbe, text, wert, wertFarbe) => '<span class="leg"><span class="leg-l"><span class="leg-p" style="background:' + farbe + '"></span>' +
   esc(uebersetze(text)) + '</span><b' + (wertFarbe ? ' style="color:' + wertFarbe + '"' : '') + '>' + wert + '</b></span>';
 const zahlEinheit = (wert, einheit) => '<span class="instr-wert">' + wert + '<span>' + esc(einheit) + '</span></span>';
-const OFFEN_FARBE = 'rgba(249,115,22,.55)';
+const OFFEN_FARBE = 'color-mix(in srgb, var(--accent) 55%, transparent)';
 
 // Modelle nach Kosten: die fuenf groessten, der Rest als "andere".
 function modellRing(modelle) {
@@ -190,7 +190,7 @@ const INSTRUMENTE = [
   ['modelle', 'Modell-Anteile', 'Ring', '◔', 'Welche Modelle den Verbrauch treiben — für Kostensteuerung.'],
   ['stunden', 'Aktive Stunden', 'Claude · manuell · Agent', '◷', 'Wie viel abrechenbare Zeit entsteht und was noch offen ist.'],
   ['burn', 'Verbrauchsrate', 'Gauge, live', '◜', 'Warnt, wenn gerade ungewöhnlich viel verbraucht wird.'],
-  ['quote', 'Abrechnungsquote', 'abgerechnet vs. offen', '◑', 'Wie viel der erbrachten Arbeit schon in Rechnung ist.'],
+  ['quote', 'Abrechnungsquote', 'abgerechnet vs. noch nicht abgerechnet', '◑', 'Wie viel der erbrachten Arbeit schon in Rechnung ist.'],
   ['agent', 'Agentenzeit vs. aktive Zeit', 'Ring', '◐', 'Wie viel Claude allein arbeitet, ohne dass du abrechnest.'],
   ['ziel', 'Monatsziel Umsatz', 'Gauge, Ziel änderbar', '◎', 'Fortschritt zum Monatsziel und was noch fehlt.'],
   ['cache', 'Cache-Trefferquote', 'Ring', '◒', 'Technische Effizienz — hoch heißt günstiger.'],
@@ -263,7 +263,7 @@ function instrumentInhalt(id, D) {
         '<div>' + zahlEinheit(nf1.format(hWoche), 'h') + '<span class="hinweis">' + esc(uebersetze('diese Woche')) + '</span></div></div>' +
       '<div class="wochen-balken">' + woche.map((x, i) =>
         '<div title="' + esc(datum(x.d) + ' · ' + nf1.format(x.h) + ' h') + '"><span class="s" style="height:' + Math.max(x.h ? 6 : 0, x.h / max * 100).toFixed(0) + '%;background:' +
-          (x.d === heuteIso ? 'var(--accent)' : 'rgba(249,115,22,.45)') + '"></span><span class="t">' + wt[i] + '</span></div>').join('') + '</div>' +
+          (x.d === heuteIso ? 'var(--accent)' : 'color-mix(in srgb, var(--accent) 45%, transparent)') + '"></span><span class="t">' + wt[i] + '</span></div>').join('') + '</div>' +
       // Mockup Z. 327–330: Claude und manuell als Anteil an Agentenzeit + manueller Zeit.
       '<div class="balken-duenn zwei"><span style="width:' + (basis > 0 ? K.aktive_stunden / basis * 100 : 0).toFixed(1) + '%;background:var(--accent)"></span>' +
         '<span style="width:' + (basis > 0 ? man / basis * 100 : 0).toFixed(1) + '%;background:var(--zeit-manuell)"></span></div>' +
@@ -272,7 +272,7 @@ function instrumentInhalt(id, D) {
         '<span><span class="leg-p" style="background:var(--zeit-manuell)"></span>' + esc(uebersetze('manuell')) + ' ' + nf1.format(man) + '</span>' +
         '<span><span class="leg-p" style="background:var(--line-hover)"></span>' + esc(uebersetze('von')) + ' ' + nf1.format(K.agent_stunden) + ' h ' + esc(uebersetze('Agentenzeit')) + '</span></span>' +
       // Offen = Claude-Zeit nicht abgerechneter Vorgaenge + offene manuelle Zeit (kennzahlen.offen_stunden zu offen_eur).
-      '<a class="instr-link" href="#/vorgaenge">' + esc(uebersetze('Abrechenbar offen')) + ' <b class="mono">' + nf1.format(K.offen_stunden || 0) + ' h · ' + eur(K.offen_eur) + '</b><span>→</span></a>';
+      '<a class="instr-link" href="#/vorgaenge">' + esc(uebersetze('Noch nicht abgerechnet')) + ' <b class="mono">' + nf1.format(K.offen_stunden || 0) + ' h · ' + eur(K.offen_eur) + '</b><span>→</span></a>';
   }
   if (id === 'burn') {
     const b = state.live ? state.live.burn_usd_per_hour : 0;
@@ -284,7 +284,7 @@ function instrumentInhalt(id, D) {
     const r = ring([{ v: K.abgerechnet_eur, c: 'var(--ok)' }, { v: K.offen_eur, c: OFFEN_FARBE }], 40);
     return '<div class="instr-ring">' + ringSvg(r, 96, 11) + '<div>' + zahlEinheit(nf1.format(q * 100), '%') +
         '<span class="hinweis">' + esc(uebersetze('abgerechnet')) + '</span></div></div>' +
-      '<div class="legenden">' + legende('var(--ok)', 'abgerechnet', eur(K.abgerechnet_eur)) + legende('var(--accent)', 'offen', eur(K.offen_eur), 'var(--accent)') + '</div>';
+      '<div class="legenden">' + legende('var(--ok)', 'abgerechnet', eur(K.abgerechnet_eur)) + legende('var(--accent)', 'noch nicht abgerechnet', eur(K.offen_eur), 'var(--accent-text)') + '</div>';
   }
   if (id === 'agent') {
     const a = K.agent_stunden > 0 ? K.aktive_stunden / K.agent_stunden : 0;
@@ -344,7 +344,7 @@ const WIDGETS = [
   ['tree', 'MCP-Server', 'nur Werkzeugdaten', 2, 'analyse', '▥', 'Welche MCP-Server Tokens erzeugen.'],
   ['marge', 'Marge je Woche', 'gegen Ziel', 2, 'analyse', '±', 'Marge Woche für Woche gegen dein Ziel.'],
   ['kosten', 'Kosten je Stunde', 'USD je aktive h', 2, 'analyse', '⌁', 'Ob die Stunde teurer wird.'],
-  ['status', 'Vorgänge nach Status', 'offen · abgerechnet', 2, 'vorgaenge', '◧', 'Was offen oder abgerechnet ist.'],
+  ['status', 'Vorgänge nach Status', 'noch nicht abgerechnet · abgerechnet', 2, 'vorgaenge', '◧', 'Was offen oder abgerechnet ist.'],
   ['heat', 'Aktivität', 'Heatmap + Serie', 2, 'analyse', '▦', 'Deine aktiven Tage und Serien.'],
   ['top', 'Top-Vorgänge', 'nach Gegenwert', 2, 'vorgaenge', '▲', 'Vorgänge mit dem meisten Gegenwert.'],
   ['projekte', 'Nach Projekt', 'Anteil API-Gegenwert', 2, 'analyse', '≡', 'Verbrauch je Projekt.'],
@@ -375,7 +375,7 @@ function kpiInhalt(id, D) {
 // Vorgaenge nach Status: Summen und Anzahlen aus kennzahlen() (Server).
 function statusInhalt(K) {
   const zeilen = [
-    ['offen', K.offen_vorgaenge, K.offen_vorgang_eur, 'var(--text-faint)'],
+    ['noch nicht abgerechnet', K.offen_vorgaenge, K.offen_vorgang_eur, 'var(--text-faint)'],
     ['abgerechnet', K.abgerechnet_vorgaenge, K.abgerechnet_eur, 'var(--ok)'],
     ['ohne Vorgang', null, K.ohne_vorgang_eur, 'var(--line-hover)'],
   ];
@@ -386,7 +386,7 @@ function statusInhalt(K) {
 }
 
 // Aktivitaet der letzten zwoelf Wochen (aktive Stunden je Tag) mit Serie.
-const HEAT_FARBE = ['var(--panel-2)', 'rgba(249,115,22,.3)', 'rgba(249,115,22,.55)', 'rgba(249,115,22,.8)', 'var(--accent)'];
+const HEAT_FARBE = ['var(--panel-2)', 'color-mix(in srgb, var(--accent) 30%, transparent)', 'color-mix(in srgb, var(--accent) 55%, transparent)', 'color-mix(in srgb, var(--accent) 80%, transparent)', 'var(--accent)'];
 function heatDaten() {
   const heute = isoTag(new Date());
   const H = heatmap(Object.entries(stundenJeTag()).map(([day, v]) => ({ day, v })), { wochen: 12, bis: heute });
@@ -538,7 +538,10 @@ function kachel(sek, id, titel, unter, inhalt, breite, opt = {}) {
   const autoKnopf = (klasse) => (g ? '<button type="button" class="' + klasse + '" data-aktion="raster-auto" data-wert="' + wert + '" title="' + esc(uebersetze('Größe zurücksetzen')) + '">⤢ Auto</button>' : '');
   const wegKnopf = (klasse, text) => '<button type="button" class="' + klasse + '" data-aktion="raster-weg" data-wert="' + wert + '" aria-label="' + esc(uebersetze('Entfernen')) + '">' + text + '</button>';
   const greif = (klasse, text) => '<span class="' + klasse + '" draggable="true" title="' + esc(uebersetze('Ziehen zum Verschieben')) + '">' + text + '</span>';
-  return '<div class="kachel b' + breite + (ed ? ' bearbeiten' : '') + (g ? ' fest' : '') + (opt.klasse ? ' ' + opt.klasse : '') + '" data-sek="' + sek + '" data-id="' + esc(id) + '"' +
+  // opt.ziel: Klick auf die Flaeche springt dorthin (Maus-Abkuerzung). Tastatur und
+  // Screenreader nehmen den ↗-Link in der Kachel, darum kein role="link" um innere Links.
+  return '<div class="kachel b' + breite + (ed ? ' bearbeiten' : '') + (g ? ' fest' : '') + (opt.ziel && !ed ? ' mit-ziel' : '') + (opt.klasse ? ' ' + opt.klasse : '') + '" data-sek="' + sek + '" data-id="' + esc(id) + '"' +
+      (opt.ziel && !ed ? ' data-aktion="kachel-ziel" data-wert="' + esc(opt.ziel) + '"' : '') +
       (g ? ' style="' + groesseStil(g) + '"' : '') + '>' +
     (klein ? '<div class="zu-klein"><span class="zeichen">⤢</span><b>' + esc(uebersetze('Zu klein für diese Ansicht')) + '</b>' +
       '<span>' + esc(uebersetze('mindestens')) + ' ' + min[0] + ' × ' + min[1] + ' px — ' + esc(uebersetze('größer ziehen oder Auto-Größe')) + '</span>' +
@@ -606,15 +609,15 @@ function hubHero(D) {
   return '<div class="hero-reihe">' +
     '<div class="karte hero">' +
       '<svg class="hero-flaeche" viewBox="0 0 600 160" preserveAspectRatio="none" aria-hidden="true">' +
-        '<defs><linearGradient id="hg1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f97316" stop-opacity=".32"/><stop offset="1" stop-color="#f97316" stop-opacity="0"/></linearGradient></defs>' +
-        '<path d="' + a.fill + '" fill="url(#hg1)"/><path d="' + a.line + '" fill="none" stroke="#f97316" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>' +
+        '<defs><linearGradient id="hg1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--accent)" stop-opacity=".32"/><stop offset="1" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs>' +
+        '<path d="' + a.fill + '" fill="url(#hg1)"/><path d="' + a.line + '" fill="none" stroke="var(--accent)" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>' +
       '<div class="hero-inhalt">' +
         '<div class="hero-label"><span class="label hell">' + esc(uebersetze('Erlös im Zeitraum')) + '</span><span class="hinweis">' + esc(uebersetze('Arbeitswert — (Claude + manuelle Zeit) × Stundensatz')) + '</span></div>' +
         '<div class="hero-zahl"><span class="mono" id="hero-erloes">' + nf2.format(w.erloes) + '</span><span class="einheit">EUR</span>' +
           (state.vergleich && vorher ? '<span class="hero-delta">' + delta(w.erloes, vorher) + '<span>' + esc(uebersetze('ggü.')) + ' ' + esc(zeitraumText({ von: z.vorVon, bis: z.vorBis })) + '</span></span>' : '') + '</div>' +
         '<div class="hero-band"><div class="band"><span style="width:' + abgA.toFixed(1) + '%;background:var(--ok)"></span><span class="offen" style="width:' + (100 - abgA).toFixed(1) + '%"></span></div>' +
           '<div class="band-leg"><span><span class="leg-p" style="background:var(--ok)"></span>' + esc(uebersetze('abgerechnet')) + ' <b class="mono">' + eur(K.abgerechnet_eur) + '</b></span>' +
-          '<span><span class="leg-p" style="background:var(--accent)"></span>' + esc(uebersetze('offen')) + ' <b class="mono akzent">' + eur(K.offen_eur) + '</b> ' +
+          '<span><span class="leg-p" style="background:var(--accent)"></span>' + esc(uebersetze('noch nicht abgerechnet')) + ' <b class="mono akzent">' + eur(K.offen_eur) + '</b> ' +
             esc(uebersetze('in')) + ' ' + K.offen_vorgaenge + ' ' + esc(uebersetze(K.offen_vorgaenge === 1 ? 'Vorgang' : 'Vorgängen')) + '</span></div></div>' +
       '</div></div>' +
     '<div class="karte live-karte">' +
@@ -703,7 +706,7 @@ function hubHilfe() {
 
 const INSTRUMENT_UNTER = {
   marge: 'nach Sachkosten und eigener Zeit', abo: 'gezahlt vs. Listenpreis, beides in EUR', modelle: 'API-Gegenwert in USD',
-  burn: 'Listenpreis, letzte 60 Min hochgerechnet', quote: 'Arbeitswert abgerechnet vs. offen', agent: 'wie viel der KI-Laufzeit abrechenbar ist',
+  burn: 'Listenpreis, letzte 60 Min hochgerechnet', quote: 'Arbeitswert abgerechnet vs. noch nicht abgerechnet', agent: 'wie viel der KI-Laufzeit abrechenbar ist',
   ziel: 'Erlös im laufenden Monat gegen Ziel', cache: 'Anteil gelesener Cache-Tokens am Eingang', sitz: '',
   op: 'gestellte Rechnungen, noch nicht bezahlt · Liquidität, nicht Leistung',
 };
@@ -742,9 +745,9 @@ function zeichneHub(w, teile, neu) {
   const wmeta = Object.fromEntries(WIDGETS.map((m) => [m[0], m]));
   const widHtml = wst.sicht.filter((id) => wmeta[id]).map((id) => {
     const m = wmeta[id];
-    const rechts = '<a class="mini-link" href="#/' + m[4] + '" title="' + esc(uebersetze('Öffnen')) + '">↗</a>';
+    const rechts = '<a class="mini-link" href="#/' + m[4] + '" title="' + esc(uebersetze('Öffnen')) + '" aria-label="' + esc(uebersetze('Öffnen') + ': ' + uebersetze(m[1])) + '">↗</a>';
     const breite = wst.breite[id] || WIDGET_BREITE_STANDARD[id] || m[3];
-    return kachel('meine', id, m[1], id.startsWith('kpi-') ? '' : m[2], widgetInhalt(id, D), breite, { rechts });
+    return kachel('meine', id, m[1], id.startsWith('kpi-') ? '' : m[2], widgetInhalt(id, D), breite, { rechts, ziel: '#/' + m[4] });
   }).join('');
 
   w.innerHTML =
@@ -919,6 +922,12 @@ aktion('raster-auto', (wert) => {
 aktion('raster-weg', (wert) => {
   const [sek, id] = wert.split(':');
   rasterSetze(sek, (st) => { st.sicht = st.sicht.filter((x) => x !== id); });
+});
+aktion('kachel-ziel', (z, el, e) => {
+  // Wer Text markiert, will kopieren, nicht springen; Eingabefelder und Knoepfe ohne eigene Aktion auch nicht.
+  if (String(window.getSelection()).trim()) return;
+  if (e.target.closest('input, select, textarea, label, button')) return;
+  if (/^#\/[\w-]+$/.test(z)) geheZu(z.slice(2));
 });
 aktion('hub-hilfe', () => { hubZustand.hilfe = !hubZustand.hilfe; zeichneAnsicht(); });
 aktion('hub-verbindungen', () => { hubZustand.verbindungen = !hubZustand.verbindungen; zeichneAnsicht(); });

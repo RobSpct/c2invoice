@@ -98,7 +98,8 @@ const ed = {
   angebotEntwurf: null,  // Entwurf, der beim Oeffnen zum Fortsetzen angeboten wird
 };
 {
-  const z = lies('editor.zoom', '0.9');
+  // Ohne gemerkte Wahl: auf breiten Bildschirmen groesser (K1).
+  const z = lies('editor.zoom', window.innerWidth >= 1600 ? '1.15' : '0.9');
   ed.zoom = ED_ZOOM.some(([w]) => w === z) ? z : '0.9';
 }
 
@@ -741,6 +742,7 @@ function zeichneEditor(w, teile) {
     w.innerHTML = '';
   }
   document.title = uebersetze(istRechnung() ? 'Neue Rechnung' : 'Neues Angebot') + ' · c2invoice';
+  ciraKontext({ art: 'beleg', id: ed.b.art, titel: uebersetze(istRechnung() ? 'Neue Rechnung' : 'Neues Angebot') });
   // Hintergrund-Nachladen (Summary 60 s, Belege 120 s) baut das Formular nicht
   // neu — sonst verloere die Eingabe Fokus und Cursor. Nur was von den Daten abhaengt.
   if (w.querySelector('#editor')) {

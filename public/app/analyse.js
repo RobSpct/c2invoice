@@ -32,7 +32,7 @@ Object.assign(EN, {
   'Modelle im Zeitraum': 'Models in period', 'Tabelle + Ring': 'Table + ring', 'Modellmix und Preise im Detail.': 'Model mix and prices in detail.',
   'Marge je Woche gegen Ziel': 'Margin per week vs. target', 'Balken über/unter Ziel': 'Bars above/below target', 'Welche Wochen unter Ziel lagen.': 'Which weeks were below target.',
   'Kosten je Stunde im Verlauf': 'Cost per hour over time', 'USD je aktive h': 'USD per active h', 'Ob deine Arbeit pro Stunde teurer wird.': 'Whether your work gets more expensive per hour.',
-  'Vorgänge nach Status': 'Jobs by status', 'offen · abgerechnet': 'open · invoiced', 'Was noch abzurechnen ist.': 'What is still to be invoiced.',
+  'Vorgänge nach Status': 'Jobs by status', 'noch nicht abgerechnet · abgerechnet': 'not yet invoiced · invoiced', 'Was noch abzurechnen ist.': 'What is still to be invoiced.',
   'gestapelt nach Modell, in USD': 'stacked by model, in USD', 'andere': 'other', 'Gesamt USD': 'Total USD', 'Aktiv h': 'Active h', 'Summe': 'Sum',
   'Zahlen als Tabelle': 'Figures as table', 'Zeitraum': 'Period', 'Tag': 'Day', 'Woche': 'Week', 'Monat': 'Month', 'Fläche': 'Area', 'Balken': 'Bars',
   'aktive Stunden je Tag, letzte 12 Wochen': 'active hours per day, last 12 weeks', 'weniger': 'less', 'mehr': 'more',
@@ -94,7 +94,7 @@ const ANA = [
   ['modelle', 'Modelle im Zeitraum', 'Tabelle + Ring', '◔', 'Modellmix und Preise im Detail.', 4],
   ['marge', 'Marge je Woche gegen Ziel', 'Balken über/unter Ziel', '±', 'Welche Wochen unter Ziel lagen.', 4],
   ['kosten', 'Kosten je Stunde im Verlauf', 'USD je aktive h', '⌁', 'Ob deine Arbeit pro Stunde teurer wird.', 4],
-  ['status', 'Vorgänge nach Status', 'offen · abgerechnet', '◧', 'Was noch abzurechnen ist.', 4],
+  ['status', 'Vorgänge nach Status', 'noch nicht abgerechnet · abgerechnet', '◧', 'Was noch abzurechnen ist.', 4],
 ];
 RASTER.ana = { standard: ['kpis', 'verlauf', 'akt', 'sankey', 'modelle'], reihe: null, meta: ANA, speicher: 'analyse.raster', felder: [3, 4], an: 'sichtbar ✓', plus: '+ Bereich hinzufügen', min: () => [360, 220],
   zusatz: ['analyse.kpi'] };
@@ -242,7 +242,7 @@ function sankeyInhalt() {
     : id.startsWith('m:') ? kurzModell(id.slice(2)) : id.slice(2));
   const cols = [spalte('m:').map((id, i) => ({ id, label: name(id), c: andere(id) ? 'var(--m-rest)' : modellFarbe(i) })),
     spalte('p:').map((id) => ({ id, label: name(id), c: andere(id) ? 'var(--line-hover)' : 'var(--text-hell)' })),
-    spalte('v:').map((id) => ({ id, label: name(id), c: andere(id) ? '#9a3412' : id.startsWith('v:ohne:') ? 'var(--line-hover)' : 'var(--accent)' }))];
+    spalte('v:').map((id) => ({ id, label: name(id), c: andere(id) ? 'var(--m-5)' : id.startsWith('v:ohne:') ? 'var(--line-hover)' : 'var(--accent)' }))];
   // Hoehe nach Knotenzahl, Breite 960 wie im Entwurf; rechts bleiben 220 fuer Beschriftungen
   // (echte Projekt- und Vorgangsnamen sind laenger als die Beispieldaten).
   const H = Math.max(340, Math.max(...cols.map((c) => c.length)) * 30);
@@ -372,7 +372,7 @@ function statusBereich(S) {
   const K = S.kennzahlen, abr = S.abrechnung || {};
   const nach = (ab) => (S.tickets || []).filter((t) => !!abr[t.ticket] === ab && t.arbeitswert > 0).sort((a, b) => b.arbeitswert - a.arbeitswert).slice(0, 3).map((t) => t.ticket);
   const zeilen = [
-    ['offen', K.offen_vorgaenge, K.offen_vorgang_eur, 'var(--text-faint)', nach(false)],
+    ['noch nicht abgerechnet', K.offen_vorgaenge, K.offen_vorgang_eur, 'var(--text-faint)', nach(false)],
     ['abgerechnet', K.abgerechnet_vorgaenge, K.abgerechnet_eur, 'var(--ok)', nach(true)],
     ['ohne Vorgang', null, K.ohne_vorgang_eur, 'var(--line-hover)', []],
   ];
@@ -449,7 +449,7 @@ function werkzeugeReiter(S) {
     '<span class="tm-kopf"><span class="ell">' + esc(s.server) + '</span><b>' + nf2.format(s.cost_usd) + '</b></span>' +
     (s.werkzeuge || []).slice().sort(nachBetrag).filter((t) => t.cost_usd > 0).map((t) => {
       const sh = t.cost_usd / s.cost_usd;
-      return '<span class="tm-werkzeug' + (sh > 0.3 ? ' dunkel' : '') + '" title="' + esc(t.werkzeug + ' · ' + nf2.format(t.cost_usd) + ' USD') + '" style="flex:' + gewicht(t.cost_usd, s.cost_usd) + ' 1 0;background:rgba(249,115,22,' + (0.25 + sh * 0.75).toFixed(2) + ')">' +
+      return '<span class="tm-werkzeug' + (sh > 0.3 ? ' dunkel' : '') + '" title="' + esc(t.werkzeug + ' · ' + nf2.format(t.cost_usd) + ' USD') + '" style="flex:' + gewicht(t.cost_usd, s.cost_usd) + ' 1 0;background:color-mix(in srgb, var(--accent) ' + ((0.25 + sh * 0.75) * 100).toFixed(0) + '%, transparent)">' +
         (sh > 0.06 ? '<span class="ell">' + esc(t.werkzeug) + '</span><span>' + nf2.format(t.cost_usd) + '</span>' : '') + '</span>';
     }).join('') + '</button>';
 
@@ -499,6 +499,7 @@ function werkzeugeReiter(S) {
   return '<section class="werkzeug-rahmen">' +
     '<div class="wz-kopf"><span class="wz-zeichen" aria-hidden="true">⚙</span>' +
       '<div class="wz-titel"><div><h2>' + esc(uebersetze('Werkzeugbetrieb')) + '</h2><span class="pille voll-warn">' + esc(uebersetze('Nur Werkzeugdaten')) + '</span>' +
+        ' <a class="knopf klein" href="#/werkzeuge">' + esc(uebersetze('Verwalten → Werkzeuge')) + '</a>' +
         '<span class="pille warn">' + esc(uebersetze('nicht abrechenbar')) + '</span>' + infoI('werkzeuge') + '</div>' +
         infoText('werkzeuge', 'Hintergrunddienste mit eigener Sitzung — claude-mem, Sync-Jobs, MCP-Server. Diese Zahlen gehören zu keinem Vorgang, fließen in keine Rechnung und ändern keine Marge.') + '</div>' +
       '<div class="wz-summe"><span class="kpi-wert">' + nf2.format(summe) + '<span>USD</span></span><span class="hinweis">' + nf1.format(anteil * 100) + ' % ' + esc(uebersetze('des API-Gegenwerts')) + '</span></div></div>' +

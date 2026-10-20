@@ -35,6 +35,10 @@ function jsonlDir() {
 // ohne Arbeitsverzeichnis. Der Name steht bewusst in Klammern, damit er sich
 // nicht mit einem echten Projektnamen verwechseln laesst.
 const LOKAL_PROJEKT = '(lokal)';
+// Cira (Stufe T2) startet Claude Code in diesem Ordner. Was dort laeuft, ist
+// Werkzeugbetrieb von c2invoice selbst, kein Kundenprojekt (metrics.isOverhead).
+const CIRA_ORDNER = path.join(__dirname, 'data', 'cira');
+const CIRA_PROJEKT = '(cira)';
 
 // Aus "C:\Users\Name\Dev\Beispiel - App\src\lib" wird "Beispiel - App".
 // Ohne diesen Schritt zaehlt jeder Unterordner als eigenes Projekt.
@@ -60,6 +64,7 @@ const PROJECT_ROOTS = (Array.isArray(config.projectRoots) && config.projectRoots
 function projectOf(cwd) {
   if (!cwd) return '(unbekannt)';
   const norm = cwd.replace(/\//g, '\\').replace(/\\+$/, '');
+  if (norm.toLowerCase() === CIRA_ORDNER.replace(/\//g, '\\').toLowerCase()) return CIRA_PROJEKT;
   for (const root of PROJECT_ROOTS) {
     if (!root) continue;
     const r = root.replace(/\//g, '\\').replace(/\\+$/, '');
@@ -565,7 +570,11 @@ async function run({ db, verbose = false } = {}) {
     let start = prev ? prev.offset : 0;
     // Kleiner gewordene Datei heisst: sie wurde ersetzt, nicht angehaengt.
     if (prev && stat.size < prev.size) start = 0;
-    if (prev && stat.size === prev.size && stat.mtimeMs === prev.mtime_ms) continue;
+    // Gespeichert ist die abgerundete Zeit (setFile unten). Ungerundet verglichen
+    // galt unter Windows jede Datei bei jedem Lauf als geaendert: 1.000+
+    // Schreibvorgaenge je Takt, und der Zwischenspeicher in metrics.js war nach
+    // 30 s immer leer (Block L, 20.10.).
+    if (prev && stat.size === prev.size && Math.floor(stat.mtimeMs) === prev.mtime_ms) continue;
 
     let res;
     try {
@@ -600,7 +609,7 @@ async function run({ db, verbose = false } = {}) {
 
 module.exports = {
   run, projectOf, ticketOf, extractUsage, listJsonlFiles, PROJECT_ROOTS,
-  lokalDir, jsonlDir, LOKAL_PROJEKT, istEingabe, gleichePreiseAb,
+  lokalDir, jsonlDir, LOKAL_PROJEKT, CIRA_ORDNER, CIRA_PROJEKT, istEingabe, gleichePreiseAb, loeseHeim,
 };
 
 if (require.main === module) {

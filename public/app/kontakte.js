@@ -361,7 +361,7 @@ function kopfHtml(k) {
       '</div></div>' +
     '<div class="kon-kpis">' +
       kpi('Umsatz bezahlt', nf2.format(z.umsatz_bezahlt_eur || 0) + ' €', 'Zahlungseingänge, brutto, gesamt') +
-      kpi('Offene Posten', nf2.format(z.offen_eur || 0) + ' €', 'gestellt, abzüglich Zahlungen', z.offen_eur > 0.005 ? '#fdba74' : '') +
+      kpi('Offene Posten', nf2.format(z.offen_eur || 0) + ' €', 'gestellt, abzüglich Zahlungen', z.offen_eur > 0.005 ? 'var(--accent-blass)' : '') +
       kpi('Ø Zahlungsdauer', z.zahlungsdauer_tage == null ? '–' : nf1.format(z.zahlungsdauer_tage) + ' ' + esc(uebersetze('Tage')), 'Rechnungsdatum bis letzte Zahlung') +
       kpi('Angebote offen', num(z.angebote_offen || 0), 'nicht angenommen, nicht abgelaufen') +
     '</div>' +
@@ -396,7 +396,7 @@ function uebersichtHtml(k) {
     '<div class="kon-felder" data-kid="' + k.id + '">' + felder + '<span class="kon-fuss">' + esc(uebersetze('Felder speichern beim Verlassen.')) + '</span></div>' +
     '<div class="kon-box"><span class="ueberzeile">' + esc(uebersetze('Offene Posten')) + '</span>' +
       (offene.length ? offene.map((r) => '<button type="button" class="kon-posten" data-aktion="k-beleg" data-wert="' + esc('r:' + r.nr) + '">' +
-        '<span class="mono">' + esc(r.nr) + '</span><span class="mono rechts" style="color:#fdba74">' + nf2.format(r.rest_eur) + ' €</span>' +
+        '<span class="mono">' + esc(r.nr) + '</span><span class="mono rechts" style="color:var(--accent-blass)">' + nf2.format(r.rest_eur) + ' €</span>' +
         '<span class="s ell">' + esc(r.leistung_von ? datum(r.leistung_von) + ' – ' + datum(r.leistung_bis) : '') + '</span>' +
         '<span class="s rechts">' + esc(uebersetze('fällig') + ' ' + datum(r.faellig_am)) + '</span></button>').join('')
         : '<span class="dim">' + esc(uebersetze('Alles bezahlt.')) + '</span>') +
@@ -474,6 +474,7 @@ function zeichneKontakte(w, teile) {
   // Breit ohne Auswahl: erster Treffer der Liste (Mockup). Schmal zeigt dann nur die Liste.
   const sichtbar = L.filter(K_PASST[kz.f]);
   const sel = explizit ? selK : (sichtbar[0] || L[0] || null);
+  if (sel) ciraKontext({ art: 'kontakt', id: sel.id, titel: sel.firma || sel.name || '' });
   // Hintergrund-Nachladen unterbricht keine Eingabe in der Akte; die Entwuerfe
   // stehen ohnehin im Zustand und ueberleben jedes spaetere Neuzeichnen.
   const a = document.activeElement;

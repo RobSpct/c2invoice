@@ -297,6 +297,47 @@ function verteile(abschnitte) {
   return abschnitte;
 }
 
+// Zwischenspeicher fuer die Zeitrechnung (Block L). /api/summary rechnete die
+// Abschnitte sonst zehnmal neu, jedes Mal ueber alle Activity-Zeilen. Er
+// rechnet nichts, er merkt sich nur — und zwar einmal ueber alle Tage; jede
+// Ansicht filtert daraus. Das ist dasselbe wie eine Rechnung je Zeitraum:
+// zeitAbschnitte() liest ohnehin einen Tag ueber den Rand, weil sich die
+// Verteilung nur an zeitgleichen Abschnitten entscheidet (an echten Daten fuer
+// 29 Zeitraeume nachgeprueft, Gate l-gates.js mess).
+// Gueltig, solange sich der Stand nicht aendert: total_changes() zaehlt jedes
+// Schreiben dieser Verbindung (Server und Ingest teilen sie), data_version das
+// anderer Verbindungen (backfill.js, jira-sync.js), dazu die Config-Werte, die
+// in die Abschnitte eingehen.
+// In einer offenen Transaktion wird nicht gespeichert: total_changes() bleibt
+// nach einem ROLLBACK erhoeht, der Eintrag galte sonst weiter. Kennt die
+// Node-Version isTransaction nicht, wird ebenfalls nur gerechnet.
+const ZWISCHEN = new WeakMap();
+function standVon(db) {
+  return db.prepare('SELECT total_changes() AS n').get().n + '|' + db.prepare('PRAGMA data_version').get().data_version
+    + '|' + config.gapMinutes + '|' + config.zeitmodell + '|' + JSON.stringify(config.projektSaetze || {});
+}
+function memo(db, schluessel, rechne) {
+  if (db.isTransaction !== false) return rechne();
+  const stand = standVon(db);
+  let s = ZWISCHEN.get(db);
+  if (!s || s.stand !== stand) { s = { stand, werte: new Map() }; ZWISCHEN.set(db, s); }
+  if (!s.werte.has(schluessel)) s.werte.set(schluessel, rechne());
+  return s.werte.get(schluessel);
+}
+const alleAbschnitte = (db) => memo(db, 'verteilt', () => verteile(abrechenbareAbschnitte(db, { von: null, bis: null })));
+// Alle Activity-Zeilen in Lesereihenfolge, mit Tag zum Filtern und der Zeit
+// schon als Zahl (Date.parse je Zeile und Aufruf war der halbe Aufwand). Nur lesen.
+const alleZeilen = (db) => memo(db, 'agent', () => db.prepare('SELECT session_id, ts, project, ticket, day FROM activity ORDER BY session_id, ts').all()
+  .map((r) => ({ ...r, ms: Date.parse(r.ts) })));
+
+// Nach dem Einlesen, solange jemand die Oberflaeche offen hat (server.js): die
+// naechste Ansicht findet den Speicher dann gefuellt. Ohne neue Daten kostet es
+// nur den Stand-Vergleich.
+function vorrechnen(db) {
+  alleAbschnitte(db);
+  alleZeilen(db);
+}
+
 // Abrechenbare Zeit je Gruppe (Ticket oder Projekt), in Sekunden.
 // opts: dieselben Filter wie ueberall (from, to, month, ticket, project). Ein
 // Modellfilter wird bewusst nicht gelesen — eine Zeitspanne gehoert keinem
@@ -312,7 +353,8 @@ function zeitJeGruppe(db, opts = {}, { groupBy = 'ticket', ticketlos = false } =
   const rahmen = zeitRahmen(opts);
   const out = new Map();
   const modelle = new Map();
-  for (const a of verteile(abrechenbareAbschnitte(db, rahmen))) {
+  // Nur gelesen: verteile() hat ms schon gesetzt, die Abschnitte bleiben unveraendert.
+  for (const a of alleAbschnitte(db)) {
     if (rahmen.von && a.day < rahmen.von) continue;
     if (rahmen.bis && a.day > rahmen.bis) continue;
     if (opts.ticket && a.ticket !== opts.ticket) continue;
@@ -341,21 +383,21 @@ function zeitJeGruppe(db, opts = {}, { groupBy = 'ticket', ticketlos = false } =
 // hier erst nach dem Lesen ausgewaehlt, damit Zeilen ohne Arbeitsverzeichnis
 // ihr Projekt erben koennen.
 function agentSecondsByGroup(db, opts = {}, { groupBy = 'ticket', ticketlos = false } = {}) {
-  const zeit = filterClause({ from: opts.from, to: opts.to, month: opts.month });
-  const rows = db.prepare(`
-    SELECT session_id, ts, project, ticket FROM activity
-    ${zeit.where ? 'WHERE ' + zeit.where : ''}
-    ORDER BY session_id, ts
-  `).all(...zeit.params);
+  // Gefiltert wie frueher die Abfrage (day >= from, day <= to, Monat): die
+  // erste Zeile des Zeitraums hat keinen Vorgaenger und erbt nichts.
+  const { von, bis } = zeitRahmen(opts);
 
   const limit = config.gapMinutes * 60 * 1000;
   const out = new Map();
   let prev = null;
   let prevMs = 0;
 
-  for (const r of rows) {
-    const ms = Date.parse(r.ts);
+  for (let r of alleZeilen(db)) {
+    if ((von && r.day < von) || (bis && r.day > bis)) continue;
+    const ms = r.ms;
     if (!Number.isFinite(ms)) continue;
+    // Die Zeilen gehoeren allen Ansichten: erben nur in einer Kopie.
+    if (r.project === UNBEKANNT) r = { ...r };
     erbeProjekt(r, prev);
     const gap = prev && r.session_id === prev.session_id ? ms - prevMs : Infinity;
     const gewaehlt = prev
@@ -525,8 +567,13 @@ for (const [projekt, eintrag] of Object.entries(config.projektSaetze || {})) {
   }
 }
 
+// Cira-Laeufe (Stufe T2) im eigenen Ordner. Muss zu ingest.CIRA_PROJEKT passen.
+// Werkzeugbetrieb wie lokale Modelle, aber nicht in werkzeugeJeTicket: die
+// Kosten des Assistenten gehoeren keinem parallel laufenden Kundenvorgang.
+const CIRA_PROJEKT = '(cira)';
+
 function isOverhead(project) {
-  return OVERHEAD.has(project) || project === LOKAL_PROJEKT;
+  return OVERHEAD.has(project) || project === LOKAL_PROJEKT || project === CIRA_PROJEKT;
 }
 
 // Werkzeuge wie claude-mem laufen nicht eigenstaendig, sondern begleiten eine
@@ -916,16 +963,81 @@ function herkunft(db, opts = {}) {
   };
 }
 
+// Werkzeuge (C8): Nutzung je Arbeitsbereich in Sitzungen, nicht in Requests —
+// herkunft() zaehlt Requests waehrend eines aktiven Skills, ein einmal
+// benutzter Skill haette dort schnell 20+. project null = alle Projekte.
+// Plugin = Sitzungen, in denen einer seiner Skills (`p:x`) oder einer seiner
+// Server (`plugin:p:x`) lief.
+function werkzeugNutzung(db, { project = null, from, to } = {}) {
+  return memo(db, 'werkzeugNutzung|' + project + '|' + from + '|' + to, () => {
+    const { where, params } = filterClause({ project: project || undefined, from, to });
+    const w = where ? 'WHERE ' + where : '';
+    const und = (b) => (where ? 'WHERE ' + where + ' AND ' + b : 'WHERE ' + b);
+    const s = db.prepare(`SELECT COUNT(DISTINCT session_id) AS sitzungen, COUNT(*) AS requests, SUM(cost_usd) AS usd FROM events ${w}`).get(...params) || {};
+    const m = db.prepare(`SELECT model, COUNT(*) AS n FROM events ${w} GROUP BY model ORDER BY n DESC, model LIMIT 1`).get(...params);
+    const skill = {};
+    const plugin = new Map();
+    const zuPlugin = (p, sitzung) => { if (!plugin.has(p)) plugin.set(p, new Set()); plugin.get(p).add(sitzung); };
+    for (const r of db.prepare(`SELECT DISTINCT skill, session_id FROM events ${und('skill IS NOT NULL')}`).all(...params)) {
+      skill[r.skill] = (skill[r.skill] || 0) + 1;
+      const i = r.skill.indexOf(':');
+      if (i > 0) zuPlugin(r.skill.slice(0, i), r.session_id);
+    }
+    const mcp = {};
+    for (const r of db.prepare(`SELECT mcp_server, COUNT(DISTINCT session_id) AS sitzungen, SUM(cost_usd) AS usd FROM events ${und('mcp_server IS NOT NULL')} GROUP BY mcp_server`).all(...params)) {
+      mcp[r.mcp_server] = { sitzungen: r.sitzungen, cost_eur: usdToEur(r.usd || 0) };
+    }
+    for (const r of db.prepare(`SELECT DISTINCT mcp_server, session_id FROM events ${und("mcp_server LIKE 'plugin:%'")}`).all(...params)) {
+      zuPlugin(r.mcp_server.split(':')[1], r.session_id);
+    }
+    return {
+      sitzungen: s.sitzungen || 0,
+      requests: s.requests || 0,
+      kosten_usd: s.usd || 0,
+      modell: m ? m.model : null,
+      skill,
+      mcp,
+      plugin: Object.fromEntries([...plugin].map(([p, set]) => [p, set.size])),
+    };
+  });
+}
+
+// Schwelle „selten benutzt“ (Sitzungen in 30 T): Vorschlag und Markierung in der Liste.
+const WERKZEUG_SELTEN = 2;
+
+// Vorschlag „abschalten“: aktiv, hoechstens 2 Sitzungen in 30 T, geladener
+// Kontext ab 1k. Der Kontext wird bei jedem Request aus dem Cache gelesen und
+// je Sitzung einmal in den Cache geschrieben:
+//   Ersparnis = Kontext × (Requests × Cache-Lesen + Sitzungen × Cache-Schreiben 5 min)
+// mit den Preisen des meistgenutzten Modells. Ohne Preis kein Vorschlag.
+function werkzeugVorschlag({ kandidaten = [], nutzung, preis }) {
+  if (!preis || !nutzung) return null;
+  let best = null;
+  for (const k of kandidaten) {
+    if (!(k.tokens >= 1000) || !(k.sitzungen <= WERKZEUG_SELTEN)) continue;
+    const usd = k.tokens * (nutzung.requests * preis.cr + nutzung.sitzungen * preis.cw5m);
+    // Plausibilitaet: mehr sparen, als der Bereich in 30 T kostete, geht nicht —
+    // dann stimmt die Grundlage nicht (falsche Projektzuordnung, Preis).
+    if (nutzung.kosten_usd !== undefined && usd > nutzung.kosten_usd) continue;
+    if (!best || usd > best.ersparnis_usd) {
+      best = { ...k, ersparnis_usd: usd, ersparnis_eur: usdToEur(usd),
+        grundlage: { requests: nutzung.requests, sitzungen: nutzung.sitzungen, cr: preis.cr, cw5m: preis.cw5m } };
+    }
+  }
+  return best;
+}
+
 // Anteil am Monatsabo: Ein Ticket traegt so viel vom Abopreis, wie es am
 // Listenwert des Monats ausmacht. Die Bezugsgroesse ist bewusst der GESAMTE
 // Monatsverbrauch einschliesslich der Werkzeuge — sonst waeren die Anteile
 // aller Tickets zusammen groesser als das Abo selbst.
 function aboAnteil(db, costUsd, month) {
   if (!costUsd || !month) return 0;
-  const row = db.prepare(
-    'SELECT COALESCE(SUM(cost_usd),0) AS total FROM events WHERE substr(day,1,7) = ?'
-  ).get(month);
-  const total = row ? row.total : 0;
+  // Je Vorgang und Monat ein voller Scan ueber events war der groesste Posten
+  // einer warmen Uebersicht (Block L): Monatssummen einmal je Datenstand.
+  const total = memo(db, 'monatssummen', () => new Map(db.prepare(
+    'SELECT substr(day,1,7) AS monat, COALESCE(SUM(cost_usd),0) AS total FROM events GROUP BY monat'
+  ).all().map((r) => [r.monat, r.total]))).get(month) || 0;
   if (!total) return 0;
   return (costUsd / total) * config.aboPreisMonat;
 }
@@ -1709,6 +1821,49 @@ function tokenArten(modelle) {
   };
 }
 
+// Claude-Nutzungsfenster fuer die Cira-Karte (5-h-Block). Wie Claude zaehlt:
+// ein Fenster beginnt mit der ersten Anfrage nach Ablauf des vorigen, auf die
+// volle Stunde (UTC) abgerundet, und dauert 5 h. Gezaehlt wird dieselbe
+// Tokensumme wie im Live-Strom (Ein-/Ausgabe plus Cache); lokale Modelle
+// belasten kein Claude-Kontingent und bleiben draussen. Anthropic nennt kein
+// Limit in Tokens — das setzt der Nutzer (limit5hTokens), deshalb traegt die
+// Anzeige "≈ aus Ledger". Ohne Limit: null. Kein laufendes Fenster: anteil 0.
+const FENSTER_5H_MS = 5 * 3600000;
+function block5h(db, { limit, jetzt = Date.now() } = {}) {
+  if (!(Number(limit) > 0)) return null;
+  const zeilen = db.prepare(`
+    SELECT ts, input_tokens, output_tokens, cache_w_5m, cache_w_1h, cache_read FROM events
+    WHERE ts >= ? AND ts <= ? AND COALESCE(source, '') <> 'lokal' ORDER BY ts
+  `).all(new Date(jetzt - 24 * 3600000).toISOString(), new Date(jetzt).toISOString());
+  let beginn = null, tokens = 0;
+  for (const z of zeilen) {
+    const ms = Date.parse(z.ts);
+    if (!Number.isFinite(ms)) continue;
+    if (beginn === null || ms >= beginn + FENSTER_5H_MS) { beginn = Math.floor(ms / 3600000) * 3600000; tokens = 0; }
+    tokens += withTotals(z).total_tokens;
+  }
+  if (beginn === null || jetzt >= beginn + FENSTER_5H_MS) return { anteil: 0, tokens: 0, limit: Number(limit), ende: null };
+  return { anteil: tokens / Number(limit), tokens, limit: Number(limit), ende: new Date(beginn + FENSTER_5H_MS).toISOString() };
+}
+
+// Laufende Claude-Sitzungen fuer das Navigations-Badge: Anfragen der letzten
+// zwei Minuten (wie istAktiv in der Oberflaeche), ohne Werkzeugbetrieb und
+// ohne lokale Modelle.
+function liveSitzungen(db, { jetzt = Date.now() } = {}) {
+  const platz = [...OVERHEAD].map(() => '?').join(',');
+  return db.prepare(`SELECT COUNT(DISTINCT session_id) AS n FROM events WHERE ts >= ? AND COALESCE(source, '') <> 'lokal'` +
+    (OVERHEAD.size ? ` AND project NOT IN (${platz})` : '')).get(new Date(jetzt - 120000).toISOString(), ...OVERHEAD).n;
+}
+
+// Was Cira (Stufe T2) im Kalendermonat von `jetzt` gekostet hat, in Euro, aus
+// den Laeufen selbst (total_cost_usd). Grundlage fuer das Monatslimit — der
+// Ledger kennt einen Lauf erst nach dem naechsten Abgleich.
+function ciraKostenMonatEur(db, { jetzt = new Date() } = {}) {
+  const monat = jetzt.toISOString().slice(0, 7);
+  const usd = db.prepare("SELECT COALESCE(SUM(kosten_usd), 0) AS s FROM cira_lauf WHERE substr(zeit, 1, 7) = ?").get(monat).s;
+  return usdToEur(usd);
+}
+
 // Momentaufnahme fuer den Live-Monitor.
 // Werkzeug-Sitzungen erscheinen hier bewusst NICHT als eigene Zeilen: sie
 // begleiten eine Arbeitssitzung und wuerden die Liste sonst verdoppeln.
@@ -1859,11 +2014,69 @@ function splitOverhead(db, opts = {}) {
   };
 }
 
+// Budget je Vorgang (Owner 20.10.2026): von Hand in Euro gesetzt. Verbraucht ist
+// der Arbeitswert des ganzen Vorgangs inkl. manueller Zeit — ohne Zeitraum, auch
+// wenn die Tabelle daneben einen zeigt. Stufe und Hinweis folgen der angezeigten,
+// gerundeten Prozentzahl, sonst stuende „60 %“ gruen da.
+const cent = (x) => Math.round(x * 100) / 100;
+function budgetStand(budget_eur, verbraucht_eur) {
+  const prozent = Math.round((verbraucht_eur / budget_eur) * 100);
+  return {
+    budget_eur: cent(budget_eur),
+    verbraucht_eur: cent(verbraucht_eur),
+    rest_eur: cent(budget_eur - verbraucht_eur),
+    prozent,
+    balken: Math.min(100, prozent),
+    stufe: prozent < 60 ? 'ok' : prozent < 80 ? 'warn' : prozent <= 100 ? 'acc' : 'bad',
+    hinweis: prozent >= 100 ? 100 : prozent >= 80 ? 80 : null,
+  };
+}
+
+// Alle gesetzten Budgets mit Stand; Zuordnung ohne Gross-/Kleinschreibung.
+function budgets(db) {
+  const zeilen = db.prepare('SELECT vorgang, budget_eur FROM vorgang_budget ORDER BY vorgang').all();
+  if (!zeilen.length) return [];
+  // Schreibweisen desselben Vorgangs (abc-1, ABC-1) sind in byTicket getrennte Zeilen: addieren.
+  const wert = new Map();
+  for (const t of byTicket(db, {})) { const k = String(t.ticket).toUpperCase(); wert.set(k, (wert.get(k) || 0) + t.arbeitswert); }
+  return zeilen.map((z) => ({ vorgang: z.vorgang, ...budgetStand(z.budget_eur, wert.get(z.vorgang.toUpperCase()) || 0) }));
+}
+
+function budgetFuer(db, key) {
+  return budgets(db).find((b) => b.vorgang.toUpperCase() === String(key).toUpperCase()) || null;
+}
+
+// Budget setzen oder mit null entfernen. Der Vorgang muss in der Auswertung
+// vorkommen; gespeichert wird sein Schluessel von dort, nicht die Eingabe.
+function setzeBudget(db, { vorgang, budget_eur } = {}) {
+  if (typeof vorgang !== 'string' || !vorgang.trim() || vorgang.length > 200) throw new Error('Vorgang fehlt.');
+  const k = vorgang.trim().toUpperCase();
+  const zeile = byTicket(db, {}).find((t) => String(t.ticket).toUpperCase() === k);
+  if (!zeile) throw new Error('Unbekannter Vorgang.');
+  const key = zeile.ticket;
+  // Erst runden, dann pruefen: 0.001 ist > 0, auf Cent gerundet aber 0 (Teilung durch 0).
+  const betrag = typeof budget_eur === 'number' && Number.isFinite(budget_eur) ? cent(budget_eur) : NaN;
+  if (budget_eur !== null && !(betrag >= 0.01 && betrag <= 10000000)) {
+    throw new Error('Budget: eine Zahl über 0 und höchstens 10.000.000 €.');
+  }
+  db.prepare('DELETE FROM vorgang_budget WHERE vorgang = ? COLLATE NOCASE').run(key);
+  if (budget_eur === null) return { vorgang: key, budget: null };
+  db.prepare('INSERT INTO vorgang_budget (vorgang, budget_eur, geaendert_am) VALUES (?,?,?)').run(key, betrag, new Date().toISOString());
+  return { vorgang: key, budget: budgetFuer(db, key) };
+}
+
 module.exports = {
+  budgetStand,
+  budgets,
+  budgetFuer,
+  setzeBudget,
   splitOverhead,
   werkzeuge,
   werkzeugeJeTicket,
   herkunft,
+  werkzeugNutzung,
+  werkzeugVorschlag,
+  WERKZEUG_SELTEN,
   satzFuerProjekt,
   satzFuerTicket,
   overheadZuordnung,
@@ -1872,9 +2085,12 @@ module.exports = {
   OVERHEAD,
   usdToEur,
   isOverhead,
+  ciraKostenMonatEur,
+  CIRA_PROJEKT,
   activeSecondsFromTimestamps,
   activeSecondsByGroup,
   agentSecondsByGroup,
+  vorrechnen,
   zeitmodellKarte,
   ZEITMODELLE,
   summary,
@@ -1903,6 +2119,8 @@ module.exports = {
   fluss,
   margeJeWoche,
   live,
+  block5h,
+  liveSitzungen,
   aboAnteil,
   aboKosten,
   filterClause,

@@ -171,7 +171,14 @@ const state = {
 async function hole(pfad) {
   // Nach 30 s abbrechen: eine haengende Abfrage liesse sonst "Lädt …" ewig stehen.
   const r = await fetch(pfad, { cache: 'no-store', signal: AbortSignal.timeout(30000) });
-  if (!r.ok) throw new Error('HTTP ' + r.status);
+  if (!r.ok) {
+    // Meldung bleibt "HTTP <status>" (Aufrufer pruefen darauf); der Grund des
+    // Servers kommt als e.grund mit, damit ihn die Oberflaeche zeigen kann.
+    const e = new Error('HTTP ' + r.status);
+    e.status = r.status;
+    e.grund = await r.json().then((d) => (d && d.error) || null, () => null);
+    throw e;
+  }
   return r.json();
 }
 // Der Server meldet Fehler als { error } mit Status 400 — beides pruefen.
@@ -188,6 +195,7 @@ async function sende(pfad, nutzlast) {
     // status geht mit: 409 und 5xx bedeuten fuer den Aufrufer etwas anderes als 400.
     const e = new Error(d.error || d.grund || 'HTTP ' + r.status);
     e.status = r.status;
+    e.daten = d;   // z. B. die moeglichen Jira-Uebergaenge bei 409 (Board)
     throw e;
   }
   return d;
@@ -283,17 +291,44 @@ async function mitLauf(knopf, tu) {
   }
 }
 
+/* ---------- Cira (Handoff README §8) ----------
+   Ein Zustand fuer alle Orbs und das Dock. Jede Ansicht meldet ihr gewaehltes
+   Objekt mit ciraKontext({ art, id, titel }); das Dock zeigt es unter "Sieht
+   mit" und schickt es mit jeder Frage. Beim Seitenwechsel faellt es weg. */
+const CIRA_MODI = { ruht: 'Bereit', spricht: 'Spricht', 'hört': 'Hört zu', denkt: 'Denkt nach' };
+const cira = { modus: 'ruht', zustand: 'auto', nacht: false, kontext: null, spur: [], dockOffen: false, verlauf: null };
+function ciraKontext(k) {
+  cira.kontext = k && typeof k === 'object' && k.art
+    ? { art: String(k.art), id: k.id == null ? '' : String(k.id), titel: String(k.titel || k.id || '') } : null;
+  if (typeof zeichneDockKontext === 'function') zeichneDockKontext();
+}
+// Spiegelt Modus und Zustand auf jeden <cira-orb> und jede Modus-Beschriftung.
+function ciraModus(modus) {
+  if (modus && CIRA_MODI[modus]) cira.modus = modus;
+  const zustand = cira.nacht && cira.zustand === 'auto' ? 'night' : cira.zustand;
+  for (const o of document.querySelectorAll('cira-orb')) {
+    if (o.getAttribute('mode') !== cira.modus) o.setAttribute('mode', cira.modus);
+    if (o.getAttribute('state') !== zustand) o.setAttribute('state', zustand);
+  }
+  // Orb-Stil „Flaeche“ auf der Buehne (README §5.2): eigene Zustandsnamen.
+  const siri = { ruht: 'idle', 'hört': 'listening', denkt: 'thinking', spricht: 'speaking' }[cira.modus];
+  for (const o of document.querySelectorAll('siri-orb')) if (o.getAttribute('state') !== siri) o.setAttribute('state', siri);
+  for (const el of document.querySelectorAll('[data-cira-modus]')) el.textContent = uebersetze(CIRA_MODI[cira.modus]);
+}
+
 /* ---------- Navigation ----------
    Hash-Routen: #/hub, #/analyse/verbrauch, #/vorgaenge/ABC-123. Jede Seite
    meldet sich mit registriere() an; shell.js zeigt sie an. */
 const ANSICHTEN = Object.create(null);
 function registriere(name, def) { ANSICHTEN[name] = def; }
+// Ohne gemerkte Wahl oeffnet das Cockpit (Masterplan 3.0, C3).
+const START_STANDARD = 'cockpit';
 
 function route() {
   const roh = location.hash.replace(/^#\/?/, '');
   const teile = roh.split('/').filter(Boolean).map((x) => { try { return decodeURIComponent(x); } catch { return x; } });
   if (ANSICHTEN[teile[0]]) return { name: teile[0], teile: teile.slice(1) };
-  const start = lies('start', 'hub');
+  const start = lies('start', START_STANDARD);
   return { name: ANSICHTEN[start] ? start : 'hub', teile: [] };
 }
 
@@ -361,6 +396,13 @@ function bewegungAus(roh) {
   return roh === 'off' ? 'off' : 'on';
 }
 
+/* Bereiche spaeterer Bloecke (`block`) stehen nur mit config
+   oberflaeche.geplanteBereiche === true in der Navigation (Owner 21.10.):
+   oeffentlich aus, in der eigenen Installation als Erinnerung an. */
+function navSeiten(seiten, geplant) {
+  return seiten.filter((s) => !s.block || geplant === true);
+}
+
 // Googles vorbefuelltes Termin-Formular (R22, Zwischenloesung statt OAuth): der
 // Nutzer speichert dort selbst, bei Gaesten verschickt Google die Einladung.
 function googleVorlageUrl({ titel, start, ende, details, gaeste }) {
@@ -372,4 +414,4 @@ function googleVorlageUrl({ titel, start, ende, details, gaeste }) {
   return 'https://calendar.google.com/calendar/render?' + p.toString().replace(/\+/g, '%20');
 }
 
-if (typeof module !== 'undefined') module.exports = { zeitraum, isoTag, kachelGroesse, verschiebe, betragAus, entwuerfeAus, bewegungAus, googleVorlageUrl };
+if (typeof module !== 'undefined') module.exports = { zeitraum, isoTag, kachelGroesse, verschiebe, betragAus, entwuerfeAus, bewegungAus, navSeiten, googleVorlageUrl };
