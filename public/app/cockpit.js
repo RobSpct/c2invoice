@@ -22,7 +22,8 @@ Object.assign(EN, {
   'Braucht dich': 'Needs you', 'Nichts wartet auf dich. Cira meldet sich.': 'Nothing is waiting for you. Cira will let you know.',
   'Freigeben': 'Approve', 'Ablehnen': 'Decline', 'Freigegeben': 'Approved', 'Abgelehnt': 'Declined',
   'noch keine Aktion · nur Ablehnen': 'no action yet · decline only',
-  'Briefings kommen mit Block C9 des Ausbaus.': 'Briefings arrive with block C9 of the build-out.',
+  'Nichts Neues im Vault.': 'Nothing new in the vault.', 'Kein Vault eingerichtet.': 'No vault set up.', 'Vorschau': 'Preview', 'Projekt-Tag': 'Project tag', 'Tag wählen …': 'Choose tag …',
+  'Vault-Notiz': 'Vault note', 'Notiz gespeichert': 'Note saved', 'Ordner {o}/ fehlt im Vault.': 'Folder {o}/ is missing in the vault.', 'Monatsbericht': 'Monthly report', 'Briefings: Stand nicht aktuell.': 'Briefings: not up to date.',
   'Skills starten': 'Start skills', 'Tagesbericht vorlesen': 'Read daily report', 'Timer stoppen + buchen': 'Stop timer + book',
   'Frag mich nach Zahlen — oder tipp einen Vorschlag unten an. Direkte Antworten (T0) kosten nichts.': 'Ask me about numbers — or tap a suggestion below. Direct answers (T0) cost nothing.',
   'Heute — Stunden aus Claude-Arbeit und manuell': 'Today — hours from Claude work and manual',
@@ -38,6 +39,9 @@ Object.assign(EN, {
   'projekt': 'project', 'global': 'global', 'Arbeitsbereich': 'Workspace', '{n} weitere': '{n} more',
   'Keine Skills gefunden (~/.claude/skills und .claude/skills im Arbeitsbereich).': 'No skills found (~/.claude/skills and .claude/skills in the workspace).',
   'Meldung schließen': 'Close notice', 'In „Braucht dich“ ansehen': 'View in “Needs you”',
+  // B1: wartende Sitzung im eigenen Terminal
+  'Terminal': 'Terminal', 'Zur Sitzung': 'To session', 'Läuft in deinem Terminal — dort antworten.': 'Runs in your terminal — answer there.',
+  'Claude wartet auf dich': 'Claude is waiting for you', 'Terminal-Sitzungen: Stand nicht aktuell.': 'Terminal sessions: not up to date.', 'Rückfrage im Terminal': 'Question in terminal',
   'Desktop-Benachrichtigung': 'Desktop notification', 'zusätzlich zur Karte in der Seite, wenn der Tab im Hintergrund liegt · nicht im Nicht-stören-Fenster': 'in addition to the in-page card when the tab is in the background · not during do-not-disturb',
   'Dieser Browser kennt keine Desktop-Benachrichtigungen.': 'This browser has no desktop notifications.',
   'Der Browser erlaubt keine Benachrichtigungen. In den Seiten-Einstellungen freigeben und erneut einschalten.': 'The browser does not allow notifications. Allow them in the site settings and switch on again.',
@@ -63,7 +67,7 @@ Object.assign(EN, {
   'An Claude weitergegeben.': 'Passed on to Claude.', '/{b} als nächster Schritt angehängt': '/{b} appended as next step', 'Ablauf gestartet': 'Run started',
 });
 
-const ck = { verlauf: null, szene: null, vorschlaege: [], heute: null, freigaben: null, orbStil: 'partikel', fehler: {}, skills: null, her: null,
+const ck = { verlauf: null, szene: null, vorschlaege: [], heute: null, freigaben: null, wartend: null, orbStil: 'partikel', fehler: {}, skills: null, her: null,
   ablauf: null, ablaufLauf: 0, ablaufHinweis: '', stoppFrage: false, stoppPille: '', stoppText: '' };
 
 /* ---------- Formate ---------- */
@@ -108,6 +112,52 @@ function ladeOrbStil() {
   }, (e) => console.error('/api/cira/einstellungen:', e.message));
 }
 window.addEventListener('c2-freigabe', () => { if (route().name === 'cockpit') ladeFreigaben(); });
+// Wartende Sitzungen im eigenen Terminal (B1): nur Hinweis, beantwortet wird dort.
+// SSE und 15-s-Takt koennen sich ueberholen: nur die juengste Antwort zaehlt.
+let wartendLauf = 0;
+function ladeWartend() {
+  const nr = ++wartendLauf;
+  hole('/api/sitzungen?offen=1').then((r) => {
+    if (nr !== wartendLauf) return;
+    ck.wartend = (r.sitzungen || []).filter((s) => s.quelle === 'fremd' && s.status === 'wartet');
+    // Nur bei Aenderung neu zeichnen: sonst nimmt der 15-s-Takt Fokus und Klick weg.
+    const neu = JSON.stringify(ck.wartend), hatteFehler = !!ck.fehler.wartend;
+    delete ck.fehler.wartend;
+    if (neu !== ck.wartendStand || hatteFehler) { ck.wartendStand = neu; zeichneFreigaben(); }
+  }, (e) => { if (nr !== wartendLauf) return; console.error('/api/sitzungen:', e.message); ck.fehler.wartend = e.message; zeichneFreigaben(); });
+}
+// Nur Statuswechsel (Hook), nicht jedes Transkript-Ereignis eigener Sitzungen.
+window.addEventListener('c2-sitzung', (e) => { if (e.detail && e.detail.status && route().name === 'cockpit') ladeWartend(); });
+
+// Spaete Antwort (C9c): Verlauf ersetzen, nicht anhaengen (ladeCkVerlauf ist fuer den ersten Stand).
+// Kommt sie, waehrend die eigene Frage noch laeuft (Entwurf ohne Modell ist schneller), danach nachladen.
+window.addEventListener('c2-cira', (e) => { if (e.detail && e.detail.kanal === 'cockpit') ckSpaet(0); });
+function ckSpaet(n) {
+  if (cira.laeuft) { if (n < 300) setTimeout(() => ckSpaet(n + 1), 500); return; }
+  hole('/api/cira/verlauf?kanal=cockpit').then((r) => { if (!cira.laeuft) { ck.verlauf = r.verlauf || []; if (route().name === 'cockpit') zeichneCkVerlauf(); } },
+    (err) => console.error('/api/cira/verlauf:', err.message));
+}
+
+/* ---------- Briefings-Karte (C9a) ---------- */
+function ladeCkBriefings() {
+  ck.briefingsZeit = Date.now();
+  hole('/api/briefings').then((d) => { ck.briefings = d; delete ck.fehler.briefings; }, (e) => { ck.fehler.briefings = e.message; })
+    .then(() => zeichneCkBriefings());
+}
+function zeichneCkBriefings() {
+  const el = document.getElementById('ck-bf');
+  const n = document.getElementById('ck-bf-n');
+  if (!el) return;
+  const d = ck.briefings;
+  if (!d) { el.innerHTML = '<span class="ck-leer">' + esc(uebersetze(ck.fehler.briefings ? 'Briefings: Stand nicht aktuell.' : 'Lädt …')) + '</span>'; return; }
+  const neu = d.briefings.filter((b) => !b.gelesen);
+  if (n) { n.textContent = neu.length ? String(neu.length) : ''; n.classList.toggle('an', neu.length > 0); }
+  if (!d.vault) { el.innerHTML = '<span class="ck-leer">' + esc(uebersetze('Kein Vault eingerichtet.')) + '</span>'; return; }
+  if (d.fehlt) { el.innerHTML = '<span class="ck-leer">' + esc(fuelle('Ordner {o}/ fehlt im Vault.', { o: d.ordner })) + '</span>'; return; }
+  if (!neu.length) { el.innerHTML = '<span class="ck-leer">' + esc(uebersetze('Nichts Neues im Vault.')) + '</span>'; return; }
+  el.innerHTML = neu.slice(0, 3).map((b) => '<a class="ck-bf" href="#/briefings/' + esc(encodeURIComponent(b.pfad)) + '"><span class="quadrat" style="background:' + esc(b.quelle.farbe || 'var(--text-faint)') + '" aria-hidden="true"></span>' +
+    '<span class="t">' + esc(b.titel) + '</span><span class="mono faint">' + esc(b.datum ? datumKurz(b.datum) : '–') + '</span></a>').join('');
+}
 
 /* ---------- Seite ---------- */
 function zeichneCockpit(w, teile, neu) {
@@ -116,8 +166,7 @@ function zeichneCockpit(w, teile, neu) {
   const da = w.querySelector('.cockpit');
   // Dabei holt es nach, was beim Oeffnen fehlte, und frischt „Heute“ hoechstens minuetlich auf.
   if (!neu && da && da.dataset.sprache === SPRACHE) {
-    const br = document.getElementById('ck-briefings');
-    if (br) br.hidden = !geplantSichtbar();
+    if (!ck.briefings || Date.now() - (ck.briefingsZeit || 0) > 60000) ladeCkBriefings();
     if (!ck.freigaben) ladeFreigaben();
     if (!ck.heute || Date.now() - (ck.heuteZeit || 0) > 60000) ladeHeute();
     // Rueckfall fuer verpasste SSE-Ereignisse: ein laufender Ablauf im 15-s-Takt.
@@ -151,8 +200,8 @@ function zeichneCockpit(w, teile, neu) {
       '<aside class="ck-leiste" aria-label="' + esc(uebersetze('Heute')) + ', ' + esc(uebersetze('Braucht dich')) + '">' +
         '<div class="ck-block"><span class="ck-titel">' + esc(uebersetze('Heute')) + '</span><div class="ck-heute" id="ck-heute"></div></div>' +
         '<div class="ck-block"><span class="ck-titel">' + esc(uebersetze('Braucht dich')) + '<span class="ck-anzahl" id="ck-anzahl"></span></span><div class="ck-freigaben" id="ck-freigaben"></div></div>' +
-        // Briefings kommen erst mit C9: nur mit Schalter fuer geplante Bereiche (Release 3.0.0).
-        '<div class="ck-block" id="ck-briefings"' + (geplantSichtbar() ? '' : ' hidden') + '><span class="ck-titel">' + esc(uebersetze('Briefings')) + '</span><span class="ck-leer">' + esc(uebersetze('Briefings kommen mit Block C9 des Ausbaus.')) + '</span></div>' +
+        // Briefings (C9a): die drei neuesten ungelesenen.
+        '<div class="ck-block" id="ck-briefings"><span class="ck-titel">' + esc(uebersetze('Briefings')) + '<span class="ck-anzahl" id="ck-bf-n"></span></span><div id="ck-bf"></div></div>' +
         '<div class="ck-block"><span class="ck-titel">' + esc(uebersetze('Skills starten')) + '<span id="ck-ab"></span></span>' +
           '<div class="ck-kacheln">' +
             '<button type="button" class="ck-kachel" data-aktion="ck-frage" data-wert="Tagesbericht"><span class="b">' + esc(uebersetze('Tagesbericht vorlesen')) + '</span><span class="s">T0 · ' + esc(uebersetze('kostenlos')) + '</span></button>' +
@@ -177,8 +226,9 @@ function zeichneCockpit(w, teile, neu) {
   zeichneFreigaben();
   zeichneSkills();
   zeichneTimerKachel();
+  zeichneCkBriefings();
   if (neu || !ck.verlauf) { ck.verlauf = null; ladeCkVerlauf(); }
-  ladeCkVorschlaege(); ladeHeute(); ladeFreigaben(); ladeOrbStil(); ladeSkills();
+  ladeCkVorschlaege(); ladeHeute(); ladeFreigaben(); ladeWartend(); ladeOrbStil(); ladeSkills(); ladeCkBriefings();
   // Zurueck im Cockpit: der gezeigte Ablauf kann sich inzwischen geaendert haben.
   if (!ck.szene) ladeOffenenAblauf(); else if (ck.ablauf) ladeAblauf(ck.ablauf.id);
   const q = document.getElementById('ck-q');
@@ -187,14 +237,26 @@ function zeichneCockpit(w, teile, neu) {
 // Frage, die eine andere Seite mitgibt („abrechnen“ auf dem Board, C7b):
 // einmal stellen, sobald das Cockpit steht.
 let ckAusstehend = null;
+// Kontext, den eine andere Seite mitgibt (Briefings C9a): setzen, Eingabe vorbereiten, nichts fragen.
+let ckKontextAusstehend = null;
 registriere('cockpit', {
   zeichne(...a) {
     zeichneCockpit(...a);
+    if (ckKontextAusstehend) {
+      const k = ckKontextAusstehend;
+      ckKontextAusstehend = null;
+      ciraKontext(k);
+      const q = document.getElementById('ck-q');
+      if (q) { q.value = uebersetze('Zum Briefing') + ' „' + k.titel + '“: '; q.focus(); }
+    }
     const text = ckAusstehend;
     ckAusstehend = null;
     // Laeuft Cira noch, meldet frageCira das selbst („Cira antwortet noch“).
     if (text) frageCira(text, ckKanal);
   },
+  // 15-s-Takt der Shell: nach der Antwort im Terminal kommt kein Hook, nur neue Arbeit im Ledger.
+  // Auch ohne Karten: ein beim Neuverbinden verpasstes SSE-Ereignis holt dieser Takt nach.
+  live() { if (route().name === 'cockpit') ladeWartend(); },
 });
 
 /* ---------- Teiler Buehne | Gespraech (Owner 20.10.) ---------- */
@@ -608,21 +670,26 @@ function zeichneHeute() {
   const sp = (v, l, f, genau) => '<div title="' + esc(uebersetze(l) + ': ' + genau(v)) + '"><span class="v mono">' + esc(f(v)) + '</span><span class="l">' + esc(uebersetze(l)) + '</span></div>';
   el.innerHTML = sp(k.aktive_stunden + k.manuell_stunden, 'Stunden', hrs, hrs) + sp(k.wert.arbeitswert, 'Arbeitswert', ganz, eur) + sp(k.wert.api_gegenwert, 'API-Gegenwert', ganz, eur);
 }
-const ART = { mahnung: 'Mahnung', rechnung: 'Rechnung', mail: 'Mail', jira_kommentar: 'Jira-Kommentar', sitzung_frage: 'Rückfrage', plan_schritt: 'Plan-Schritt', flow_fehler: 'Flow-Fehler', serie: 'Rechnungsserie', ablauf: 'Skill-Ablauf' };
+const ART = { vault_notiz: 'Vault-Notiz', monatsbericht: 'Monatsbericht', mahnung: 'Mahnung', rechnung: 'Rechnung', mail: 'Mail', jira_kommentar: 'Jira-Kommentar', sitzung_frage: 'Rückfrage', plan_schritt: 'Plan-Schritt', flow_fehler: 'Flow-Fehler', serie: 'Rechnungsserie', ablauf: 'Skill-Ablauf' };
 function zeichneFreigaben() {
   const el = document.getElementById('ck-freigaben');
   const n = document.getElementById('ck-anzahl');
   if (!el) return;
   const liste = ck.freigaben;
-  if (n) { n.textContent = liste ? String(liste.length) : ''; n.classList.toggle('an', !!(liste && liste.length)); }
-  if (!liste) { el.innerHTML = '<span class="ck-leer">' + esc(ck.fehler.freigaben ? uebersetze('Keine Antwort vom Server.') : uebersetze('Lädt …')) + '</span>'; return; }
-  if (!liste.length) { el.innerHTML = '<span class="ck-leer">' + esc(uebersetze('Nichts wartet auf dich. Cira meldet sich.')) + '</span>'; return; }
-  el.innerHTML = liste.map((f) => {
+  const wartend = ck.wartend || [];
+  const anzahl = (liste ? liste.length : 0) + wartend.length;
+  // „Nichts wartet“ erst, wenn beide Quellen geantwortet haben; ein Ladefehler bleibt sichtbar.
+  const beide = !!(liste && ck.wartend);
+  const fehler = (ck.fehler.freigaben ? '<span class="ck-leer">' + esc(uebersetze('Keine Antwort vom Server.')) + '</span>' : '') +
+    (ck.fehler.wartend ? '<span class="ck-leer">' + esc(uebersetze('Terminal-Sitzungen: Stand nicht aktuell.')) + '</span>' : '');
+  if (n) { n.textContent = anzahl || beide ? String(anzahl) : ''; n.classList.toggle('an', anzahl > 0); }
+  if (!anzahl) { el.innerHTML = fehler || '<span class="ck-leer">' + esc(uebersetze(beide ? 'Nichts wartet auf dich. Cira meldet sich.' : 'Lädt …')) + '</span>'; return; }
+  el.innerHTML = fehler + wartend.map(zeichneWartend).join('') + (liste || []).map((f) => {
     const fehler = f.art === 'flow_fehler';
     return '<div class="ck-karte' + (fehler ? ' fehler' : '') + '">' +
       '<div class="ck-kkopf"><span class="punkt" aria-hidden="true"></span><span class="art mono">' + esc(uebersetze(ART[f.art] || f.art)) + '</span>' +
         (f.bezug ? '<span class="bezug mono">' + esc(f.bezug) + '</span>' : '') + '<span class="wann mono">' + esc(vor(f.erstellt)) + '</span></div>' +
-      '<span class="t">' + esc(f.titel) + '</span>' + (f.text ? '<span class="s">' + esc(String(f.text).slice(0, 240)) + '</span>' : '') +
+      '<span class="t">' + esc(f.titel) + '</span>' + (f.text ? '<span class="s">' + esc(String(f.text).slice(0, 240)) + '</span>' : '') + ckVorschau(f) +
       '<div class="knoepfe">' + (f.ausfuehrbar ? '<button type="button" class="ok" data-aktion="ck-freigabe" data-wert="' + f.id + ':ok">' + esc(uebersetze('Freigeben')) + '</button>' : '') +
         '<button type="button" data-aktion="ck-freigabe" data-wert="' + f.id + ':ablehnen">' + esc(uebersetze('Ablehnen')) + '</button>' +
         // Ein Entwurf zeigt vor dem Freigeben, woraus er besteht.
@@ -630,13 +697,36 @@ function zeichneFreigaben() {
       (f.ausfuehrbar ? '' : '<span class="s faint">' + esc(uebersetze('noch keine Aktion · nur Ablehnen')) + '</span>') + '</div>';
   }).join('');
 }
+// Vault-Entwuerfe (C9): ganzer Text bzw. Aenderung aufklappbar; fehlt der Projekt-Tag, waehlt man ihn hier.
+function ckVorschau(f) {
+  const n = f.nutzlast;
+  if (!n || (f.art !== 'vault_notiz' && f.art !== 'monatsbericht')) return '';
+  const text = n.art === 'aenderung' ? n.vorschau : n.text;
+  const wahl = f.art === 'vault_notiz' && n.art === 'neu' && !n.tag && Array.isArray(n.tagWahl) && n.tagWahl.length
+    ? '<label class="ck-tag"><span>' + esc(uebersetze('Projekt-Tag')) + '</span><select id="ck-tag-' + f.id + '"><option value="">' + esc(uebersetze('Tag wählen …')) + '</option>' +
+      n.tagWahl.map((t) => '<option>' + esc(t) + '</option>').join('') + '</select></label>' : '';
+  return wahl + '<details class="ck-vorschau"><summary>' + esc(uebersetze('Vorschau')) + '</summary><pre class="mono">' + esc(String(text || '')) + '</pre></details>';
+}
+// Hinweis-Karte: kein Freigeben/Ablehnen — c2invoice kann einer fremden Sitzung nicht antworten.
+function zeichneWartend(s) {
+  const bezug = [s.projekt, s.vorgang].filter(Boolean).join(' · ');
+  return '<div class="ck-karte wartet">' +
+    '<div class="ck-kkopf"><span class="punkt" aria-hidden="true"></span><span class="art mono">' + esc(uebersetze('Terminal')) + '</span>' +
+      (bezug ? '<span class="bezug mono">' + esc(bezug) + '</span>' : '') + (s.seit ? '<span class="wann mono">' + esc(vor(s.seit)) + '</span>' : '') + '</div>' +
+    '<span class="t">' + esc(s.frage || uebersetze('Claude wartet auf dich')) + '</span>' +
+    '<span class="s faint">' + esc(uebersetze('Läuft in deinem Terminal — dort antworten.')) + '</span>' +
+    '<div class="knoepfe"><button type="button" class="ok" data-aktion="gehe" data-wert="sitzungen/' + esc(encodeURIComponent(s.id)) + '">' + esc(uebersetze('Zur Sitzung')) + '</button></div></div>';
+}
 aktion('ck-freigabe', async (wert, el) => {
   const [id, wahl] = String(wert).split(':');
   await mitLauf(el, async () => {
     try {
-      const r = await sende('/api/freigaben/' + encodeURIComponent(id) + '/entscheide', { wahl });
+      const tag = document.getElementById('ck-tag-' + id);
+      const r = await sende('/api/freigaben/' + encodeURIComponent(id) + '/entscheide', { wahl, ...(tag && tag.value && wahl === 'ok' ? { hinweis: 'tag:' + tag.value } : {}) });
       const nr = r && r.freigabe && r.freigabe.ergebnis && r.freigabe.ergebnis.nr;
+      const mem = r && r.freigabe && r.freigabe.ergebnis && r.freigabe.ergebnis.memory;
       if (nr) toast(fuelle('Rechnung {nr} gestellt', { nr }), 'ok', { text: uebersetze('Zu den Rechnungen'), tu: () => geheZu('rechnungen') });
+      else if (mem && !/^Zeile unter/.test(mem)) toast(uebersetze('Notiz gespeichert') + ' · ' + mem, 'err');
       else toast(uebersetze(wahl === 'ok' ? 'Freigegeben' : 'Abgelehnt'), 'ok');
     } catch (e) { toast(e.message, 'err'); }
   });

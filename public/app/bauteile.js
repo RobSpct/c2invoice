@@ -239,3 +239,53 @@ function margeWochenHtml(e, hoehe) {
       '<span title="' + esc(uebersetze('Woche ab') + ' ' + datum(a.montag) + ' · ' + (a.v == null ? uebersetze('kein Erlös oder Selbstkostensatz') : nf1.format(a.marge) + ' %')) + '">' +
         esc(uebersetze('KW')) + ' ' + a.kw + '<br><span style="color:' + a.farbe + '">' + a.text + '</span></span>').join('') + '</div>';
 }
+
+/* ---------- Markdown (Sitzungen C6, Briefings und Gedaechtnis C9) ----------
+   Erst esc, dann wenige Formen: Codeblock, Tabelle, Ueberschrift, Listen,
+   Aufgaben (☐/☑ nur zur Anzeige), Zitat, **fett**, `code`, Links nur http(s),
+   Wikilinks als Text oder mit { wiki: true } als Knopf (data-aktion gd-oeffne).
+   HTML aus dem Text bleibt Text. Frontmatter oben wird ausgelassen. */
+function md(text, { wiki = false } = {}) {
+  let t = String(text == null ? '' : text).replace(/^﻿/, '').replace(/\r\n?/g, '\n');
+  const fm = /^---\n[\s\S]*?\n---[ \t]*(\n|$)/.exec(t);
+  if (fm) t = t.slice(fm[0].length);
+  const inl = (s) => esc(s)
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+    .replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+    .replace(/\[\[([^\]|#\n]+)(?:#[^\]|\n]*)?(?:\|([^\]\n]+))?\]\]/g, (m, z, a) => (wiki
+      ? '<button type="button" class="md-wiki" data-aktion="gd-oeffne" data-wert="' + z.trim() + '">' + (a || z).trim() + '</button>'
+      : '<span class="md-wiki">' + (a || z).trim() + '</span>'));
+  const zeilen = t.split('\n');
+  const istZeile = (z) => /^\s*\|.*\|\s*$/.test(z || '');
+  const zellen = (z) => z.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
+  const aus = [];
+  for (let i = 0; i < zeilen.length;) {
+    const z = zeilen[i];
+    let m;
+    if (/^\s*```/.test(z)) {
+      const b = [];
+      for (i++; i < zeilen.length && !/^\s*```/.test(zeilen[i]); i++) b.push(zeilen[i]);
+      i++;
+      aus.push('<pre class="tz-code">' + esc(b.join('\n')) + '</pre>');
+      continue;
+    }
+    if (istZeile(z) && /^\s*\|[\s:|-]+\|\s*$/.test(zeilen[i + 1] || '')) {
+      const kopf = zellen(z);
+      const reihen = [];
+      for (i += 2; istZeile(zeilen[i]); i++) reihen.push(zellen(zeilen[i]));
+      aus.push('<table class="tz-tab"><thead><tr>' + kopf.map((c) => '<th>' + inl(c) + '</th>').join('') + '</tr></thead><tbody>' +
+        reihen.map((r) => '<tr>' + r.map((c) => '<td>' + inl(c) + '</td>').join('') + '</tr>').join('') + '</tbody></table>');
+      continue;
+    }
+    i++;
+    if ((m = /^(#{1,6})\s+(.*)/.exec(z))) aus.push('<div class="tz-h md-h' + m[1].length + '">' + inl(m[2]) + '</div>');
+    else if ((m = /^(\s*)[-*+]\s+\[([ xX])\]\s+(.*)$/.exec(z))) aus.push('<div class="md-li" style="--md-ebene:' + Math.min(4, Math.floor(m[1].length / 2)) + '"><span class="md-punkt" aria-hidden="true">' + (m[2] === ' ' ? '☐' : '☑') + '</span><span>' + inl(m[3]) + '</span></div>');
+    else if ((m = /^(\s*)[-*+]\s+(.*)$/.exec(z))) aus.push('<div class="md-li" style="--md-ebene:' + Math.min(4, Math.floor(m[1].length / 2)) + '"><span class="md-punkt" aria-hidden="true">•</span><span>' + inl(m[2]) + '</span></div>');
+    else if ((m = /^(\s*)(\d{1,3})[.)]\s+(.*)$/.exec(z))) aus.push('<div class="md-li" style="--md-ebene:' + Math.min(4, Math.floor(m[1].length / 2)) + '"><span class="md-punkt mono">' + m[2] + '.</span><span>' + inl(m[3]) + '</span></div>');
+    else if ((m = /^>\s?(.*)$/.exec(z))) aus.push('<div class="md-zitat">' + inl(m[1]) + '</div>');
+    else if (/^\s*(-{3,}|\*{3,})\s*$/.test(z)) aus.push('<hr class="md-linie">');
+    else aus.push(z.trim() ? '<div>' + inl(z) + '</div>' : '<div class="tz-luft"></div>');
+  }
+  return aus.join('');
+}

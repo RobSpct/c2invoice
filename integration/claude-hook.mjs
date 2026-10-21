@@ -32,7 +32,8 @@ try {
   await fetch('http://127.0.0.1:' + (config.port || 4747) + '/api/hook', {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-c2invoice-geheimnis': geheimnis },
-    body: JSON.stringify({ hook_event_name: e.hook_event_name, session_id: e.session_id, message: e.message || null }),
+    // notification_type: nur echte Anfragen (Rechte, Formular) gelten als "wartet", nicht der Leerlauf-Hinweis.
+    body: JSON.stringify({ hook_event_name: e.hook_event_name, session_id: e.session_id, message: e.message || null, notification_type: e.notification_type || null }),
     signal: AbortSignal.timeout(2000),
   });
 } catch { /* c2invoice laeuft nicht oder Datei fehlt: Claude nicht stoeren */ }

@@ -41,6 +41,10 @@ const board = require('./board');
 const werkzeuge = require('./werkzeuge');
 const ereignisse = require('./ereignisse');
 const geraete = require('./geraete');
+const vault = require('./vault');
+const gedaechtnis = require('./gedaechtnis');
+const briefings = require('./briefings');
+const merken = require('./merken');
 const crypto = require('node:crypto');
 
 const db = dbmod.open();
@@ -49,7 +53,36 @@ try { rechnung.faelligFestschreiben(db); } catch (e) { console.error('Faelligkei
 const PUBLIC = path.join(__dirname, 'public');
 // Cira (C2): Router, Freigaben und Ereignis-Strom. Bucht ueber dieselbe
 // Funktion wie /api/buchen.
-const ciraDienst = cira.erzeuge({ db, bucheVorgang, skillOrte: (b) => skillOrte(b) });
+// C9: Vault (Briefings, Gedaechtnis, „Merke dir“). Der Ordner kommt nur aus dem
+// Arbeitsbereich der Art vault in config.json; fehlt er, bleibt alles leer.
+function vaultPfad() {
+  const a = arbeitsbereiche().find((x) => x.art === 'vault' && typeof x.pfad === 'string' && x.pfad.trim());
+  const p = a ? ingest.loeseHeim(a.pfad) : null;
+  return p && fs.existsSync(p) ? p : null;
+}
+const vaultCfg = () => (config.vault && typeof config.vault === 'object' ? config.vault : {});
+// Die Dienste greifen lazy auf ciraDienst zu: der braucht umgekehrt „merken“ und den Briefing-Kontext.
+const gedaechtnisDienst = gedaechtnis.erzeuge({ db, vaultPfad, gruppenEigen: () => vaultCfg().gruppen || [],
+  ausText: (o) => ciraDienst.ausText(o), abrechnung: () => rechnung.abrechnung(db) });
+const briefingDienst = briefings.erzeuge({ db, vaultPfad, ordnerName: () => vaultCfg().briefingsOrdner || 'Briefings',
+  quellenEigen: () => vaultCfg().quellen || [], ausText: (o) => ciraDienst.ausText(o), bereiche: () => arbeitsbereiche() });
+const merkDienst = merken.erzeuge({ db, vaultPfad, gedaechtnis: gedaechtnisDienst, ausText: (o) => ciraDienst.ausText(o),
+  t2Lauf: (o) => ciraDienst.t2Lauf(o), bereiche: () => arbeitsbereiche() });
+const ciraDienst = cira.erzeuge({ db, bucheVorgang, skillOrte: (b) => skillOrte(b), merken: merkDienst,
+  kontextQuellen: { briefing: (id) => briefingDienst.kontextFakten(id) } });
+// Im 30-s-Takt: Index nachziehen, Monatsbericht pruefen. Wirft nie.
+// Derselbe Fehler steht einmal im Protokoll, nicht alle 30 s; in der Oberflaeche zeigt /api/vault ihn.
+const vaultFehler = { index: null, monatsbericht: null };
+function vaultTakt() {
+  const lauf = (k, fn) => {
+    try { fn(); vaultFehler[k] = null; } catch (err) {
+      if (vaultFehler[k] !== err.message) console.error('Vault ' + k + ':', err);
+      vaultFehler[k] = err.message;
+    }
+  };
+  lauf('index', () => gedaechtnisDienst.indexiere());
+  lauf('monatsbericht', () => briefingDienst.takt());
+}
 
 // Stellt eine Rechnung: ein Weg fuer den Beleg-Editor (POST /api/rechnung)
 // und die Freigabe "Rechnungsentwurf" (C4), damit beide dasselbe tun.
@@ -770,6 +803,7 @@ const SCHREIBBAR = [...new Set([
   'arbeitsbereiche',   // Kuerzel, Farbe, Verweise — Pfade aendert nur die Datei
   'cira',              // Einstellungen -> Cira (CIRA_FELDER), feldgenau
   'hook',              // Geheimnis fuer integration/claude-hook.mjs, beim ersten Start erzeugt (C5)
+  'vault',             // Einstellungen -> Vault: nur gruppen und quellen (VAULT_FELDER), briefingsOrdner nur in der Datei
   ...Object.entries(EINSTELLUNGEN).map(([feld, r]) => (r.pfad ? r.pfad.split('.')[0] : feld)),
 ])];
 
@@ -787,6 +821,7 @@ function schreibeConfig() {
     gruppen.set(g, (gruppen.get(g) || []).concat(s));
   }
   gruppen.set('cira', (gruppen.get('cira') || []).concat(Object.keys(CIRA_FELDER)));
+  gruppen.set('vault', VAULT_FELDER);
   for (const k of SCHREIBBAR) {
     if (config[k] === undefined) continue;
     if (gruppen.has(k)) {
@@ -825,6 +860,8 @@ const ARBEITSBEREICH_FELDER = {
   farbe: { re: /^#[0-9a-fA-F]{6}$/, label: 'Farbe', klein: true },
   projekt: { re: /^[^\u0000-\u001f\u007f]{1,80}$/, label: 'Projekt', leer: true },
   jiraProjekt: { re: /^[A-Z][A-Z0-9]{1,9}$/, label: 'Jira-Projekt', leer: true },
+  // Projekt-Tag fuer „Merke dir“ (C9c, E12): ausdruecklich, kein Automatismus aus dem Namen.
+  tag: { re: /^[\p{L}\p{N}_/-]{1,40}$/u, label: 'Tag', leer: true },
 };
 const arbeitsbereiche = () => (Array.isArray(config.arbeitsbereiche) ? config.arbeitsbereiche : [])
   .filter((a) => a && typeof a === 'object' && typeof a.name === 'string');
@@ -932,6 +969,66 @@ function setzeCira(daten, bekannte = null) {
   return ciraEinstellungen();
 }
 
+// Einstellungen -> Vault (C9). Gruppen (Graph) und Quellen (Briefings) als Text,
+// eine Regel je Zeile; Grenzen hier, nicht nur im Browser. Pfad und
+// Briefings-Ordner bleiben der Datei vorbehalten (Ruling R-Pfade).
+const VAULT_FELDER = ['gruppen', 'quellen'];
+const FARBE_RE = /^#[0-9a-fA-F]{6}$/;
+function zeilenAus(text, label, max) {
+  if (typeof text !== 'string' || text.length > 4000) throw new Error(label + ': Text bis 4000 Zeichen.');
+  const zeilen = text.split(/\r?\n/).map((z) => z.trim()).filter(Boolean);
+  if (zeilen.length > max) throw new Error(label + ': höchstens ' + max + ' Regeln.');
+  return zeilen;
+}
+function leseGruppen(text) {
+  return zeilenAus(text, 'Gruppen', 30).map((z, i) => {
+    const m = /^(tag:#[^\s#]{1,60}|path:[^\s]{1,80})\s+(#[0-9a-fA-F]{6})$/.exec(z);
+    if (!m) throw new Error('Gruppen, Zeile ' + (i + 1) + ': „tag:#name #rrggbb“ oder „path:ordner #rrggbb“.');
+    return { query: m[1], farbe: m[2].toLowerCase() };
+  });
+}
+function leseQuellen(text) {
+  return zeilenAus(text, 'Quellen', 20).map((z, i) => {
+    const [muster, name, farbe = ''] = z.split('|').map((t) => t.trim());
+    const wo = 'Quellen, Zeile ' + (i + 1) + ': ';
+    try { vault.regel(muster); } catch (err) { throw new Error(wo + err.message); }
+    if (!name || name.length > 40 || /[\u0000-\u001f<>]/.test(name)) throw new Error(wo + 'Name 1 bis 40 Zeichen („Muster | Name | #rrggbb“).');
+    if (farbe && !FARBE_RE.test(farbe)) throw new Error(wo + 'Farbe als #rrggbb oder leer.');
+    return { muster, name, farbe: farbe ? farbe.toLowerCase() : null };
+  });
+}
+const gruppenText = (l) => (l || []).map((g) => g.query + ' ' + g.farbe).join('\n');
+const quellenText = (l) => (l || []).map((q) => q.muster + ' | ' + q.name + (q.farbe ? ' | ' + q.farbe : '')).join('\n');
+function vaultAnzeige() {
+  const v = vaultPfad();
+  const ab = arbeitsbereiche().find((x) => x.art === 'vault');
+  const g = vault.gruppenAus(v, vaultCfg().gruppen || []);
+  return {
+    pfad: ab && ab.pfad ? ab.pfad : null, name: v ? path.basename(v) : null, erreichbar: !!v, briefingsOrdner: briefingDienst.ordner(),
+    gruppen: gruppenText(vaultCfg().gruppen), gruppenQuelle: g.quelle, gruppenWirksam: gruppenText(g.gruppen),
+    quellen: quellenText(vaultCfg().quellen), quellenStandard: quellenText(briefings.QUELLEN_STANDARD),
+    index: { gesamt: db.prepare('SELECT COUNT(*) AS n FROM notiz_index').get().n, zeit: dbmod.getMeta(db, 'vault_index_zeit') }, fehler: vaultFehler,
+  };
+}
+function setzeVault(daten) {
+  for (const k of Object.keys(daten)) if (!VAULT_FELDER.includes(k)) throw new Error(/ordner|pfad|path/i.test(k) ? k + ': nur in config.json aenderbar.' : 'Unbekanntes Feld: ' + k);
+  const neu = {};
+  if (Object.hasOwn(daten, 'gruppen')) neu.gruppen = leseGruppen(daten.gruppen);
+  if (Object.hasOwn(daten, 'quellen')) neu.quellen = leseQuellen(daten.quellen);
+  if (!Object.keys(neu).length) throw new Error('Kein bekanntes Feld uebergeben.');
+  if (!config.vault || typeof config.vault !== 'object') config.vault = {};
+  const alt = { ...config.vault };
+  Object.assign(config.vault, neu);
+  try {
+    schreibeConfig();
+  } catch (err) {
+    for (const k of Object.keys(config.vault)) delete config.vault[k];
+    Object.assign(config.vault, alt);
+    throw err;
+  }
+  return vaultAnzeige();
+}
+
 // Claude-Code-Konfiguration (Skills, spaeter Agenten/Plugins in C8). Ohne
 // Claude Code fehlt der Ordner: dann gibt es schlicht keine Skills.
 const claudeOrdner = () => process.env.CLAUDE_CONFIG_DIR || path.join(require('node:os').homedir(), '.claude');
@@ -969,7 +1066,7 @@ function arbeitsbereichAnzeige(a) {
   const gilt = (f) => (typeof a[f] === 'string' && ARBEITSBEREICH_FELDER[f].re.test(a[f]) ? a[f] : '');
   return {
     name: a.name, kuerzel: gilt('kuerzel').toUpperCase(), farbe: gilt('farbe').toLowerCase(), art: ARBEITSBEREICH_ARTEN.includes(a.art) ? a.art : 'neutral',
-    projekt: a.projekt || null, jiraProjekt: a.jiraProjekt || null, pfad: a.pfad || null, todo: a.todo || null,
+    projekt: a.projekt || null, jiraProjekt: a.jiraProjekt || null, tag: gilt('tag') || null, pfad: a.pfad || null, todo: a.todo || null,
     erreichbar: !!ziel && fs.existsSync(ziel),
   };
 }
@@ -1319,6 +1416,10 @@ function handle(req, res) {
     if (ablaufDienst.routen(req, res, p, u, { sendJson, leseKoerper })) return;
     if (boardDienst.routen(req, res, p, u, { sendJson, leseKoerper })) return;
     if (werkzeugDienst.routen(req, res, p, u, { sendJson, leseKoerper })) return;
+    if (gedaechtnisDienst.routen(req, res, p, u, { sendJson, leseKoerper })) return;
+    if (briefingDienst.routen(req, res, p, u, { sendJson, leseKoerper })) return;
+    if (p === '/api/vault' && req.method === 'POST') return antworte(req, res, setzeVault);
+    if (p === '/api/vault') return sendJson(res, vaultAnzeige());
     if (p === '/api/hook' && req.method === 'POST') {
       // Vor dem Lesen des Koerpers: ohne Geheimnis entsteht nichts.
       if (!hookErlaubt(req)) { req.resume(); return sendJson(res, { error: 'Nicht berechtigt' }, 401); }
@@ -1449,7 +1550,7 @@ function handle(req, res) {
 
     // Shell v2: Badges der Navigation aus einer Quelle (BACKEND §1). Weitere
     // Felder kommen je Block dazu (freigaben C2, sitzungen C5 …).
-    if (p === '/api/zaehler') return sendJson(res, { live: metrics.liveSitzungen(db), freigaben: freigaben.offenAnzahl(db), sitzungen: sitzungDienst.anzahlOffen() });
+    if (p === '/api/zaehler') return sendJson(res, { live: metrics.liveSitzungen(db), freigaben: freigaben.offenAnzahl(db), sitzungen: sitzungDienst.anzahlOffen(), briefings: briefingDienst.ungelesen() });
     if (p === '/api/dienste') {
       return dienste().then((d) => sendJson(res, { dienste: d }), (err) => {
         console.error('Dienst-Status:', err);
@@ -2257,6 +2358,9 @@ async function main() {
   setInterval(refreshData, 30_000).unref();
   erinnern();
   setInterval(erinnern, 30_000).unref();
+  // C9: Index und Monatsbericht (nachgeholt, wenn der Server am 1. nicht lief).
+  vaultTakt();
+  setInterval(vaultTakt, 30_000).unref();
 
   if (config.jira && config.jira.enabled) {
     await syncJira();
@@ -2289,6 +2393,7 @@ module.exports = {
   setzeEinstellungen, EINSTELLUNGEN, SCHREIBBAR,
   setzeArbeitsbereich, ARBEITSBEREICH_FELDER,
   setzeCira, CIRA_FELDER, ciraEinstellungen,
+  setzeVault, vaultAnzeige, VAULT_FELDER,
   diensteCacheLeeren: () => { dienstStand = { zeit: 0, laeuft: null, wert: null }; },
   starteModellProxy,
   setzeStammdaten, STAMMDATEN,

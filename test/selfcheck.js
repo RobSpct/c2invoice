@@ -7366,6 +7366,10 @@ async function main() {
     ...require('./cira/l')({ dbmod, openDbs }),
     ...require('./cira/budget')({ dbmod, openDbs }),
     ...require('./cira/c8')({ dbmod, openDbs }),
+    ...require('./cira/b1')({ dbmod, openDbs }),
+    ...require('./cira/c9b')({ dbmod, openDbs, configGeschuetzt }),
+    ...require('./cira/c9a')({ dbmod, openDbs }),
+    ...require('./cira/c9c')({ dbmod, openDbs }),
   ]) {
     try {
       await fn();

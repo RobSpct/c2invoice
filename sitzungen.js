@@ -38,6 +38,8 @@ const MAX_PRUEFBAR = 16000;
 const MAX_ZEILE = 8 * 1024 * 1024;
 // Fremde Sitzung ohne eigene Eingabe so lange offen (Owner 20.10.); /exit beendet sofort.
 const OFFEN_OHNE_EINGABE_MS = 5 * 3600000;
+// Notification-Typen, bei denen eine Sitzung im eigenen Terminal wirklich auf dich wartet (B1).
+const BRAUCHT_DICH = new Set(['permission_prompt', 'elicitation_dialog', 'elicitation_url_dialog', 'agent_needs_input']);
 // Fremde Transkripte koennen groß werden; gelesen wird nur das Ende.
 const MAX_JSONL = 4 * 1024 * 1024;
 
@@ -565,6 +567,12 @@ function erzeuge({ db, arbeitsbereiche, exe, heim = (p) => p, vormerken, werkzeu
     return hookGilt ? h.status : 'bereit';
   }
 
+  function wartendAus(id) {
+    const f = db.prepare("SELECT titel FROM sitzung_ereignis WHERE session_id = ? AND art = 'frage' ORDER BY id DESC LIMIT 1").get(id);
+    const h = db.prepare('SELECT aktualisiert FROM sitzung WHERE id = ?').get(id);
+    return { frage: f ? f.titel : null, seit: h ? h.aktualisiert : null };
+  }
+
   function liste({ offen = false } = {}) {
     const eigene = db.prepare(`SELECT rowid AS nr, * FROM sitzung WHERE quelle = 'c2invoice' ${offen ? `AND status IN (${OFFEN.map(() => '?').join(',')})` : ''} ORDER BY gestartet DESC LIMIT 100`).all(...(offen ? OFFEN : []));
     const bekannt = new Set([...db.prepare("SELECT id FROM sitzung WHERE quelle = 'c2invoice'").all().map((r) => r.id), ...db.prepare('SELECT folge FROM sitzung_folge').all().map((r) => r.folge)]);
@@ -576,6 +584,8 @@ function erzeuge({ db, arbeitsbereiche, exe, heim = (p) => p, vormerken, werkzeu
       .map((r) => ({ id: r.id, quelle: 'fremd', projekt: r.projekt, branch: r.branch, vorgang: r.ticket, kosten_usd: Math.round(r.kosten_usd * 1e6) / 1e6,
         gestartet: r.erste, letzte: r.letzte, live: Date.parse(r.letzte) >= Date.now() - 120000, status: fremdStatus(r.id, r.letzte, eingaben.get(r.id) || letzteEingabe(r.id)) }))
       .filter((s) => !offen || s.status !== 'beendet');
+    // Wartende tragen Hook-Meldung und Zeitpunkt („Braucht dich“, B1).
+    for (const s of fremd) if (s.status === 'wartet') Object.assign(s, wartendAus(s.id));
     return { sitzungen: [...eigene.map(anzeige), ...fremd], offen: anzahlOffen() };
   }
 
@@ -701,7 +711,14 @@ function erzeuge({ db, arbeitsbereiche, exe, heim = (p) => p, vormerken, werkzeu
     if (laufend.has(id)) throw konflikt('Die Sitzung läuft noch in c2invoice. Erst stoppen, dann im Terminal fortsetzen.');
     const r = zeile(id);
     let pfad = null;
-    if (r && r.quelle === 'c2invoice') { const ab = arbeitsbereiche().find((a) => a.name === r.arbeitsbereich); pfad = ab ? heim(ab.pfad || '') : null; } else pfad = ledger(id).cwd;
+    if (r && r.quelle === 'c2invoice') { const ab = arbeitsbereiche().find((a) => a.name === r.arbeitsbereich); pfad = ab ? heim(ab.pfad || '') : null; } else {
+      const l = ledger(id);
+      // Laeuft oder wartet sie im eigenen Terminal, schriebe --resume mit einem
+      // zweiten Prozess in dieselbe Sitzungsdatei (B1, Owner 21.10.).
+      const st = fremdStatus(id, l.letzte, letzteEingabe(id));
+      if (st === 'wartet' || st === 'laeuft') throw konflikt('Die Sitzung läuft noch in deinem Terminal — dort antworten.');
+      pfad = l.cwd;
+    }
     if (!r && !pfad) throw unbekannt();
     let ordner = false;
     try { ordner = !!pfad && fs.statSync(pfad).isDirectory(); } catch { /* fehlt */ }
@@ -731,6 +748,9 @@ function erzeuge({ db, arbeitsbereiche, exe, heim = (p) => p, vormerken, werkzeu
 
   // Hook einer fremden Sitzung (integration/claude-hook.mjs): "wartet auf dich".
   // Der Aufrufer hat das Geheimnis schon geprueft.
+  // Wartet heisst eine echte Anfrage (B1, Owner 21.10.): Rechte, MCP-Formular,
+  // Hintergrund-Agent. idle_prompt kommt ~60 s nach jedem Zug-Ende und heisst
+  // nur "fertig"; ohne Typ (aelteres Hook-Skript) entscheidet der Text.
   function hook(d = {}) {
     const sid = d.session_id;
     if (typeof sid !== 'string' || !SID_RE.test(sid)) throw new Error('session_id fehlt.');
@@ -738,12 +758,23 @@ function erzeuge({ db, arbeitsbereiche, exe, heim = (p) => p, vormerken, werkzeu
     if (art !== 'Notification' && art !== 'Stop' && art !== 'SessionEnd') return { ignoriert: true };
     const r = zeile(sid);
     if (r && r.quelle === 'c2invoice') return { ignoriert: true };   // eigene Sitzung: Stream weiss es schon
-    // SessionEnd: /exit, Strg+D, Fenster zu — die Sitzung ist vorbei.
-    const s = art === 'Notification' ? 'wartet' : art === 'SessionEnd' ? 'beendet' : 'bereit';
+    const meldung = kappe(String(d.message || 'Claude wartet auf dich'), 200);
+    const typ = typeof d.notification_type === 'string' ? d.notification_type : null;
+    let s;
+    if (art === 'Notification') {
+      const wartet = typ ? BRAUCHT_DICH.has(typ) : /permission/i.test(meldung);
+      if (typ && !wartet && typ !== 'idle_prompt') return { ignoriert: true };
+      // Leerlauf-Hinweis waehrend einer offenen Anfrage: die Anfrage bleibt offen.
+      // Kam seitdem neue Arbeit, ist sie beantwortet — dann gilt der Leerlauf.
+      if (!wartet && r && r.status === 'wartet' && fremdStatus(sid, ledger(sid).letzte, letzteEingabe(sid)) === 'wartet') return { id: sid, status: 'wartet' };
+      s = wartet ? 'wartet' : 'bereit';
+    } else s = art === 'SessionEnd' ? 'beendet' : 'bereit';   // SessionEnd: /exit, Strg+D, Fenster zu
     if (r) setze(sid, { status: s, aktualisiert: jetzt() });
     else db.prepare('INSERT INTO sitzung (id, quelle, status, gestartet, aktualisiert) VALUES (?,?,?,?,?)').run(sid, 'fremd', s, jetzt(), jetzt());
-    if (art === 'Notification') ereignis(sid, { art: 'frage', titel: kappe(String(d.message || 'Claude wartet auf dich'), 200), meta: 'hook' });
-    ereignisse.sende('sitzung', { id: sid, status: s });
+    // typ steht nur in meta, wenn er aus BRAUCHT_DICH stammt.
+    if (s === 'wartet') ereignis(sid, { art: 'frage', titel: meldung, meta: typ ? 'hook:' + typ : 'hook' });
+    // fremd: der Browser meldet die Rueckfrage (eigene Sitzungen melden sich als Freigabe).
+    ereignisse.sende('sitzung', { id: sid, status: s, fremd: true, ...(s === 'wartet' ? { frage: meldung } : {}) });
     return { id: sid, status: s };
   }
 

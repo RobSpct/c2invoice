@@ -40,21 +40,22 @@ function kindUmgebung(env = process.env) {
 const PROFILE = { lesen: ['Read', 'Glob', 'Grep'], schreiben: ['Read', 'Glob', 'Grep', 'Edit', 'Write'] };
 const NIE = ['Bash', 'PowerShell', 'NotebookEdit', 'WebFetch', 'WebSearch'];
 const GESCHUETZT = ['.obsidian/**', '.git/**', '.claude/**', 'CLAUDE.md'];
-function rechte(profil) {
+// zusatzVerbot: weitere Pfadmuster (relativ zum Arbeitsordner), die Edit und Write verweigern (C9c).
+function rechte(profil, zusatzVerbot = []) {
   const tools = PROFILE[profil];
   if (!tools) throw new Error('Profil unbekannt: ' + profil);
   const schreibt = tools.includes('Write');
-  const verbot = [...NIE, ...(schreibt ? GESCHUETZT.flatMap((p) => ['Edit(./' + p + ')', 'Write(./' + p + ')']) : ['Edit', 'Write'])];
+  const verbot = [...NIE, ...(schreibt ? GESCHUETZT.concat(zusatzVerbot).flatMap((p) => ['Edit(./' + p + ')', 'Write(./' + p + ')']) : ['Edit', 'Write'])];
   return ['--tools', tools.join(','), '--disallowedTools', verbot.join(','), ...(schreibt ? ['--permission-mode', 'acceptEdits'] : [])];
 }
 
 // Ein Lauf. onText(delta) bekommt die Textstuecke, sobald sie kommen.
 // Ergebnis: { ok, text, sessionId, kostenUsd, tokens, abgelehnt[], fehler? }.
 // maxBudgetUsd: harte Grenze je Lauf (--max-budget-usd), sonst bricht erst das Monatslimit.
-function lauf({ exe, cwd, prompt, profil = 'lesen', modell = '', maxBudgetUsd = null, onText, spawnFn = spawn, env = kindUmgebung() }) {
+function lauf({ exe, cwd, prompt, profil = 'lesen', modell = '', maxBudgetUsd = null, onText, spawnFn = spawn, env = kindUmgebung(), zusatzVerbot = [] }) {
   // --strict-mcp-config ohne --mcp-config: keine MCP-Server des Nutzers (die haengen nicht an --setting-sources).
   const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
-    '--setting-sources', 'project,local', '--strict-mcp-config', ...rechte(profil)];
+    '--setting-sources', 'project,local', '--strict-mcp-config', ...rechte(profil, zusatzVerbot)];
   if (modell) args.push('--model', modell);
   if (maxBudgetUsd != null) args.push('--max-budget-usd', String(Math.max(0.01, Math.floor(maxBudgetUsd * 100) / 100)));
   // "--" beendet die Optionen: --disallowedTools ist variadisch und schluckte den Prompt sonst.

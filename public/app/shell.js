@@ -127,12 +127,12 @@ const SEITEN = [
   { k: 'sitzungen', l: 'Sitzungen', u: 'Claude Code · jede Sitzung bucht auf einen Vorgang' },
   { k: 'live', l: 'Live', u: 'Laufende Claude-Sitzungen' },
   { k: 'zeit', l: 'Zeiterfassung', u: 'Timer, Nachträge, Kalender' },
-  { k: 'briefings', l: 'Briefings', block: 'C9', u: 'Berichte aus dem Vault · Cira fasst zusammen und liest vor' },
+  { k: 'briefings', l: 'Briefings', u: 'Berichte aus dem Vault · Cira fasst zusammen' },
   { k: 'board', l: 'Board', gruppe: 'Arbeit', u: 'Aufgaben aus TODO.md · mit Zeit und Wert aus c2invoice' },
   { k: 'vorgaenge', l: 'Vorgänge', u: 'Budget, Status und Rechenweg je Vorgang' },
   { k: 'postfach', l: 'Postfach', block: 'C15', u: 'Mail, Slack und Telegram · landet am Kunden und am Vorgang' },
   { k: 'flows', l: 'Flows', block: 'C11', u: 'Automatisierungen ohne Code · Auslöser, Bedingung, Aktion' },
-  { k: 'gedaechtnis', l: 'Gedächtnis', block: 'C9', u: 'Vault als Graph · Notizen, Links und ihr Bezug zum Ledger' },
+  { k: 'gedaechtnis', l: 'Gedächtnis', u: 'Vault als Graph · Notizen, Links und ihr Bezug zum Ledger' },
   { k: 'werkzeuge', l: 'Werkzeuge', u: 'Skills, Agents, Commands, Plugins, Mods und MCPs je Arbeitsbereich' },
   { k: 'hub', l: 'Finanzen', gruppe: 'Auswertung', u: 'Umsatz, Marge, offene Posten' },
   { k: 'analyse', l: 'Verbrauch', u: 'Token, Kosten und Arbeitszeit je Projekt' },
@@ -297,9 +297,13 @@ function liveSitzungen() {
 }
 // Laufende Sitzungen (eigene Prozesse und fremde mit Ereignis in 2 Min, C5).
 const offeneSitzungen = () => (state.zaehler && Number.isInteger(state.zaehler.sitzungen) ? state.zaehler.sitzungen : 0);
+// Ungelesene Briefings (C9a), gleiche Quelle /api/zaehler.
+const ungeleseneBriefings = () => (state.zaehler && Number.isInteger(state.zaehler.briefings) ? state.zaehler.briefings : 0);
 function zeigeSitzungenZaehler() {
   const z = document.getElementById('nav-sitzungen');
   if (z) { z.textContent = String(offeneSitzungen()); z.hidden = !offeneSitzungen(); }
+  const b = document.getElementById('nav-briefings');
+  if (b) { b.textContent = String(ungeleseneBriefings()); b.hidden = !ungeleseneBriefings(); }
 }
 const LOGO = '<svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="var(--panel-2)"/><rect x="7" y="17" width="4" height="9" fill="var(--accent)"/><rect x="14" y="11" width="4" height="15" fill="var(--accent)"/><rect x="21" y="6" width="4" height="20" fill="var(--accent)"/></svg>';
 
@@ -317,6 +321,7 @@ function zeichneLeiste() {
     }
     const extra = s.k === 'live' ? '<span class="zaehler ok nur-breit" id="nav-live"' + (liveSitzungen() ? '' : ' hidden') + '>' + liveSitzungen() + '</span>'
       : s.k === 'sitzungen' ? '<span class="zaehler laeuft nur-breit" id="nav-sitzungen"' + (offeneSitzungen() ? '' : ' hidden') + '>' + offeneSitzungen() + '</span>'
+      : s.k === 'briefings' ? '<span class="zaehler nur-breit" id="nav-briefings"' + (ungeleseneBriefings() ? '' : ' hidden') + '>' + ungeleseneBriefings() + '</span>'
       : s.k === 'zeit' ? '<span class="zaehler laeuft nur-breit" id="nav-zeit"' + (state.live && state.live.timer ? '' : ' hidden') + '>' + esc(uebersetze('läuft')) + '</span>'
         : s.pro && !proAktiv() ? '<span class="pille pro">Pro</span>' : '';
     html += '<a href="#/' + s.k + '" title="' + esc(seitenName(s)) + '"' + (r === s.k ? ' aria-current="page"' : '') + '>' +
@@ -866,7 +871,7 @@ async function frageCira(text, k = DOCK_KANAL) {
   k.liste().push({ rolle: 'ich', text, zeit: jetzt }, antwort);
   k.zeichne();
   ciraModus('denkt');
-  const kontext = { screen: route().name, art: cira.kontext ? cira.kontext.art : null, id: cira.kontext ? cira.kontext.id : null, titel: kontextText() };
+  const kontext = { screen: route().name, art: cira.kontext ? cira.kontext.art : null, id: cira.kontext ? cira.kontext.id : null, titel: kontextText(), arbeitsbereich: lies('cockpit.arbeitsbereich', '') || null };
   try {
     const r = await fetch('/api/cira/frage', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text, kanal: k.kanal, kontext }) });
     if (!r.ok || !r.body) throw new Error((await r.json().catch(() => ({}))).error || 'HTTP ' + r.status);
@@ -954,14 +959,14 @@ async function ladeCira() {
 // (dort steht sie schon unter „Braucht dich“). Liegt der Tab im Hintergrund und
 // ist es eingeschaltet, zusaetzlich eine Desktop-Benachrichtigung — nie im
 // Nicht-stoeren-Fenster.
-const MELDE_ART = { flow_fehler: 'Flow-Fehler', sitzung_frage: 'Rückfrage', rechnung: 'Rechnungsentwurf', mahnung: 'Mahnung', mail: 'Mail', jira_kommentar: 'Jira-Kommentar', plan_schritt: 'Plan-Schritt', serie: 'Rechnungsserie' };
+const MELDE_ART = { flow_fehler: 'Flow-Fehler', sitzung_frage: 'Rückfrage', rechnung: 'Rechnungsentwurf', mahnung: 'Mahnung', mail: 'Mail', jira_kommentar: 'Jira-Kommentar', plan_schritt: 'Plan-Schritt', serie: 'Rechnungsserie', sitzung_wartet: 'Rückfrage im Terminal', vault_notiz: 'Vault-Notiz', monatsbericht: 'Monatsbericht' };
 function benachrichtige(f) {
   if (!f || f.status !== 'offen' || !f.titel) return;
   const art = uebersetze(MELDE_ART[f.art] || f.art);
   if (document.hidden && ciraZeiten.desktop === true && typeof Notification !== 'undefined' && Notification.permission === 'granted' && !nichtStoerenJetzt()) {
     try {
       const n = new Notification(CIRA_NAME + ' · ' + art, { body: f.titel, tag: 'c2-freigabe-' + f.id });
-      n.onclick = () => { window.focus(); geheZu('cockpit'); n.close(); };
+      n.onclick = () => { window.focus(); geheZu(f.ziel || 'cockpit'); n.close(); };
     } catch (e) { console.error('Desktop-Benachrichtigung:', e.message); }
   }
   if (route().name === 'cockpit' && !document.hidden) return;
@@ -981,9 +986,11 @@ function benachrichtige(f) {
   el.innerHTML = '<div class="kopf"><span class="art">' + esc(art) + '</span><span class="mono zeit">' + esc(new Date().toLocaleTimeString(istDE() ? 'de-DE' : 'en-US', { hour: '2-digit', minute: '2-digit' })) + '</span>' +
     '<button type="button" class="zu" aria-label="' + esc(uebersetze('Meldung schließen')) + '">×</button></div>' +
     '<span class="t">' + esc(f.titel) + '</span>' + (f.bezug ? '<span class="s mono">' + esc(f.bezug) + '</span>' : '') +
-    '<div class="knoepfe"><button type="button" class="ok" data-aktion="gehe" data-wert="cockpit">' + esc(uebersetze('In „Braucht dich“ ansehen')) + '</button></div>';
+    '<div class="knoepfe"><button type="button" class="ok" data-aktion="gehe" data-wert="' + esc(f.ziel || 'cockpit') + '">' + esc(uebersetze(f.knopf || 'In „Braucht dich“ ansehen')) + '</button></div>';
   el.querySelector('.zu').addEventListener('click', () => el.remove());
-  el.querySelector('.ok').addEventListener('click', () => el.remove());
+  // Erst nach der Klick-Delegation entfernen: die prueft wurzel.contains(el) und
+  // ignorierte den Knopf einer schon entfernten Karte — er navigierte nie (Owner-Test 21.10.).
+  el.querySelector('.ok').addEventListener('click', () => setTimeout(() => el.remove()));
   halter.appendChild(el);
 }
 
@@ -1001,6 +1008,9 @@ function verbindeEreignisse() {
       let d = null;
       try { d = JSON.parse(e.data).daten; } catch (err) { console.error('Ereignis ' + art + ' unlesbar:', err.message); return; }
       window.dispatchEvent(new CustomEvent('c2-sitzung', { detail: { art, ...d } }));
+      // B1: eine Sitzung im eigenen Terminal fragt (Hook). Eigene Sitzungen melden sich als Freigabe.
+      // Direkt zur Sitzung: die Meldung kommt auch auf dem Cockpit, wenn der Tab im Hintergrund lag (Owner-Test 21.10.).
+      if (d && d.fremd && d.status === 'wartet') benachrichtige({ status: 'offen', art: 'sitzung_wartet', id: 's-' + d.id, titel: d.frage || uebersetze('Claude wartet auf dich'), ziel: 'sitzungen/' + encodeURIComponent(d.id), knopf: 'Zur Sitzung' });
     });
   }
   // Skill-Ablauf (C6b): das Cockpit laedt den gezeigten Ablauf nach.
@@ -1013,6 +1023,14 @@ function verbindeEreignisse() {
   es.addEventListener('jira_status', () => window.dispatchEvent(new CustomEvent('c2-jira')));
   // Board-Abgleich im Hintergrund hat einen neuen Jira-Stand (Block L).
   es.addEventListener('jira_cache', () => window.dispatchEvent(new CustomEvent('c2-jira')));
+  // Cira hat nachtraeglich geantwortet (C9c „Merke dir“): Verlauf neu laden.
+  es.addEventListener('cira', (e) => {
+    let d = null;
+    try { d = JSON.parse(e.data).daten; } catch (err) { console.error('Ereignis cira unlesbar:', err.message); return; }
+    if (!d) return;
+    if (d.kanal === 'dock' && cira.verlauf && !cira.laeuft) hole('/api/cira/verlauf?kanal=dock').then((r) => { if (!cira.laeuft) { cira.verlauf = r.verlauf; zeichneVerlauf(); } }, (err) => console.error('/api/cira/verlauf:', err.message));
+    window.dispatchEvent(new CustomEvent('c2-cira', { detail: d }));
+  });
   // Ansichten mit Freigaben (Cockpit „Braucht dich“) hoeren auf dieses Fenster-Ereignis.
   es.addEventListener('freigabe', (e) => {
     let d = null;
@@ -1136,7 +1154,7 @@ function zeige() {
     // Die Farbe einer Szene (Marge, Ueberfaellig) gilt nur, solange sie offen ist.
     if (cira.zustand !== 'auto') { cira.zustand = 'auto'; ciraModus(); }
     // Das Cockpit fuellt den Bereich ohne Rand und ersetzt das Dock.
-    document.getElementById('inhalt').classList.toggle('vollbild', r.name === 'cockpit' || r.name === 'sitzungen');
+    document.getElementById('inhalt').classList.toggle('vollbild', ['cockpit', 'sitzungen', 'gedaechtnis', 'briefings'].includes(r.name));
     if (r.name !== 'cockpit') kiosk(false);
     if (r.name === 'cockpit' && cira.dockOffen) oeffneDock(false);
   }

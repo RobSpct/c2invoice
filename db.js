@@ -571,6 +571,34 @@ function migrate(db) {
     sitzung TEXT NOT NULL,
     seit    TEXT NOT NULL
   )`);
+  // C9: Index des Vaults (Gedaechtnis), Gelesen-Stand und Kurzfassungen der Briefings.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS notiz_index (
+      pfad             TEXT PRIMARY KEY,   -- relativ zum Vault, mit /
+      ordner           TEXT,
+      titel            TEXT,
+      tags_json        TEXT,
+      links_json       TEXT,
+      frontmatter_json TEXT,
+      rumpf            TEXT,
+      groesse          INTEGER,
+      mtime            REAL,
+      hash             TEXT,
+      indexiert        TEXT
+    );
+    CREATE TABLE IF NOT EXISTS briefing_gelesen (
+      pfad       TEXT PRIMARY KEY,
+      hash       TEXT NOT NULL,
+      gelesen_am TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS briefing_kurz (
+      hash   TEXT PRIMARY KEY,
+      text   TEXT NOT NULL,
+      modell TEXT,
+      tokens INTEGER,
+      zeit   TEXT NOT NULL
+    );
+  `);
   // Saat genau einmal: eine geloeschte Taetigkeit kaeme sonst bei jedem Start zurueck.
   if (getMeta(db, 'taetigkeiten_gesaet') === null) {
     const ein = db.prepare('INSERT OR IGNORE INTO taetigkeitsart (name, satz, parallel) VALUES (?, NULL, ?)');

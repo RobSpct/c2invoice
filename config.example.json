@@ -9,7 +9,7 @@
       "kunde": "Beispielkunde"
     }
   },
-  "//arbeitsbereiche": "Ordner, in denen Claude Code arbeitet: Sitzungen, Board, Werkzeuge und Skills zeigen je Arbeitsbereich. Je Eintrag: name (eindeutig), kuerzel (1-3 Zeichen), farbe (#rrggbb), art ('projekt', 'vault', 'global' oder 'neutral'), pfad, optional projekt (Projektname wie im Ledger, verbindet Verbrauch, Saetze und Jira), jiraProjekt (Schluessel wie ABC) und todo (Pfad einer TODO.md). 'global' ist die Claude-Konfiguration (~/.claude), 'vault' ein Notiz-Ordner (z. B. Obsidian), 'neutral' ein Ordner fuer allgemeine Chats. pfad und todo stehen nur hier: sie bestimmen, wo ein gestarteter Prozess arbeitet und schreibt, deshalb aendert die Oberflaeche sie nicht. Kuerzel, Farbe und Verweise sind in den Einstellungen aenderbar. Ohne Eintrag schlaegt die Oberflaeche eine Liste aus deinen Daten vor. '~' steht fuer dein Benutzerverzeichnis.",
+  "//arbeitsbereiche": "Ordner, in denen Claude Code arbeitet: Sitzungen, Board, Werkzeuge und Skills zeigen je Arbeitsbereich. Je Eintrag: name (eindeutig), kuerzel (1-3 Zeichen), farbe (#rrggbb), art ('projekt', 'vault', 'global' oder 'neutral'), pfad, optional projekt (Projektname wie im Ledger, verbindet Verbrauch, Saetze und Jira), jiraProjekt (Schluessel wie ABC), tag (Projekt-Tag fuer Notizen aus 'Merke dir', z. B. beispielprojekt) und todo (Pfad einer TODO.md). 'global' ist die Claude-Konfiguration (~/.claude), 'vault' ein Notiz-Ordner (z. B. Obsidian), 'neutral' ein Ordner fuer allgemeine Chats. pfad und todo stehen nur hier: sie bestimmen, wo ein gestarteter Prozess arbeitet und schreibt, deshalb aendert die Oberflaeche sie nicht. Kuerzel, Farbe und Verweise sind in den Einstellungen aenderbar. Ohne Eintrag schlaegt die Oberflaeche eine Liste aus deinen Daten vor. '~' steht fuer dein Benutzerverzeichnis.",
   "arbeitsbereiche": [
     { "name": "Beispielprojekt", "kuerzel": "BP", "farbe": "#f97316", "art": "projekt", "projekt": "Beispielprojekt", "pfad": "~/Dev/Beispielprojekt", "todo": "~/Dev/Beispielprojekt/TODO.md" },
     { "name": "Notizen", "kuerzel": "NO", "farbe": "#6b7fd7", "art": "vault", "pfad": "~/Notizen" },
@@ -37,9 +37,11 @@
     "orbStil": "partikel",
     "benachrichtigungDesktop": false
   },
-  "//vault": "Optionen fuer den Arbeitsbereich mit art 'vault' (Briefings, Gedaechtnis). Der Ordner selbst steht dort unter pfad. briefingsOrdner: Unterordner mit den Berichten.",
+  "//vault": "Optionen fuer den Arbeitsbereich mit art 'vault' (Briefings, Gedaechtnis, Merke dir). Der Ordner selbst steht dort unter pfad. briefingsOrdner: Unterordner mit den Berichten (nur hier aenderbar). gruppen: Farbgruppen im Gedaechtnis-Graph, je { query: 'tag:#name' oder 'path:ordner', farbe: '#rrggbb' }; leer = die Gruppen aus .obsidian/graph.json. quellen: Regeln fuer die Quelle eines Briefings, je { muster, name, farbe }; im Muster steht * fuer beliebige Zeichen und JJJJ-MM-TT fuer ein Datum; leer = eingebaute Regeln (c2invoice, Vault, Posteingang). gruppen und quellen auch unter Einstellungen -> Vault. Den Projekt-Tag fuer 'Merke dir' traegt der Arbeitsbereich unter tag.",
   "vault": {
-    "briefingsOrdner": "Briefings"
+    "briefingsOrdner": "Briefings",
+    "gruppen": [],
+    "quellen": []
   },
   "//claudeConfig": "Claude-Code-Konfiguration fuer den Bereich Werkzeuge. lager: Ordner mit nicht installierten Skills, aus dem sich Skills in einen Arbeitsbereich kopieren lassen (z. B. ~/.claude/skills-library, ~ steht fuer dein Benutzerverzeichnis). Nur hier aenderbar, nicht ueber die Oberflaeche. Leer = kein Lager.",
   "claudeConfig": {

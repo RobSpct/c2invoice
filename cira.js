@@ -281,7 +281,43 @@ const sauber = (s) => String(s).replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 
 const satzFakten = (fakten) => fakten.map((f) => sauber(f.k) + ' ' + sauber(f.t)).join(', ');
 // Fuer Modelle mit Bezug (u): "Offen" allein verwechselte llama3.2 mit "Überfällig gesamt" (echter Lauf M2).
 const promptFakten = (fakten) => fakten.map((f) => sauber(f.k) + (f.u ? ' — ' + sauber(f.u) : '') + ' ' + sauber(f.t)).join(', ');
+// „Claude:“ vor einer Absicht = ausdruecklich mit Claude (Angebot angenommen).
+const CLAUDE_VORSATZ = /^(?:(?:frag(?:e)?\s+(?:mal\s+)?)?claude\s*[,:]?\s+)/i;
 const T0 = [
+  {
+    // C9c: Entwurf fuer den Vault. Antwortet sofort; der Entwurf kommt als Freigabe
+    // unter „Braucht dich“, das Ergebnis als Nachricht im selben Kanal (spaeter).
+    // Ergaenzen und Wiki laufen ueber Claude (T2): erst auf Knopfdruck (Owner 15.10.).
+    name: 'merken', re: /^(?:(?:frag(?:e)?\s+(?:mal\s+)?)?claude\s*[,:]?\s+)?(?:merke?\s+dir\b|notier(?:e)?\b|erg(?:ä|ae)nze\s+in\s|schreib(?:e)?\s+(?:das\s+)?ins\s+wiki\b)/i,
+    tu: ({ text, kontext, merken, spaeter }) => {
+      const mitClaude = CLAUDE_VORSATZ.test(text);
+      const t = text.replace(CLAUDE_VORSATZ, '');
+      let art, satz, ziel = null, tagWort = null, m;
+      if ((m = /^erg(?:ä|ae)nze\s+in\s+(.{1,120}?)\s*:\s*([\s\S]{3,2000})$/i.exec(t))) { art = 'ergaenze'; ziel = m[1]; satz = m[2]; }
+      else if ((m = /^schreib(?:e)?\s+(?:das\s+)?ins\s+wiki\s*:?\s*([\s\S]{3,2000})$/i.exec(t))) { art = 'wiki'; satz = m[1]; }
+      else if ((m = /^(?:merke?\s+dir|notier(?:e)?(?:\s+dir)?)\b/i.exec(t))) {
+        art = 'neu';
+        let rest = t.slice(m[0].length).trim();
+        const f = /^f(?:ü|ue)r\s+([\p{L}\p{N}_/-]{1,40})\s*[,:]?\s*/iu.exec(rest);
+        if (f) { tagWort = f[1]; rest = rest.slice(f[0].length); }
+        satz = rest.replace(/^[,:]\s*/, '').replace(/^dass\s+/i, '');
+      }
+      if (!art || !satz || satz.trim().length < 3) return { antwort: 'Was soll ich mir merken? Zum Beispiel: „Merke dir für <Tag>: …“, „Ergänze in <Notiz>: …“ oder „Schreib ins Wiki: …“.', quelle: ciraName() };
+      if (!merken) return { antwort: 'Merken geht erst mit einem Vault (Arbeitsbereich mit art „vault“ in config.json).', quelle: ciraName() };
+      if (art !== 'neu' && !mitClaude) {
+        return { antwort: 'Dafür entwirft Claude die Änderung in einer Kopie von memory/ und wiki/. Das kostet Claude-Nutzung; in den Vault kommt sie erst nach deiner Freigabe.', quelle: ciraName(),
+          angebot: { l: 'Mit Claude entwerfen', frage: 'claude: ' + t } };
+      }
+      merken.entwirf({ art, satz, ziel, tagWort, arbeitsbereich: kontext && kontext.arbeitsbereich }).then((r) => spaeter(r.fehlt
+        ? { text: 'Nicht gemerkt: ' + r.fehlt, stufe: 'T0', quelle: ciraName() }
+        : { text: 'Entwurf liegt unter „Braucht dich“: ' + r.freigabe.titel + '. In den Vault kommt er erst mit „Freigeben“.', stufe: art === 'neu' ? 'T1' : 'T2', quelle: 'Vault · Entwurf' }), (err) => {
+        console.error('Cira merken:', err);
+        spaeter({ text: 'Nicht gemerkt: interner Fehler, Details im Serverprotokoll.', stufe: 'T0', quelle: ciraName() });
+      });
+      return { antwort: art === 'neu' ? 'Ich entwerfe die Notiz. Sie erscheint gleich unter „Braucht dich“; in den Vault kommt sie erst nach deiner Freigabe.'
+        : 'Claude entwirft die Änderung in einer Kopie des Vaults. Das kann eine Minute dauern; danach liegt sie unter „Braucht dich“.', quelle: ciraName() };
+    },
+  },
   {
     name: 'gruss', re: /^(hallo|hi|hey|moin|servus|guten (morgen|tag|abend))\b[\s!.,]*\S{0,20}[\s!.]*$/i,
     tu: () => ({ antwort: 'Hallo. Frag mich nach Zahlen („Wie lief der Monat?“), Überfälligem, Verbrauch, einem Tagesbericht — oder sag „Timer stoppen“.', quelle: ciraName() }),
@@ -512,7 +548,8 @@ function modellFuer(rolle, c = ciraCfg()) {
 const GRENZE = { schnell: { tokens: 800, ms: 45000 }, text: { tokens: 1500, ms: 90000 }, denken: { tokens: 2500, ms: 120000 }, code: { tokens: 1500, ms: 90000 } };
 // Fehlerursachen getrennt (Silent-Failure M1): nur ein Netzfehler heisst "nicht
 // erreichbar"; ein HTTP-Fehler meist falscher Modellname oder zu wenig Speicher.
-async function t1(text, fakten, kontext, fetchFn, modell, rolle = 'schnell', signal = null) {
+// system: eigener Systemprompt (C9 ausText), sonst der aus den Fakten.
+async function t1(text, fakten, kontext, fetchFn, modell, rolle = 'schnell', signal = null, system = null) {
   const lm = config.lokaleModelle || {};
   if (!lm.upstreamUrl) return { fehlt: 'Lokale Modelle sind nicht eingerichtet (lokaleModelle in config.json).' };
   // Ueber den Proxy, damit die Nutzung wie jede lokale Anfrage erfasst wird.
@@ -523,7 +560,7 @@ async function t1(text, fakten, kontext, fetchFn, modell, rolle = 'schnell', sig
     r = await fetchFn(url, {
       method: 'POST', headers: { 'content-type': 'application/json' },
       // qwen3 denkt sonst vor jeder Antwort; nur die Rolle Denken soll das (M-9). deepseek-r1 kennt keinen Schalter.
-      body: JSON.stringify({ model: modell, temperature: 0.2, max_tokens: g.tokens, stream: false, messages: [{ role: 'system', content: systemPrompt(fakten, kontext, rolle) },
+      body: JSON.stringify({ model: modell, temperature: 0.2, max_tokens: g.tokens, stream: false, messages: [{ role: 'system', content: system || systemPrompt(fakten, kontext, rolle) },
         { role: 'user', content: text + (rolle !== 'denken' && /^qwen3/i.test(modell) ? ' /no_think' : '') }] }),
       // Schliesst der Browser, endet auch die lokale Anfrage (Silent-Failure M2).
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(g.ms)]) : AbortSignal.timeout(g.ms),
@@ -555,7 +592,9 @@ async function t1(text, fakten, kontext, fetchFn, modell, rolle = 'schnell', sig
 const KETTE = { schnell: ['schnell', 'denken'], text: ['text', 'denken'], code: ['code', 'denken'], denken: ['denken'] };
 
 /* ---------- Dienst ---------- */
-function erzeuge({ db, bucheVorgang, spawnFn, fetchFn = fetch, claudeExe, jetzt = () => new Date(), t2MaxMs = 120000, skillOrte = () => [] }) {
+// kontextQuellen: { art: (id) => fakten[] } fuer Objekte anderer Module (C9: briefing).
+// merken: Dienst aus merken.js (C9c), fuer die Absicht „merke dir“.
+function erzeuge({ db, bucheVorgang, spawnFn, fetchFn = fetch, claudeExe, jetzt = () => new Date(), t2MaxMs = 120000, skillOrte = () => [], kontextQuellen = {}, merken = null }) {
   let t2Laeuft = false;
   freigaben.aufraeumen(db);
 
@@ -568,7 +607,9 @@ function erzeuge({ db, bucheVorgang, spawnFn, fetchFn = fetch, claudeExe, jetzt 
       route ? JSON.stringify(route) : null).lastInsertRowid);
   }
 
-  async function t2(text, fakten, kontext, onText, signal) {
+  // Ein Claude-Lauf unter Monatslimit, Budget und Sperre (C9c braucht Profil und Ordner).
+  // pruefe(satz) filtert den Textstrom satzweise; ohne pruefe geht er ungefiltert durch.
+  async function t2Lauf({ prompt, profil = 'lesen', cwd = CIRA_ORDNER, zusatzVerbot = [], onText = () => {}, pruefe = null, signal = null }) {
     const c = ciraCfg();
     if (c.claudeErlaubt !== true) return { fehlt: 'Dafür bräuchte ich Claude (T2). Das ist ausgeschaltet (Einstellungen → Cira).' };
     const limit = Number(c.claudeMonatslimitEur) || 0;
@@ -581,20 +622,20 @@ function erzeuge({ db, bucheVorgang, spawnFn, fetchFn = fetch, claudeExe, jetzt 
     // bleibt das Limit auch nach Absturz oder Abbruch ohne Kostenangabe dicht.
     const budgetUsd = (limit - verbraucht) / metrics.usdToEur(1);
     const laufId = db.prepare('INSERT INTO cira_lauf (zeit, profil, ok, kosten_usd, tokens, fehler) VALUES (?,?,0,?,0,?)')
-      .run(jetzt().toISOString(), 'lesen', budgetUsd, 'laeuft; Kosten bis zum Ergebnis als Obergrenze gebucht').lastInsertRowid;
+      .run(jetzt().toISOString(), profil, budgetUsd, 'laeuft; Kosten bis zum Ergebnis als Obergrenze gebucht').lastInsertRowid;
     let uhr = null, abbruch = null;
     try {
-      fs.mkdirSync(CIRA_ORDNER, { recursive: true });
+      if (cwd === CIRA_ORDNER) fs.mkdirSync(CIRA_ORDNER, { recursive: true });
       // Satzweise weiterreichen, erst nach der Pruefung: was im Strom steht, steht auch in der Antwort.
       let puffer = '';
       const weiter = (ende) => {
         const teile = puffer.split(/(?<=[.!?])\s+/);
         puffer = ende ? '' : teile.pop();
-        for (const s of teile) { const p = pruefeZahlen(s, fakten, text); if (p.text) onText(p.text + ' '); }
+        for (const s of teile) { const t = pruefe ? pruefe(s) : s; if (t) onText(t + ' '); }
       };
       const l = claude.lauf({
-        exe: claudeExe === undefined ? claude.findeClaude(c.claudeExe) : claudeExe, cwd: CIRA_ORDNER, profil: 'lesen',
-        modell: String(c.claudeModell || ''), prompt: systemPrompt(fakten, kontext, 'T2') + '\n\nFRAGE: ' + text,
+        exe: claudeExe === undefined ? claude.findeClaude(c.claudeExe) : claudeExe, cwd, profil, zusatzVerbot,
+        modell: String(c.claudeModell || ''), prompt,
         maxBudgetUsd: budgetUsd, onText: (d) => { puffer += d; weiter(false); }, ...(spawnFn ? { spawnFn } : {}),
       });
       // Zeitgrenze und Abbruch durch den Browser beenden den Prozess; t2Laeuft wird im finally frei.
@@ -615,6 +656,35 @@ function erzeuge({ db, bucheVorgang, spawnFn, fetchFn = fetch, claudeExe, jetzt 
       t2Laeuft = false;
     }
   }
+  const t2 = (text, fakten, kontext, onText, signal) => t2Lauf({
+    prompt: systemPrompt(fakten, kontext, 'T2') + '\n\nFRAGE: ' + text, onText, signal,
+    pruefe: (s) => pruefeZahlen(s, fakten, text).text,
+  });
+
+  // T1 aus einem Text statt aus Fakten (C9: Kurzfassung, Suche, Notiz-Entwurf).
+  // Der Text steht in der Nutzernachricht; Zahlen der Antwort muessen im Text
+  // oder im Auftrag stehen, sonst faellt der Satz weg.
+  const systemText = () => 'Du bist ' + ciraName() + ', die Assistentin in c2invoice. Antworte auf Deutsch, knapp, als reiner Text ohne Markdown-Hervorhebungen. ' +
+    'Verwende nur, was im TEXT steht. Erfinde nichts, rechne nichts nach; fehlt etwas, sag es.';
+  async function ausText({ auftrag, text, rolle = 'text', signal = null }) {
+    const m = modellFuer(rolle);
+    if (!m) return { fehlt: 'Kein lokales Modell eingestellt (Einstellungen → Cira).' };
+    const quelle = String(text || '').slice(0, 12000);
+    const r = await t1(String(auftrag) + '\n\nTEXT:\n' + quelle, [], null, fetchFn, m.modell, rolle, signal, systemText());
+    if (r.fehlt) return { fehlt: r.fehlt, modell: m.modell };
+    // Zeilen bleiben: ein Entwurf (Titel, Beschreibung, Text) braucht sie.
+    const zeilen = r.text.split('\n').map((z) => (z.trim() ? pruefeZahlen(z, [{ k: 'Text', t: quelle }], auftrag) : { text: '', gestrichen: 0 }));
+    const text2 = zeilen.map((z) => z.text).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+    if (!text2) return { fehlt: 'Antwort nannte nur Zahlen, die nicht im Text stehen.', modell: m.modell };
+    return { text: text2, tokens: r.tokens, modell: m.modell, gestrichen: zeilen.reduce((n, z) => n + z.gestrichen, 0) };
+  }
+
+  // Fakten aus anderen Modulen (C9: Briefing). Ein Fehler dort kostet die Frage nicht.
+  function fremdeFakten(kontext) {
+    const q = kontext && kontext.art && Object.hasOwn(kontextQuellen, kontext.art) ? kontextQuellen[kontext.art] : null;
+    if (!q || !kontext.id) return [];
+    try { return q(kontext.id) || []; } catch (err) { console.error('Cira Kontext ' + kontext.art + ':', err && err.message); return []; }
+  }
 
   // Beantwortet eine Frage. melde(ereignis) bekommt { typ: 'stufe'|'text', … }
   // waehrend der Arbeit; das Ergebnis ist die vollstaendige Antwort.
@@ -628,18 +698,20 @@ function erzeuge({ db, bucheVorgang, spawnFn, fetchFn = fetch, claudeExe, jetzt 
     if (treffer) {
       melde({ typ: 'stufe', stufe: 'T0' });
       let r;
-      try { r = treffer.absicht.tu({ db, text, m: treffer.m, kontext, bucheVorgang, heute, skillOrte }); } catch (err) {
+      // spaeter: Ergebnis einer Absicht, die nach der Antwort weiterarbeitet (C9c), als eigene Nachricht.
+      const spaeter = (n) => { try { speichere(kanal, 'cira', n, null); ereignisse.sende('cira', { kanal }); } catch (err) { console.error('Cira: spaete Nachricht nicht gespeichert:', err.message); } };
+      try { r = treffer.absicht.tu({ db, text, m: treffer.m, kontext, bucheVorgang, heute, skillOrte, merken, spaeter }); } catch (err) {
         // Fachliche Absagen (z. B. aus rechnung.js) gehen als Antwort; ins Protokoll kommt jeder Fehler.
         console.error('Cira T0 ' + treffer.absicht.name + ':', err && err.message);
         r = { antwort: err.message, quelle: QUELLE_DATEN };
       }
-      return fertig({ text: r.antwort, stufe: 'T0', kosten_eur: 0, tokens: 0, quelle: r.quelle, sprung: r.sprung || [], szene: r.szene || null, zustand: r.zustand || null, absicht: treffer.absicht.name, freigabe_id: r.freigabe_id || null });
+      return fertig({ text: r.antwort, stufe: 'T0', kosten_eur: 0, tokens: 0, quelle: r.quelle, sprung: r.sprung || [], szene: r.szene || null, zustand: r.zustand || null, absicht: treffer.absicht.name, freigabe_id: r.freigabe_id || null, angebot: r.angebot || null });
     }
 
     // Fakten fuer T1/T2: Datum, Kennzahlen des gefragten Zeitraums, Ueberfaelliges, ausgewaehltes Objekt.
     const z = zeitraumAus(text, heute);
     const fakten = [{ k: 'Heute', t: tag(heute) }]
-      .concat(kennzahlenFakten(db, z).fakten.map((f) => ({ ...f, k: f.k + ' (' + z.label + ')' })), ueberfaelligFakten(db).fakten, faktenFuerKontext(db, kontext));
+      .concat(kennzahlenFakten(db, z).fakten.map((f) => ({ ...f, k: f.k + ' (' + z.label + ')' })), ueberfaelligFakten(db).fakten, faktenFuerKontext(db, kontext), fremdeFakten(kontext));
     const direktT2 = /^(frag(e)?\s+(mal\s+)?claude|claude)\s*[,:]?\s+/i.test(text);
     if (!direktT2) {
       melde({ typ: 'stufe', stufe: 'T1' });
@@ -748,7 +820,7 @@ function erzeuge({ db, bucheVorgang, spawnFn, fetchFn = fetch, claudeExe, jetzt 
     if (!text || text.length > 2000) throw new Error('Frage: 1 bis 2000 Zeichen.');
     const kanal = KANAELE.includes(d.kanal) ? d.kanal : 'dock';
     const k = d.kontext && typeof d.kontext === 'object' && !Array.isArray(d.kontext) ? d.kontext : null;
-    const kontext = k ? { screen: text200(k.screen), art: text200(k.art), id: text200(k.id), titel: text200(k.titel) } : null;
+    const kontext = k ? { screen: text200(k.screen), art: text200(k.art), id: text200(k.id), titel: text200(k.titel), arbeitsbereich: text200(k.arbeitsbereich) } : null;
     return { text, kanal, kontext };
   }
 
@@ -850,7 +922,7 @@ function erzeuge({ db, bucheVorgang, spawnFn, fetchFn = fetch, claudeExe, jetzt 
       'Nur was im Verlauf steht, nichts ergänzen.\n\nVERLAUF:\n' + verlauf, [], null, fetchFn, m.modell, 'text');
   }
 
-  return { frage, verlauf, vorschlaege, routen, zusammenfassen };
+  return { frage, verlauf, vorschlaege, routen, zusammenfassen, ausText, t2Lauf, speichere };
 }
 
 module.exports = { erzeuge, pruefeZahlen, zeitraumAus, t0, T0, STANDARD, waehleRolle, modellFuer, ROLLEN, ueberfaelligFakten, faktenFuerKontext };

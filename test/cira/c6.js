@@ -244,6 +244,7 @@ module.exports = ({ dbmod, openDbs }) => {
     const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     const ctx = { EN: {}, window: { addEventListener() {} }, registriere() {}, aktion() {}, usd: (v) => v + ' USD', uebersetze: (s) => s, esc, setInterval: () => 0, console };
     vm.createContext(ctx);
+    vm.runInContext(fs.readFileSync(path.join(W, 'public/app/bauteile.js'), 'utf8'), ctx);
     vm.runInContext(fs.readFileSync(path.join(W, 'public/app/sitzungen.js'), 'utf8'), ctx);
     const ev = [
       { id: 1, art: 'eingabe', titel: 'Baue um' },
@@ -322,7 +323,7 @@ module.exports = ({ dbmod, openDbs }) => {
     const paste = [{ id: 1, art: 'eingabe', titel: 'x', text: 'Deine Antwort "\n\n<pasted_content id="4ad4">\nZeile eins\nZeile zwei\n</pasted_content id="4ad4">\n\n" fehlt' }];
     assert.strictEqual(hier(ctx.szKarten(paste))[0].t, 'Deine Antwort "\n│ Zeile eins\n│ Zeile zwei\n" fehlt');
     // Markdown: HTML bleibt Text, fett/code/Tabelle werden gesetzt.
-    const md = ctx.szMd('<img src=x onerror=1> **fett** `code`\n| a | b |\n|---|---|\n| 1 | <i>2</i> |\n```\n<script>\n```');
+    const md = ctx.md('<img src=x onerror=1> **fett** `code`\n| a | b |\n|---|---|\n| 1 | <i>2</i> |\n```\n<script>\n```');
     assert.ok(!/<img|<script|<i>/.test(md), 'HTML aus der Antwort ausgefuehrt: ' + md);
     assert.ok(md.includes('<b>fett</b>') && md.includes('<code>code</code>') && md.includes('<td>1</td>') && md.includes('<pre class="tz-code">&lt;script&gt;</pre>'), md);
   }

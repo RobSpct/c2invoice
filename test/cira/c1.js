@@ -92,7 +92,7 @@ module.exports = ({ configGeschuetzt, dbmod, openDbs }) => {
     await mitServer(async (url) => {
       const z = await (await fetch(url('/api/zaehler'))).json();
       // Felder kommen je Block dazu (C2: freigaben, C5: sitzungen), nie als Platzhalter vorab.
-      assert.deepStrictEqual(Object.keys(z), ['live', 'freigaben', 'sitzungen'], 'Felder: ' + Object.keys(z));
+      assert.deepStrictEqual(Object.keys(z), ['live', 'freigaben', 'sitzungen', 'briefings'], 'Felder: ' + Object.keys(z));
       assert.ok(Number.isInteger(z.live) && z.live >= 0);
       assert.ok(Number.isInteger(z.sitzungen) && z.sitzungen >= 0);
       await mitConfig({ limit5hTokens: 1000000 }, async () => {

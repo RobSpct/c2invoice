@@ -65,6 +65,8 @@ function projectOf(cwd) {
   if (!cwd) return '(unbekannt)';
   const norm = cwd.replace(/\//g, '\\').replace(/\\+$/, '');
   if (norm.toLowerCase() === CIRA_ORDNER.replace(/\//g, '\\').toLowerCase()) return CIRA_PROJEKT;
+  // „Merke dir“ (C9c): T2 arbeitet in einer Vault-Kopie im Temp-Ordner — Werkzeugbetrieb wie Cira.
+  if (/\\c2i-merken-[\w-]+$/i.test(norm)) return CIRA_PROJEKT;
   for (const root of PROJECT_ROOTS) {
     if (!root) continue;
     const r = root.replace(/\//g, '\\').replace(/\\+$/, '');

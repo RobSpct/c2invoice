@@ -1,0 +1,7 @@
+{
+  "showTags": false,
+  "colorGroups": [
+    { "query": "tag:#shop  ", "color": { "a": 1, "rgb": 13465107 } },
+    { "query": "path:wiki  ", "color": { "a": 1, "rgb": 5431473 } }
+  ]
+}

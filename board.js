@@ -180,6 +180,26 @@ function uebernehmeZeit(db, alt, neu) {
 
 // Dienst je Server: Arbeitsbereiche, Dateien, Jira-Cache und Routen.
 // bereiche() liefert die Eintraege aus config.json, loeseHeim loest ~ auf.
+// Datei frisch lesen, fn(text) anwenden, ueber eine Temp-Datei ersetzen: ein
+// Abbruch mittendrin laesst die alte Datei stehen. Auch fuer Briefings (C9a).
+function schreibeAtomar(datei, fn) {
+  const text = fs.readFileSync(datei, 'utf8');
+  // Kein gueltiges UTF-8: Lesen und Schreiben ersetzte die kaputten Bytes in der ganzen Datei.
+  if (text.includes('�')) throw fehler(409, path.basename(datei) + ' ist kein gültiges UTF-8 — bitte in einem Editor als UTF-8 speichern.');
+  const neu = fn(text);
+  if (neu === text) return neu;
+  const tmp = datei + '.c2i-tmp';
+  try {
+    fs.writeFileSync(tmp, neu);
+    fs.renameSync(tmp, datei);
+  } catch (e) {
+    // Datei im Editor gesperrt o. ae.: keine Temp-Datei im Ordner des Nutzers liegen lassen.
+    fs.rmSync(tmp, { force: true });
+    throw e;
+  }
+  return neu;
+}
+
 function erzeuge({ db, bereiche, loeseHeim, gesperrt = () => [], jira = require('./jira-sync'), jetzt = () => Date.now() }) {
   function bereich(name) {
     const b = bereiche().find((a) => a.name === name);
@@ -215,21 +235,7 @@ function erzeuge({ db, bereiche, loeseHeim, gesperrt = () => [], jira = require(
   function schreibeZeile(name, karte, fn) {
     const datei = todoPfad(bereich(name));
     if (!datei) throw fehler(409, 'Kein Pfad in config.json.');
-    const text = fs.readFileSync(datei, 'utf8');
-    // Kein gueltiges UTF-8: Lesen und Schreiben ersetzte die kaputten Bytes in der ganzen Datei.
-    if (text.includes('\uFFFD')) throw fehler(409, path.basename(datei) + ' ist kein gültiges UTF-8 — bitte in einem Editor als UTF-8 speichern.');
-    const neu = fn(text, karte);
-    if (neu === text) return neu;
-    const tmp = datei + '.c2i-tmp';
-    try {
-      fs.writeFileSync(tmp, neu);
-      fs.renameSync(tmp, datei);
-    } catch (e) {
-      // Datei im Editor gesperrt o. ae.: keine Temp-Datei im Projekt des Nutzers liegen lassen.
-      fs.rmSync(tmp, { force: true });
-      throw e;
-    }
-    return neu;
+    return schreibeAtomar(datei, (text) => fn(text, karte));
   }
 
   const ausCache = (projekt) => db.prepare('SELECT felder_json FROM jira_issue WHERE projekt = ? ORDER BY key').all(projekt)
@@ -665,4 +671,4 @@ function erzeuge({ db, bereiche, loeseHeim, gesperrt = () => [], jira = require(
   return { db, bereich, todoPfad, lokal, schreibeZeile, gesperrt, jiraKarten, board, detail, status, kommentar, kriterium, idVergeben, alsJira, routen };
 }
 
-module.exports = { parseTodo, spalteAus, setzeStatus, setzeKriterium, vergibId, jiraSpalte, uebernehmeZeit, erzeuge, SPALTE_TAG };
+module.exports = { zerlege, fuege, ersetzeZeile, schreibeAtomar, parseTodo, spalteAus, setzeStatus, setzeKriterium, vergibId, jiraSpalte, uebernehmeZeit, erzeuge, SPALTE_TAG };

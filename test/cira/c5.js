@@ -478,7 +478,7 @@ module.exports = ({ dbmod, openDbs }) => {
     const { db, d, zu } = dienst();
     try {
       const sid = '77777777-2222-4333-8444-555555555555';
-      d.hook({ hook_event_name: 'Notification', session_id: sid, message: 'Frage' });
+      d.hook({ hook_event_name: 'Notification', session_id: sid, message: 'Frage', notification_type: 'permission_prompt' });
       db.prepare(`INSERT INTO events (request_id, ts, session_id, project, model, cost_usd, day) VALUES ('h1', '2026-10-19T08:00:00Z', ?, 'Fremd', 'claude-opus-5', 0.2, '2026-10-19')`).run(sid);
       assert.strictEqual(d.details(sid).status, 'wartet');
       db.prepare('UPDATE sitzung SET aktualisiert = ? WHERE id = ?').run(new Date(Date.now() - 20 * 60000).toISOString(), sid);

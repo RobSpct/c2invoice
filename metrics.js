@@ -1864,6 +1864,34 @@ function ciraKostenMonatEur(db, { jetzt = new Date() } = {}) {
   return usdToEur(usd);
 }
 
+// Ledger-Bezug einer Sitzung (Gedaechtnis C9: originSessionId einer Notiz).
+// Nur Zeilen dieser Sitzung; Vorgang und Projekt wie gebucht (der haeufigste).
+function sitzungsBezug(db, sid) {
+  if (typeof sid !== 'string' || !/^[\w-]{8,80}$/.test(sid)) return null;
+  const r = db.prepare(`SELECT MIN(ts) AS von, MAX(ts) AS bis, ${SUM_COLS} FROM events WHERE session_id = ?`).get(sid);
+  if (!r || !r.requests) return null;
+  const haeufig = (spalte) => (db.prepare(`SELECT ${spalte} AS w, COUNT(*) AS n FROM events WHERE session_id = ? AND ${spalte} IS NOT NULL AND ${spalte} <> '' GROUP BY ${spalte} ORDER BY n DESC LIMIT 1`).get(sid) || {}).w || null;
+  const t = withTotals(r);
+  return { anfragen: t.requests, tokens: t.total_tokens, kosten_usd: t.cost_usd, kosten_eur: usdToEur(t.cost_usd), von: r.von, bis: r.bis, vorgang: haeufig('ticket'), projekt: haeufig('project') };
+}
+
+// Rechnungssummen fuer den Monatsbericht (C9a). rechnungen = rechnung.liste(db).
+// gestellt: Rechnungsdatum im Zeitraum, nicht storniert. offen/ueberfaellig: Stand jetzt.
+function rechnungsSummen(rechnungen, { von, bis }) {
+  const r2 = (v) => Math.round(v * 100) / 100;
+  const aus = { gestellt: { n: 0, brutto: 0 }, offen: { n: 0, rest: 0 }, ueberfaellig: { n: 0, rest: 0 } };
+  for (const r of rechnungen || []) {
+    if (r.status !== 'erstellt') continue;
+    const tag = String(r.erstellt_am || '').slice(0, 10);
+    if (tag >= von && tag <= bis) { aus.gestellt.n++; aus.gestellt.brutto += Number(r.brutto_eur) || 0; }
+    const rest = Number(r.rest_eur) || 0;
+    if (rest > 0) { aus.offen.n++; aus.offen.rest += rest; }
+    if (rest > 0 && r.ueberfaellig_tage > 0) { aus.ueberfaellig.n++; aus.ueberfaellig.rest += rest; }
+  }
+  for (const k of Object.keys(aus)) for (const f of Object.keys(aus[k])) if (f !== 'n') aus[k][f] = r2(aus[k][f]);
+  return aus;
+}
+
 // Momentaufnahme fuer den Live-Monitor.
 // Werkzeug-Sitzungen erscheinen hier bewusst NICHT als eigene Zeilen: sie
 // begleiten eine Arbeitssitzung und wuerden die Liste sonst verdoppeln.
@@ -2086,6 +2114,8 @@ module.exports = {
   usdToEur,
   isOverhead,
   ciraKostenMonatEur,
+  sitzungsBezug,
+  rechnungsSummen,
   CIRA_PROJEKT,
   activeSecondsFromTimestamps,
   activeSecondsByGroup,

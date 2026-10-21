@@ -19,6 +19,7 @@ Object.assign(EN, {
   'Tüftelt': 'Tinkering', 'Grübelt': 'Pondering', 'Werkelt': 'Working', 'Sinniert': 'Musing', 'Braut': 'Brewing', 'Köchelt': 'Simmering', 'Knobelt': 'Puzzling', 'Sitzung beenden': 'End session', 'Slash-Befehle': 'Slash commands',
   'gibt es ohne Terminal nicht — „Im Terminal fortsetzen“ öffnet die Sitzung dort.': 'is not available without a terminal — “Continue in terminal” opens the session there.',
   'noch nicht abgeglichen': 'not synced yet', 'Kontext': 'Context',
+  'Läuft noch in deinem Terminal — dort antworten.': 'Still running in your terminal — answer there.',
   'wartet auf dich': 'waiting for you', 'bereit': 'ready', 'läuft': 'running', 'startet': 'starting', 'beendet': 'ended', 'Fehler': 'Error',
   'Nachricht an Claude …': 'Message to Claude …', 'Was soll Claude tun?': 'What should Claude do?', 'nicht erreichbar': 'not reachable',
   'Branch': 'Branch', 'Buchung': 'booking', 'Vormerkung beim Start': 'reservation at start', 'ohne Vorgang': 'no job', 'Transkript gekürzt (Ende der Datei)': 'Transcript truncated (end of file)',
@@ -179,35 +180,7 @@ function szTerminalZeilen(ev) {
   return aus;
 }
 
-// Markdown fuer Claudes Antworten: erst esc, dann wenige Formen (Code-Block,
-// Tabelle, Ueberschrift, **fett**, `code`). HTML aus der Antwort bleibt Text.
-function szMd(text) {
-  const inl = (s) => esc(s).replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
-  const zeilen = String(text).replace(/\r\n/g, '\n').split('\n');
-  const istZeile = (z) => /^\s*\|.*\|\s*$/.test(z || '');
-  const zellen = (z) => z.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
-  const aus = [];
-  for (let i = 0; i < zeilen.length;) {
-    const z = zeilen[i];
-    if (/^\s*```/.test(z)) {
-      const b = [];
-      for (i++; i < zeilen.length && !/^\s*```/.test(zeilen[i]); i++) b.push(zeilen[i]);
-      i++;
-      aus.push('<pre class="tz-code">' + esc(b.join('\n')) + '</pre>');
-    } else if (istZeile(z) && /^\s*\|[\s:|-]+\|\s*$/.test(zeilen[i + 1] || '')) {
-      const kopf = zellen(z);
-      const reihen = [];
-      for (i += 2; istZeile(zeilen[i]); i++) reihen.push(zellen(zeilen[i]));
-      aus.push('<table class="tz-tab"><thead><tr>' + kopf.map((c) => '<th>' + inl(c) + '</th>').join('') + '</tr></thead><tbody>' +
-        reihen.map((r) => '<tr>' + r.map((c) => '<td>' + inl(c) + '</td>').join('') + '</tr>').join('') + '</tbody></table>');
-    } else {
-      const h = z.match(/^#{1,6}\s+(.*)/);
-      aus.push(h ? '<div class="tz-h">' + inl(h[1]) + '</div>' : z.trim() ? '<div>' + inl(z) + '</div>' : '<div class="tz-luft"></div>');
-      i++;
-    }
-  }
-  return aus.join('');
-}
+// Markdown fuer Claudes Antworten: md() in bauteile.js (gemeinsam mit Briefings und Gedaechtnis, C9).
 // wartet: die Sitzung wartet gerade — dann ist die letzte Rueckfrage die offene.
 function szKarten(ev, { wartet = false } = {}) {
   const karten = (ev || []).filter((e) => SZ_ART[e.art]).map((e) => ({
@@ -348,7 +321,7 @@ function szStatusleiste(d) {
 
 function szTerminalHtml(d) {
   const z = szTerminalZeilen(d.ereignisse);
-  const zeile = (x) => (x.md ? '<div class="tz text md"><span class="tz-punkt" aria-hidden="true">●</span><div>' + szMd(x.t) + '</div></div>'
+  const zeile = (x) => (x.md ? '<div class="tz text md"><span class="tz-punkt" aria-hidden="true">●</span><div>' + md(x.t) + '</div></div>'
     : '<div class="tz ' + x.k + (x.ind ? ' ein-r' : '') + '">' + esc(x.t) + '</div>');
   let html = '';
   for (let i = 0; i < z.length; i++) {
@@ -370,7 +343,7 @@ function szKartenHtml(d) {
   return '<div class="sz-karten" id="sz-log" role="log" aria-live="polite">' + k.map((c) =>
     '<div class="sz-k k-' + c.art + (c.wartet ? ' wartet' : '') + '">' +
       '<div class="sz-k-kopf"><span class="sz-art a-' + c.art + '">' + esc(uebersetze(c.kind)) + '</span>' +
-        (c.md ? '<div class="t text sz-k-md">' + szMd(c.t) + '</div>'
+        (c.md ? '<div class="t text sz-k-md">' + md(c.t) + '</div>'
           : '<span class="t' + (['eingabe', 'rechte', 'frage', 'fehler'].includes(c.art) ? ' text' : ' mono') + '">' + esc(c.t) + '</span>') +
         (c.wartet ? '<span class="m warte">' + esc(uebersetze('wartet auf dich')) + '</span>' : c.meta ? '<span class="m mono">' + esc(c.meta) + '</span>' : '') + '</div>' +
       (c.diff ? '<div class="sz-k-diff mono">' + c.diff.map((x) => '<span class="' + (x.z === '+' ? 'plus' : x.z === '-' ? 'minus' : 'leise') + '">' + esc(x.z + ' ' + x.t) + '</span>').join('') + '</div>' : '') +
@@ -460,7 +433,9 @@ function szAktionenHtml(d) {
       ? '<a class="sz-aktion" href="#/beleg/neu?art=rechnung&tickets=' + encodeURIComponent(d.vorgang) + '&from=' + tag + '&to=' + tag + '">' + pos + '</a>'
       : zeile(pos, '', 'Erst einem Vorgang zuordnen.')) +
     zeile(innen('Übergabe für nächste Sitzung', 'Claude', 'akzent'), '<button type="button" class="sz-aktion" data-aktion="sz-uebergabe" data-wert="' + esc(d.id) + '">' + innen('Übergabe für nächste Sitzung', 'Claude', 'akzent') + '</button>', eigen && d.live ? null : 'Nur in einer laufenden Sitzung aus c2invoice.') +
-    zeile(innen('Im Terminal fortsetzen', 'wt'), '<button type="button" class="sz-aktion" data-aktion="sz-terminal" data-wert="' + esc(d.id) + '">' + innen('Im Terminal fortsetzen', 'wt') + '</button>', eigen && d.live ? 'Läuft noch in c2invoice — erst stoppen.' : null) +
+    zeile(innen('Im Terminal fortsetzen', 'wt'), '<button type="button" class="sz-aktion" data-aktion="sz-terminal" data-wert="' + esc(d.id) + '">' + innen('Im Terminal fortsetzen', 'wt') + '</button>', eigen && d.live ? 'Läuft noch in c2invoice — erst stoppen.'
+      // B1: --resume auf eine noch offene Terminal-Sitzung schriebe mit zwei Prozessen in eine Datei (Server weist das ab).
+      : !eigen && (d.status === 'wartet' || d.status === 'laeuft') ? 'Läuft noch in deinem Terminal — dort antworten.' : null) +
   '</div>';
 }
 
