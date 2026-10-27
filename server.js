@@ -32,6 +32,7 @@ const zeit = require('./zeit');
 const kalender = require('./kalender');
 const cira = require('./cira');
 const modelle = require('./modelle');
+const sprache = require('./sprache');
 const freigaben = require('./freigaben');
 const claude = require('./claude');
 const sitzungen = require('./sitzungen');
@@ -70,6 +71,9 @@ const merkDienst = merken.erzeuge({ db, vaultPfad, gedaechtnis: gedaechtnisDiens
   t2Lauf: (o) => ciraDienst.t2Lauf(o), bereiche: () => arbeitsbereiche() });
 const ciraDienst = cira.erzeuge({ db, bucheVorgang, skillOrte: (b) => skillOrte(b), merken: merkDienst,
   kontextQuellen: { briefing: (id) => briefingDienst.kontextFakten(id) } });
+// C10: Pfade, Port und Name der Schluessel-Variablen nur aus der Datei (config.sprache), Stimme aus Einstellungen -> Cira.
+const spracheDienst = sprache.erzeuge({ db, sprachCfg: () => config.sprache, einstellungen: () => ciraEinstellungen(),
+  cacheOrdner: path.join(__dirname, 'data', 'tts-cache') });
 // Im 30-s-Takt: Index nachziehen, Monatsbericht pruefen. Wirft nie.
 // Derselbe Fehler steht einmal im Protokoll, nicht alle 30 s; in der Oberflaeche zeigt /api/vault ihn.
 const vaultFehler = { index: null, monatsbericht: null };
@@ -253,7 +257,7 @@ function sendText(res, text, status = 200, type = 'text/plain; charset=utf-8') {
 // sonst im Frame koppeln lassen und Klicks unterschieben (Review 1008786).
 // Nur fuer HTML — object-src 'none' auf einer PDF-Antwort legte Chromes Anzeige lahm.
 const CSP = "default-src 'self'; script-src 'self' 'sha256-E6jQvrT2ZivWG9GJ4AAEZf4MhI7l3QkLroW4hgvUT4c='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
-  "font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'; " +
+  "font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; media-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'; " +
   "frame-ancestors 'self' app://obsidian.md capacitor://localhost";
 
 // Statische Dateien nur aus dem public-Ordner ausliefern.
@@ -925,6 +929,13 @@ const CIRA_FELDER = {
   orbStil: { art: 'wahl', wahl: ['partikel', 'flaeche'], label: 'Orb-Stil', standard: cira.STANDARD.orbStil },
   // Desktop-Benachrichtigung (Notification API) zusaetzlich zur Karte in der Seite; Owner 15.10.: Standard aus.
   benachrichtigungDesktop: { art: 'bool', label: 'Desktop-Benachrichtigung', standard: cira.STANDARD.benachrichtigungDesktop },
+  // C10 Stimme. Die Stimmen-ID ist kein Zugang, nur eine Beschriftung (E8); der Schluessel bleibt in der Umgebung.
+  stimmeAnbieter: { art: 'wahl', wahl: ['browser', 'elevenlabs'], label: 'Stimme', standard: cira.STANDARD.stimmeAnbieter },
+  antwortenVorlesen: { art: 'wahl', wahl: ['auto', 'immer', 'nie'], label: 'Antworten vorlesen', standard: cira.STANDARD.antwortenVorlesen },
+  stimmeElevenlabs: { art: 'text', re: /^[A-Za-z0-9]{0,40}$/, label: 'ElevenLabs-Stimme', standard: cira.STANDARD.stimmeElevenlabs },
+  stimmeModellKurz: { art: 'wahl', wahl: sprache.MODELLE, label: 'Modell kurze Antworten', standard: cira.STANDARD.stimmeModellKurz },
+  stimmeModellLang: { art: 'wahl', wahl: sprache.MODELLE, label: 'Modell Briefings', standard: cira.STANDARD.stimmeModellLang },
+  stimmeMonatslimitZeichen: { art: 'zahl', min: 1000, max: 1000000, label: 'Monatslimit Zeichen', standard: cira.STANDARD.stimmeMonatslimitZeichen },
 };
 const CIRA_FELDER_ANZEIGE = Object.fromEntries(Object.entries(CIRA_FELDER).map(([k, r]) =>
   [k, { art: r.art, label: r.label, ...(r.wahl ? { wahl: r.wahl } : {}), ...(r.art === 'zahl' ? { min: r.min, max: r.max } : {}) }]));
@@ -1438,11 +1449,12 @@ function handle(req, res) {
       });
     }
     if (modelle.routen(req, res, p, { sendJson, leseKoerper, cfg: config })) return;
+    if (spracheDienst.routen(req, res, p, u, { sendJson, leseKoerper })) return;
     if (p === '/api/cira/einstellungen') {
       return sendJson(res, {
         cira: ciraEinstellungen(), felder: CIRA_FELDER_ANZEIGE,
         name: (config.cira && typeof config.cira.name === 'string' && config.cira.name.trim().slice(0, 40)) || 'Cira',
-        verbraucht_eur: metrics.ciraKostenMonatEur(db),
+        verbraucht_eur: metrics.ciraKostenMonatEur(db), sprache: spracheDienst.status(),
       });
     }
 

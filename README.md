@@ -537,6 +537,65 @@ Restart the server after editing the file.
   their first occurrence. Signing in to Google or Microsoft is planned for 2.1:
   c2invoice then reads without the secret address and saves events itself.
 
+## Obsidian vault: briefings, memory, "remember"
+
+Give a workspace in `config.json` `"art": "vault"` (an Obsidian folder) and
+c2invoice reads it every 30 seconds. It writes to the vault only when you
+click to approve.
+
+- **Memory** shows your notes as a graph: notes are nodes, wikilinks are
+  edges, colours come from Obsidian's colour groups (`.obsidian/graph.json`)
+  or Settings → Vault. A note with `originSessionId` in its frontmatter shows
+  the session it came from: job, tokens, API equivalent and invoice. Search
+  ranks titles over tags over text; *Ask Cira* answers from the top three hits
+  with your local model.
+- **Briefings** lists the reports in `vault.briefingsOrdner` (default
+  `Briefings/`, plus `reports/`). To-dos (`- [ ]`) can be ticked off; only
+  that line changes. A summary is made on click with the local model.
+- **Monthly report:** from the 1st of a month, 7 am, a report on the previous
+  month waits under *Needs you* (hours, value of work, invoices as count and
+  total, API equivalent per workspace). No invoice numbers or recipients, since
+  vaults are often shared. Approving saves it to
+  `Briefings/reports/YYYY-MM-c2invoice.md`.
+- **"Merke dir …"** (remember …) in a chat with Cira drafts a note in
+  `memory/` with a top-level `tags:` entry and a line in `memory/MEMORY.md`.
+  Nothing is written until you approve, and nothing at all if the file changed
+  since the draft.
+
+## Voice
+
+Cira can listen and read aloud. Both are optional.
+
+- **Reading aloud** works without setup, using your browser's voice, locally.
+  Choose under Settings → Cira when answers are read: automatically (after a
+  spoken question and for the daily report), always or never. Briefings have
+  a read-aloud button.
+- **Listening** (push-to-talk) needs a local
+  [whisper.cpp](https://github.com/ggml-org/whisper.cpp/releases) server;
+  without it there is no microphone button. Speech recognition always runs on
+  your machine. Unpack `whisper-bin-win-cuda-12.4.0-x64.zip` (NVIDIA) or
+  `whisper-bin-x64.zip` (CPU only, much slower) and a model such as
+  `ggml-large-v3-turbo-q5_0.bin` (about 1 GB of video memory), then point
+  `config.json` at both:
+  ```json
+  "sprache": { "stt": { "exe": "D:/models/whisper/whisper-server.exe", "modell": "D:/models/whisper/ggml-large-v3-turbo-q5_0.bin" } }
+  ```
+  c2invoice starts whisper on first use (port 8178) and stops it after 10 idle
+  minutes to free the video memory. Press the speak button in the cockpit or
+  dock, or Ctrl+Space with an empty input; 0.8 s of silence sends the
+  question, Esc discards it or stops reading. Embedded views such as Obsidian
+  usually get no microphone; reading aloud still works there.
+- **ElevenLabs** (optional) gives a better voice, but the text leaves your
+  machine, customer names and amounts included. Set `ELEVENLABS_API_KEY` as a
+  user environment variable and restart; the key never goes into
+  `config.json` or the interface. Then pick ElevenLabs and a voice ID under
+  Settings → Cira → Voice. On the free plan only the built-in voices work via
+  the API (Matilda, for example); Voice Library voices need a paid plan. A
+  monthly character limit switches back to the browser voice in time, repeated
+  texts come from a local cache, and if ElevenLabs fails the browser speaks.
+
+Cira's voice speaks German for now, like Cira itself.
+
 ## Language
 
 The interface speaks **English and German**. Pick one under Settings →
@@ -557,7 +616,6 @@ without a console window. Both are optional; `npm start` is enough.
 
 ## Roadmap
 
-- Briefings and memory from an Obsidian vault, Cira reading aloud and listening
 - Flows: automations with trigger, condition and action, dunning, sending
   documents, recurring invoices
 - Acceptance links for quotes, a shared mailbox per customer and job

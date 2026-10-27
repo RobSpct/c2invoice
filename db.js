@@ -599,6 +599,21 @@ function migrate(db) {
       zeit   TEXT NOT NULL
     );
   `);
+  // C10: Spracherkennung und Stimme. ElevenLabs rechnet nach Zeichen ab, die
+  // passen weder zu cira_lauf (USD) noch zu events (Tokens) — eigene Tabelle.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sprache_lauf (
+      id       INTEGER PRIMARY KEY AUTOINCREMENT,
+      zeit     TEXT NOT NULL,
+      art      TEXT NOT NULL,      -- stt | tts
+      anbieter TEXT NOT NULL,      -- whisper | elevenlabs
+      zeichen  INTEGER NOT NULL,   -- abgerechnete Zeichen (Cache-Treffer und Fehler 0)
+      ms       INTEGER,
+      cache    INTEGER NOT NULL,
+      fehler   TEXT
+    );
+  `);
+  addColumn(db, 'cira_nachricht', 'gesprochen', 'INTEGER');
   // Saat genau einmal: eine geloeschte Taetigkeit kaeme sonst bei jedem Start zurueck.
   if (getMeta(db, 'taetigkeiten_gesaet') === null) {
     const ein = db.prepare('INSERT OR IGNORE INTO taetigkeitsart (name, satz, parallel) VALUES (?, NULL, ?)');

@@ -1864,6 +1864,13 @@ function ciraKostenMonatEur(db, { jetzt = new Date() } = {}) {
   return usdToEur(usd);
 }
 
+// Bei ElevenLabs abgerechnete Zeichen im Kalendermonat von `jetzt` (C10),
+// Grundlage fuer das Zeichenlimit. Cache-Treffer und Fehlschlaege tragen 0.
+function spracheZeichenMonat(db, { jetzt = new Date(), anbieter = 'elevenlabs' } = {}) {
+  return db.prepare("SELECT COALESCE(SUM(zeichen), 0) AS s FROM sprache_lauf WHERE art = 'tts' AND anbieter = ? AND substr(zeit, 1, 7) = ?")
+    .get(anbieter, jetzt.toISOString().slice(0, 7)).s;
+}
+
 // Ledger-Bezug einer Sitzung (Gedaechtnis C9: originSessionId einer Notiz).
 // Nur Zeilen dieser Sitzung; Vorgang und Projekt wie gebucht (der haeufigste).
 function sitzungsBezug(db, sid) {
@@ -2114,6 +2121,7 @@ module.exports = {
   usdToEur,
   isOverhead,
   ciraKostenMonatEur,
+  spracheZeichenMonat,
   sitzungsBezug,
   rechnungsSummen,
   CIRA_PROJEKT,

@@ -26,7 +26,9 @@ const QUELLE_DATEN = 'Zahlen aus c2invoice';
 // zeigt sie an, hier wird mit ihnen gerechnet, wenn config.json nichts sagt.
 // modellLokal ist seit dem Modell-Block die Rolle "Schnell" (alter Schluessel, bleibt gueltig).
 const STANDARD = { anrede: '', modellLokal: '', modellText: '', modellDenken: '', modellCode: '',
-  woerterSchnell: '', woerterText: '', woerterDenken: '', woerterCode: '', claudeErlaubt: false, claudeModell: 'sonnet', claudeMonatslimitEur: 5, nichtStoerenAb: '22:00', nichtStoerenBis: '07:00', orbStil: 'partikel', benachrichtigungDesktop: false };
+  woerterSchnell: '', woerterText: '', woerterDenken: '', woerterCode: '', claudeErlaubt: false, claudeModell: 'sonnet', claudeMonatslimitEur: 5, nichtStoerenAb: '22:00', nichtStoerenBis: '07:00', orbStil: 'partikel', benachrichtigungDesktop: false,
+  // C10: Stimme (sprache.js). Browser spricht ohne Einrichtung; ElevenLabs nur auf Wunsch (E2).
+  stimmeAnbieter: 'browser', antwortenVorlesen: 'auto', stimmeElevenlabs: '', stimmeModellKurz: 'eleven_flash_v2_5', stimmeModellLang: 'eleven_multilingual_v2', stimmeMonatslimitZeichen: 10000 };
 const ciraCfg = () => ({ ...STANDARD, ...(config.cira && typeof config.cira === 'object' ? config.cira : {}) });
 
 /* ---------- Formate (Antworttext, deutsch) ---------- */
@@ -336,7 +338,7 @@ const T0 = [
       return {
         antwort: 'Heute: ' + satzFakten(fakten.slice(0, 2)) + '.' + (zusatz.length ? ' Meiste Zeit: ' + zusatz.map((x) => x.k + ' (' + x.t + ')').join(', ') + '.' : ''),
         fakten: fakten.concat(zusatz), quelle: QUELLE_DATEN, sprung: [{ l: 'Zeiterfassung öffnen', ziel: '#/zeit' }],
-        szene: szeneZahlen('Heute', fakten),
+        szene: szeneZahlen('Heute', fakten), vorlesen: true,
       };
     },
   },
@@ -601,10 +603,10 @@ function erzeuge({ db, bucheVorgang, spawnFn, fetchFn = fetch, claudeExe, jetzt 
   function speichere(kanal, rolle, n, kontext) {
     // route_json traegt Rolle, Modell, Grund, Versuche und ein Claude-Angebot (Modell-Block).
     const route = n.route ? { ...n.route, ...(n.angebot ? { angebot: n.angebot } : {}) } : null;
-    return Number(db.prepare(`INSERT INTO cira_nachricht (zeit, kanal, rolle, text, stufe, kosten_eur, quelle, szene_json, sprung_json, kontext_json, route_json)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(jetzt().toISOString(), kanal, rolle, n.text, n.stufe || null, n.kosten_eur ?? null, n.quelle || null,
+    return Number(db.prepare(`INSERT INTO cira_nachricht (zeit, kanal, rolle, text, stufe, kosten_eur, quelle, szene_json, sprung_json, kontext_json, route_json, gesprochen)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(jetzt().toISOString(), kanal, rolle, n.text, n.stufe || null, n.kosten_eur ?? null, n.quelle || null,
       n.szene ? JSON.stringify(n.szene) : null, n.sprung && n.sprung.length ? JSON.stringify(n.sprung) : null, kontext ? JSON.stringify(kontext) : null,
-      route ? JSON.stringify(route) : null).lastInsertRowid);
+      route ? JSON.stringify(route) : null, n.gesprochen === true ? 1 : null).lastInsertRowid);
   }
 
   // Ein Claude-Lauf unter Monatslimit, Budget und Sperre (C9c braucht Profil und Ordner).
@@ -688,11 +690,12 @@ function erzeuge({ db, bucheVorgang, spawnFn, fetchFn = fetch, claudeExe, jetzt 
 
   // Beantwortet eine Frage. melde(ereignis) bekommt { typ: 'stufe'|'text', … }
   // waehrend der Arbeit; das Ergebnis ist die vollstaendige Antwort.
-  async function frage({ text, kontext = null, kanal = 'dock', signal = null }, melde = () => {}) {
+  // gesprochen: die Frage kam per Push-to-Talk (C10), Marke im Verlauf.
+  async function frage({ text, kontext = null, kanal = 'dock', signal = null, gesprochen = false }, melde = () => {}) {
     const heute = jetzt();
     // Nach einem Abbruch liest niemand die Antwort: nur die Frage bleibt im Verlauf.
     const fertig = (n) => { if (signal && signal.aborted) return { ...n, abgebrochen: true }; n.id = speichere(kanal, 'cira', n, null); return n; };
-    speichere(kanal, 'ich', { text }, kontext);
+    speichere(kanal, 'ich', { text, gesprochen }, kontext);
 
     const treffer = t0(text);
     if (treffer) {
@@ -705,7 +708,7 @@ function erzeuge({ db, bucheVorgang, spawnFn, fetchFn = fetch, claudeExe, jetzt 
         console.error('Cira T0 ' + treffer.absicht.name + ':', err && err.message);
         r = { antwort: err.message, quelle: QUELLE_DATEN };
       }
-      return fertig({ text: r.antwort, stufe: 'T0', kosten_eur: 0, tokens: 0, quelle: r.quelle, sprung: r.sprung || [], szene: r.szene || null, zustand: r.zustand || null, absicht: treffer.absicht.name, freigabe_id: r.freigabe_id || null, angebot: r.angebot || null });
+      return fertig({ text: r.antwort, stufe: 'T0', kosten_eur: 0, tokens: 0, quelle: r.quelle, sprung: r.sprung || [], szene: r.szene || null, zustand: r.zustand || null, absicht: treffer.absicht.name, freigabe_id: r.freigabe_id || null, angebot: r.angebot || null, vorlesen: r.vorlesen === true });
     }
 
     // Fakten fuer T1/T2: Datum, Kennzahlen des gefragten Zeitraums, Ueberfaelliges, ausgewaehltes Objekt.
@@ -775,12 +778,12 @@ function erzeuge({ db, bucheVorgang, spawnFn, fetchFn = fetch, claudeExe, jetzt 
   function verlauf(kanal) {
     const h = jetzt();
     const ab = new Date(h.getFullYear(), h.getMonth(), h.getDate()).toISOString();
-    return db.prepare('SELECT id, zeit, rolle, text, stufe, kosten_eur, quelle, sprung_json, szene_json, route_json, falsch FROM cira_nachricht WHERE kanal = ? AND zeit >= ? ORDER BY id DESC LIMIT 100')
+    return db.prepare('SELECT id, zeit, rolle, text, stufe, kosten_eur, quelle, sprung_json, szene_json, route_json, falsch, gesprochen FROM cira_nachricht WHERE kanal = ? AND zeit >= ? ORDER BY id DESC LIMIT 100')
       .all(kanal, ab).reverse().map((r) => {
         const route = jsonOder(r.route_json, null, r.id);
         return { id: r.id, zeit: r.zeit, rolle: r.rolle, text: r.text, stufe: r.stufe, kosten_eur: r.kosten_eur, quelle: r.quelle,
           sprung: jsonOder(r.sprung_json, [], r.id), szene: jsonOder(r.szene_json, null, r.id),
-          route, angebot: route && route.angebot ? route.angebot : null, falsch: r.falsch === 1 };
+          route, angebot: route && route.angebot ? route.angebot : null, falsch: r.falsch === 1, gesprochen: r.gesprochen === 1 };
       });
   }
 
@@ -821,7 +824,7 @@ function erzeuge({ db, bucheVorgang, spawnFn, fetchFn = fetch, claudeExe, jetzt 
     const kanal = KANAELE.includes(d.kanal) ? d.kanal : 'dock';
     const k = d.kontext && typeof d.kontext === 'object' && !Array.isArray(d.kontext) ? d.kontext : null;
     const kontext = k ? { screen: text200(k.screen), art: text200(k.art), id: text200(k.id), titel: text200(k.titel), arbeitsbereich: text200(k.arbeitsbereich) } : null;
-    return { text, kanal, kontext };
+    return { text, kanal, kontext, gesprochen: d.gesprochen === true };
   }
 
   // Liefert true, wenn die Route bedient wurde.
@@ -839,7 +842,7 @@ function erzeuge({ db, bucheVorgang, spawnFn, fetchFn = fetch, claudeExe, jetzt 
         res.on('close', () => { if (!res.writableEnded) ac.abort(); });
         frage({ ...f, signal: ac.signal }, zeile).then((n) => {
           if (n.abgebrochen) { res.end(); return; }
-          zeile({ typ: 'fertig', id: n.id, antwort: n.text, stufe: n.stufe, kosten_eur: n.kosten_eur, tokens: n.tokens || 0, quelle: n.quelle, szene: n.szene || null, zustand: n.zustand || null, sprung: n.sprung || [], herleitung_id: n.szene && n.szene.herleitung ? n.szene.herleitung : null, freigabe_id: n.freigabe_id || null, gestrichen: n.gestrichen || 0, route: n.route || null, angebot: n.angebot || null });
+          zeile({ typ: 'fertig', id: n.id, antwort: n.text, stufe: n.stufe, kosten_eur: n.kosten_eur, tokens: n.tokens || 0, quelle: n.quelle, szene: n.szene || null, zustand: n.zustand || null, sprung: n.sprung || [], herleitung_id: n.szene && n.szene.herleitung ? n.szene.herleitung : null, freigabe_id: n.freigabe_id || null, gestrichen: n.gestrichen || 0, route: n.route || null, angebot: n.angebot || null, vorlesen: n.vorlesen === true });
           ereignisse.sende('cira', { kanal: f.kanal });
           res.end();
         }, (err) => {

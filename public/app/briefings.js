@@ -2,7 +2,8 @@
 /* Briefings (C9a, README §6.9): Berichte aus dem Vault als Posteingang. Liste
    links mit Filter nach Quelle und Gruppen nach Datum, rechts das Briefing mit
    Kurzfassung auf Klick (T1, gecacht), To-dos zum Abhaken und dem Text.
-   Vault-Health-To-dos sind nur Anzeige (E8). Kein Vorlesen (C10). */
+   Vault-Health-To-dos sind nur Anzeige (E8). Vorlesen (C10) liest die
+   Kurzfassung, sonst den Text; die Stimme waehlt sprache.js. */
 
 Object.assign(EN, {
   'Briefings': 'Briefings', 'Alle': 'All', 'Heute': 'Today', 'Diese Woche': 'This week', 'Früher': 'Earlier', 'Ohne Datum': 'Undated',
@@ -14,7 +15,7 @@ Object.assign(EN, {
   'lokal · {m} · {t} Tokens': 'local · {m} · {t} tokens', 'aus dem Cache': 'from cache', 'Im Gespräch nachfragen': 'Ask in the conversation',
   'Braucht dich': 'Needs you', 'Vault-Health-To-dos hakt der Skill vault-health-abarbeiten ab, zusammen mit der Änderung dazu.': 'Vault health to-dos are ticked off by the vault-health-abarbeiten skill, together with the change.',
   'Briefing lädt …': 'Loading briefing …', 'Briefing nicht gefunden.': 'Briefing not found.', 'Zum Briefing': 'About the briefing',
-  'To-do nicht gespeichert': 'To-do not saved', 'ungelesen': 'unread', 'Filter nach Quelle': 'Filter by source', 'Nichts Neues im Vault.': 'Nothing new in the vault.',
+  'To-do nicht gespeichert': 'To-do not saved', 'Vorlesen': 'Read aloud', 'Vorlesen stoppen': 'Stop reading', 'ungelesen': 'unread', 'Filter nach Quelle': 'Filter by source', 'Nichts Neues im Vault.': 'Nothing new in the vault.',
 });
 
 const bf = { daten: null, fehler: null, laedt: false, filter: lies('bf.filter', 'alle'), pfad: null, offen: null, offenFehler: null, kurz: Object.create(null), kurzLaeuft: false };
@@ -87,6 +88,7 @@ function bfLesen() {
       (k && k.text ? '<p>' + esc(k.text) + '</p><span class="faint mono">' + esc(k.cache ? uebersetze('aus dem Cache') : fuelle('lokal · {m} · {t} Tokens', { m: k.modell || '–', t: k.tokens || 0 })) + '</span>'
         : k && k.fehlt ? '<p class="dim">' + esc(k.fehlt) + '</p>' : '') +
       '<div class="bf-knoepfe">' + (k && k.text ? '' : '<button type="button" class="knopf klein primaer" data-aktion="bf-kurz"' + (bf.kurzLaeuft ? ' disabled' : '') + '>' + esc(uebersetze(bf.kurzLaeuft ? 'Kurzfassung entsteht …' : 'Kurzfassung erstellen')) + '</button>') +
+        bfVorlesenKnopf(b) +
         '<button type="button" class="knopf klein" data-aktion="bf-frage">' + esc(uebersetze('Im Gespräch nachfragen')) + '</button>' +
         '<a class="knopf klein" href="' + esc(obsidian) + '">' + esc(uebersetze('In Obsidian öffnen')) + '</a></div></section>' +
     (b.todos.length ? '<section class="bf-todos"><div class="bf-todos-kopf"><span>' + esc(uebersetze('Braucht dich')) + '</span><span class="mono faint">' + b.todos.filter((t) => !t.erledigt).length + '/' + b.todos.length + '</span></div>' +
@@ -96,6 +98,22 @@ function bfLesen() {
         '<span>' + md(t.text).replace(/^<div>|<\/div>$/g, '') + '</span></div>').join('') + '</section>' : '') +
     '<div class="bf-text">' + md(ohneTitel(b.text)) + '</div></article>';
 }
+
+// Vorlesen (C10): solange dieses Briefing spricht, stoppt der Knopf und zeigt die Restzeit.
+function bfVorlesenKnopf(b) {
+  const an = sprache.quelle === 'briefing:' + b.hash;
+  return '<button type="button" class="knopf klein" id="bf-vorlesen" data-aktion="bf-vorlesen" aria-pressed="' + an + '">' + esc(bfVorlesenText(an, null)) + '</button>';
+}
+function bfVorlesenText(an, rest) {
+  return uebersetze(an ? 'Vorlesen stoppen' : 'Vorlesen') + (an && rest != null ? ' · ' + Math.floor(rest / 60) + ':' + String(rest % 60).padStart(2, '0') : '');
+}
+document.addEventListener('c2i-sprache', (e) => {
+  const k = document.getElementById('bf-vorlesen');
+  if (!k || !bf.offen) return;
+  const an = e.detail.quelle === 'briefing:' + bf.offen.hash;
+  k.textContent = bfVorlesenText(an, e.detail.rest);
+  k.setAttribute('aria-pressed', String(an));
+});
 
 function zeichneBriefings(w, teile) {
   const pfad = teile[0] || null;
@@ -115,6 +133,13 @@ function zeichneBriefings(w, teile) {
 }
 
 aktion('bf-neu', () => { bf.fehler = null; bfLade(); });
+aktion('bf-vorlesen', () => {
+  const b = bf.offen;
+  if (!b) return;
+  if (sprache.quelle === 'briefing:' + b.hash) { stoppeSprechen(); return; }
+  const k = bf.kurz[b.hash];
+  sprich(k && k.text ? k.text : ohneTitel(b.text), 'briefing:' + b.hash);
+});
 aktion('bf-filter', (q) => { bf.filter = q; merke('bf.filter', q); zeichneAnsicht(); });
 aktion('bf-kurz', async () => {
   const b = bf.offen;

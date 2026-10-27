@@ -192,6 +192,10 @@ function zeichneCockpit(w, teile, neu) {
         '<div class="ck-eingabe">' +
           '<div class="ck-vorschlaege" id="ck-vorschlaege" role="group" aria-label="' + esc(uebersetze('Vorschläge')) + '"></div>' +
           '<form class="ck-zeile" id="ck-form">' +
+            // Push-to-Talk (C10): nur mit eingerichteter Erkennung sichtbar (spracheKnoepfe).
+            '<button type="button" class="ck-ptt" data-aktion="mikro" data-wert="cockpit" aria-pressed="false" aria-label="' + esc(uebersetze('Sprechen (Strg+Leertaste)')) + '" hidden><span class="punkt" aria-hidden="true"></span><span class="l">' + esc(uebersetze('Sprechen')) + '</span></button>' +
+            // Sichtbar nur, solange Cira vorliest (spracheKnoepfe); Esc tut dasselbe.
+            '<button type="button" class="ck-ptt ck-stopp" data-aktion="vorlesen-stopp" title="Esc" hidden><span class="quadrat" aria-hidden="true"></span><span>' + esc(uebersetze('Vorlesen stoppen')) + '</span></button>' +
             '<input id="ck-q" autocomplete="off" maxlength="2000" placeholder="' + esc(uebersetze('Frag nach Zahlen, starte Skills, schreib Rechnungen …')) + '" aria-label="' + esc(uebersetze('Frage an Cira im Cockpit')) + '">' +
             '<button type="submit" class="ck-senden">' + esc(uebersetze('Senden')) + '</button>' +
           '</form>' +
@@ -217,6 +221,7 @@ function zeichneCockpit(w, teile, neu) {
     q.value = '';
     frageCira(text, ckKanal);
   });
+  spracheKnoepfe();
   setzeBuehne(Number(lies('cockpit.buehne', BUEHNE.standard)));
   zeichneOrb();
   zeichneSzene();
@@ -638,7 +643,7 @@ function zeichneCkVerlauf() {
   if (ck.verlauf && !liste.length) { el.innerHTML = '<span class="ck-leer">' + esc(uebersetze('Frag mich nach Zahlen — oder tipp einen Vorschlag unten an. Direkte Antworten (T0) kosten nichts.')) + '</span>'; return; }
   el.innerHTML = liste.map((m, i) => {
     if (m.rolle === 'ich') {
-      return '<div class="ck-msg ich"><span class="ck-msg-kopf">' + esc(uebersetze('Du')) + ' · <span class="mono">' + esc(uhrVon(m.zeit)) + '</span></span><span class="ck-blase-du">' + esc(m.text) + '</span></div>';
+      return '<div class="ck-msg ich"><span class="ck-msg-kopf">' + esc(uebersetze('Du')) + ' · <span class="mono">' + esc(uhrVon(m.zeit)) + '</span>' + (m.gesprochen ? ' · ' + esc(uebersetze('gesprochen')) : '') + '</span><span class="ck-blase-du">' + esc(m.text) + '</span></div>';
     }
     if (m.laeuft && !m.text) return '<div class="ck-msg cira"><span class="ck-denkt"><b>' + esc(CIRA_NAME) + '</b> ' + esc(m.uebernimmt ? m.uebernimmt + ' …' : uebersetze('denkt nach …')) + '</span></div>';
     const meta = '<span class="ck-msg-kopf"><b>' + esc(CIRA_NAME) + '</b><span class="mono">' + esc(uhrVon(m.zeit)) + '</span>' +

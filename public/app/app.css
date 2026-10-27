@@ -2613,6 +2613,18 @@ textarea.inline-eingabe { line-height: 1.5; resize: vertical; }
 .ck-zeile input:focus-visible { outline: none; border-color: var(--accent-rand); box-shadow: var(--gluehen); }
 .ck-senden { height: 40px; padding: 0 16px; border: 0; border-radius: var(--r-knopf); background: var(--accent); color: var(--auf-akzent); font-size: 10.5px; font-weight: 600; letter-spacing: .2em; text-transform: uppercase; cursor: pointer; font-family: inherit; }
 .ck-senden:focus-visible { outline: 2px solid var(--accent-hell); outline-offset: 2px; }
+/* Push-to-Talk (C10, README §5.3): Hoehe 40, Punkt 8 px. Aufnahme = Akzentflaeche + „Hört zu“ + aria-pressed, kein Blinken. */
+.ck-ptt { height: 40px; padding: 0 14px; display: inline-flex; align-items: center; gap: 8px; flex: 0 0 auto; border: 1px solid var(--line); border-radius: var(--r-knopf); background: var(--feld); color: var(--text-dim); font-size: 10.5px; font-weight: 600; letter-spacing: .2em; text-transform: uppercase; cursor: pointer; font-family: inherit; }
+.ck-ptt[hidden], .dock-mikro[hidden] { display: none; }
+.ck-ptt .punkt, .dock-mikro .punkt { width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex: 0 0 auto; }
+.ck-ptt:hover { border-color: var(--accent-rand); color: var(--text); }
+.ck-ptt.an, .dock-mikro.an { background: var(--accent); border-color: var(--accent); color: var(--auf-akzent); }
+.ck-ptt:focus-visible, .dock-mikro:focus-visible { outline: 2px solid var(--accent-hell); outline-offset: 2px; }
+.dock-mikro { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--text-dim); cursor: pointer; }
+.dock-mikro:hover { border-color: var(--accent-rand); color: var(--text); }
+.ck-stopp[hidden], .dock-stopp[hidden] { display: none; }
+.ck-stopp .quadrat, .dock-stopp .quadrat { width: 8px; height: 8px; border-radius: 1px; background: currentColor; flex: 0 0 auto; }
+.ck-stopp, .dock-stopp { color: var(--accent-text); border-color: var(--accent-rand); }
 .ck-leiste { width: 320px; flex: 0 0 auto; border-left: 1px solid var(--line-soft); padding: 20px; display: flex; flex-direction: column; gap: 24px; background: var(--leiste-rechts); overflow-y: auto; }
 .ck-block { display: flex; flex-direction: column; gap: 10px; }
 .ck-block[hidden] { display: none; }

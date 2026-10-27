@@ -35,7 +35,18 @@
     "nichtStoerenAb": "22:00",
     "nichtStoerenBis": "07:00",
     "orbStil": "partikel",
-    "benachrichtigungDesktop": false
+    "benachrichtigungDesktop": false,
+    "stimmeAnbieter": "browser",
+    "antwortenVorlesen": "auto",
+    "stimmeElevenlabs": "",
+    "stimmeModellKurz": "eleven_flash_v2_5",
+    "stimmeModellLang": "eleven_multilingual_v2",
+    "stimmeMonatslimitZeichen": 10000
+  },
+  "//sprache": "Cira hoert und spricht (C10). stt: Spracherkennung mit einem lokalen whisper-server (whisper.cpp). Entweder exe + modell (Pfade zu whisper-server.exe und einer ggml-Modelldatei) — dann startet c2invoice den Server beim ersten Push-to-Talk selbst auf port (Standard 8178) und beendet ihn nach leerlaufMinuten ohne Anfrage — oder url eines schon laufenden Servers (nur 127.0.0.1/localhost). Leer = kein Mikrofon-Knopf. tts.elevenlabs.apiKeyEnvVar: Name der Umgebungsvariablen mit dem ElevenLabs-Schluessel (der Schluessel selbst steht nie in dieser Datei). Stimme, Modelle, Vorlesen und Zeichenlimit unter Einstellungen -> Cira -> Stimme (cira.stimme*, cira.antwortenVorlesen). Alles hier nur in dieser Datei; Anleitung in der README (Stimme einrichten / Voice).",
+  "sprache": {
+    "stt": { "exe": "", "modell": "", "url": "", "port": 8178, "leerlaufMinuten": 10 },
+    "tts": { "elevenlabs": { "apiKeyEnvVar": "ELEVENLABS_API_KEY" } }
   },
   "//vault": "Optionen fuer den Arbeitsbereich mit art 'vault' (Briefings, Gedaechtnis, Merke dir). Der Ordner selbst steht dort unter pfad. briefingsOrdner: Unterordner mit den Berichten (nur hier aenderbar). gruppen: Farbgruppen im Gedaechtnis-Graph, je { query: 'tag:#name' oder 'path:ordner', farbe: '#rrggbb' }; leer = die Gruppen aus .obsidian/graph.json. quellen: Regeln fuer die Quelle eines Briefings, je { muster, name, farbe }; im Muster steht * fuer beliebige Zeichen und JJJJ-MM-TT fuer ein Datum; leer = eingebaute Regeln (c2invoice, Vault, Posteingang). gruppen und quellen auch unter Einstellungen -> Vault. Den Projekt-Tag fuer 'Merke dir' traegt der Arbeitsbereich unter tag.",
   "vault": {

@@ -4632,7 +4632,11 @@ function testBelegKennzahlen() {
     rechnung.bucheZahlung(db, { nr: b.nr, datum: heute, betrag_eur: 10 });
     rechnung.storniere(db, d.nr);
     // a ist laut Abschrift 3 Tage vor der Zahlung gestellt worden.
-    const vor3 = new Date(Date.now() - 3 * 86400000).toISOString();
+    // Kalendertage statt 72 h: nach einer Zeitumstellung landen 72 h zwischen
+    // 23 und 24 Uhr auf dem Folgetag, und die Dauer kippt auf 2.
+    const vor3d = new Date();
+    vor3d.setDate(vor3d.getDate() - 3);
+    const vor3 = vor3d.toISOString();
     db.prepare('UPDATE invoices SET erstellt_am = ? WHERE nr = ?').run(vor3, a.nr);
 
     const K = rechnung.kennzahlen(db, { from: '2000-01-01', to: '2999-12-31' });
@@ -7370,6 +7374,7 @@ async function main() {
     ...require('./cira/c9b')({ dbmod, openDbs, configGeschuetzt }),
     ...require('./cira/c9a')({ dbmod, openDbs }),
     ...require('./cira/c9c')({ dbmod, openDbs }),
+    ...require('./cira/c10')({ dbmod, openDbs, configGeschuetzt }),
   ]) {
     try {
       await fn();

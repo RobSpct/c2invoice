@@ -784,7 +784,10 @@ function zeichneDock() {
     '<div class="dock-zeile dock-spur" id="dock-spur"></div>' +
     '<div class="dock-verlauf" id="dock-verlauf" aria-live="polite"></div>' +
     '<div class="dock-fuss"><div class="vorschlaege" id="dock-vorschlaege" role="group" aria-label="' + esc(uebersetze('Vorschläge')) + '"></div>' +
-      '<form class="dock-eingabe" id="dock-form"><input id="dock-q" autocomplete="off" maxlength="2000" aria-label="' + esc(uebersetze('Frage an Cira')) + '">' +
+      '<form class="dock-eingabe" id="dock-form">' +
+        '<button type="button" class="dock-mikro" data-aktion="mikro" data-wert="dock" aria-pressed="false" aria-label="' + esc(uebersetze('Sprechen (Strg+Leertaste)')) + '" title="' + esc(uebersetze('Sprechen (Strg+Leertaste)')) + '" hidden><span class="punkt" aria-hidden="true"></span></button>' +
+        '<button type="button" class="dock-mikro dock-stopp" data-aktion="vorlesen-stopp" aria-label="' + esc(uebersetze('Vorlesen stoppen')) + '" title="' + esc(uebersetze('Vorlesen stoppen')) + ' (Esc)" hidden><span class="quadrat" aria-hidden="true"></span></button>' +
+        '<input id="dock-q" autocomplete="off" maxlength="2000" aria-label="' + esc(uebersetze('Frage an Cira')) + '">' +
         '<button type="submit" class="senden">' + esc(uebersetze('Senden')) + '</button></form></div>';
   el.querySelector('#dock-form').addEventListener('submit', (e) => {
     e.preventDefault();
@@ -795,6 +798,7 @@ function zeichneDock() {
     frageCira(text);
   });
   ciraModus();
+  spracheKnoepfe();
   zeichneDockKontext();
   zeichneSpur();
   zeichneVerlauf();
@@ -836,7 +840,7 @@ function zeichneVerlauf() {
   if (!el) return;
   const blase = (m) => {
     const ich = m.rolle === 'ich';
-    const meta = !ich && m.stufe ? '<span class="meta mono">' + esc([m.stufe, m.quelle, m.kosten_eur ? eur(m.kosten_eur) : (m.laeuft ? '' : uebersetze('kostenlos'))].filter(Boolean).join(' · ')) + '</span>' : '';
+    const meta = ich && m.gesprochen ? '<span class="meta mono">' + esc(uebersetze('gesprochen')) + '</span>' : !ich && m.stufe ? '<span class="meta mono">' + esc([m.stufe, m.quelle, m.kosten_eur ? eur(m.kosten_eur) : (m.laeuft ? '' : uebersetze('kostenlos'))].filter(Boolean).join(' · ')) + '</span>' : '';
     const spr = !ich && m.sprung && m.sprung.length ? '<div class="spruenge">' + m.sprung.map((x) =>
       '<button type="button" class="knopf klein geist" data-aktion="gehe" data-wert="' + esc(String(x.ziel || '').replace(/^#\/?/, '')) + '">' + esc(uebersetze(x.l)) + '</button>').join('') + '</div>' : '';
     const text = m.laeuft && !m.text ? (m.uebernimmt || uebersetze('Denkt nach')) + ' …' : m.text;
@@ -863,17 +867,18 @@ function zeichneVorschlaege() {
 // danach(antwort) laeuft, wenn die Antwort fertig ist.
 const DOCK_KANAL = { kanal: 'dock', liste: () => cira.verlauf || (cira.verlauf = []), zeichne: () => zeichneVerlauf(), danach: () => ladeVorschlaege() };
 // Eine Frage: Zeilen des Stroms sofort zeigen, die letzte ersetzt alles.
-async function frageCira(text, k = DOCK_KANAL) {
+// gesprochen: kam per Push-to-Talk (C10) — Marke im Verlauf, Antwort wird vorgelesen (E5).
+async function frageCira(text, k = DOCK_KANAL, { gesprochen = false } = {}) {
   if (cira.laeuft) { toast(uebersetze('Cira antwortet noch — gleich nochmal.'), 'info'); return; }
   cira.laeuft = true;
   const jetzt = new Date().toISOString();
   const antwort = { rolle: 'cira', text: '', laeuft: true, zeit: jetzt };
-  k.liste().push({ rolle: 'ich', text, zeit: jetzt }, antwort);
+  k.liste().push({ rolle: 'ich', text, zeit: jetzt, gesprochen }, antwort);
   k.zeichne();
   ciraModus('denkt');
   const kontext = { screen: route().name, art: cira.kontext ? cira.kontext.art : null, id: cira.kontext ? cira.kontext.id : null, titel: kontextText(), arbeitsbereich: lies('cockpit.arbeitsbereich', '') || null };
   try {
-    const r = await fetch('/api/cira/frage', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text, kanal: k.kanal, kontext }) });
+    const r = await fetch('/api/cira/frage', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text, kanal: k.kanal, kontext, gesprochen }) });
     if (!r.ok || !r.body) throw new Error((await r.json().catch(() => ({}))).error || 'HTTP ' + r.status);
     const leser = r.body.getReader();
     const dec = new TextDecoder();
@@ -896,7 +901,7 @@ async function frageCira(text, k = DOCK_KANAL) {
           antwort.uebernimmt = uebersetze(rolle) + ' ' + uebersetze('übernimmt') + ' (' + z.modell + ')';
         }
         else if (z.typ === 'text') antwort.text += z.text;
-        else if (z.typ === 'fertig') Object.assign(antwort, { id: z.id, text: z.antwort, stufe: z.stufe, quelle: z.quelle, kosten_eur: z.kosten_eur, sprung: z.sprung, szene: z.szene || null, zustand: z.zustand || null, route: z.route || null, angebot: z.angebot || null });
+        else if (z.typ === 'fertig') Object.assign(antwort, { id: z.id, text: z.antwort, stufe: z.stufe, quelle: z.quelle, kosten_eur: z.kosten_eur, sprung: z.sprung, szene: z.szene || null, zustand: z.zustand || null, route: z.route || null, angebot: z.angebot || null, vorlesen: z.vorlesen === true });
         // Die Zwischenstufe nennt ein Modell; nach einem Fehler hat es nicht geantwortet.
         else if (z.typ === 'fehler') Object.assign(antwort, { text: z.error || uebersetze('Fehler'), fehler: true, stufe: '' });
         k.zeichne();
@@ -909,12 +914,16 @@ async function frageCira(text, k = DOCK_KANAL) {
     antwort.laeuft = false;
     cira.laeuft = false;
     k.zeichne();
-    // Der Orb spricht die Antwort mit (Huellkurve aus dem Text), danach ruht er.
-    const orbs = [...document.querySelectorAll('cira-orb')];
-    const ms = !antwort.fehler && orbs.length ? Math.max(...orbs.map((o) => (typeof o.speak === 'function' ? o.speak(antwort.text) || 0 : 0))) : 0;
-    cira.modus = ms ? 'spricht' : 'ruht';
-    ciraModus();
-    if (ms) setTimeout(() => { if (!cira.laeuft) ciraModus('ruht'); }, ms);
+    // Vorlesen (C10): die Antwort spricht genau einmal, die Orbs zeigen den Pegel.
+    // Sonst spricht der Orb sie stumm mit (Huellkurve aus dem Text), danach ruht er.
+    if (!antwort.fehler && sprache.sollVorlesen(gesprochen, antwort.vorlesen)) sprich(antwort.text);
+    else {
+      const orbs = [...document.querySelectorAll('cira-orb')];
+      const ms = !antwort.fehler && orbs.length ? Math.max(...orbs.map((o) => (typeof o.speak === 'function' ? o.speak(antwort.text) || 0 : 0))) : 0;
+      cira.modus = ms ? 'spricht' : 'ruht';
+      ciraModus();
+      if (ms) setTimeout(() => { if (!cira.laeuft && !sprache.aktiv()) ciraModus('ruht'); }, ms);
+    }
     k.danach(antwort);
   }
 }
@@ -1297,7 +1306,10 @@ function start() {
   });
   window.addEventListener('keydown', (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); if (palette) schliessePalette(); else oeffnePalette(); }
-    else if (e.ctrlKey && !e.altKey && !e.metaKey && e.code === 'Space') { e.preventDefault(); oeffneDock(); }
+    // C10 (E3): im Cockpit oder offenen Dock mit leerem Feld nimmt Strg+Leertaste auf, sonst wie bisher.
+    else if (e.ctrlKey && !e.altKey && !e.metaKey && e.code === 'Space') { e.preventDefault(); if (!spracheTaste()) oeffneDock(); }
+    // Esc stoppt zuerst Aufnahme oder Vorlesen, erst der naechste schliesst Glocke oder Dock.
+    else if (e.key === 'Escape' && !e.defaultPrevented && !palette && !document.querySelector('.dialog-grund') && spracheAbbrechen()) e.preventDefault();
     else if (e.key === 'Escape' && state.glockeOffen) { state.glockeOffen = false; zeichneGlocke(); zeichneKopf(); }
     // Esc schliesst das Dock nur, wenn kein Dialog darueber liegt.
     else if (e.key === 'Escape' && cira.dockOffen && !palette && !document.querySelector('.dialog-grund')) oeffneDock(false);

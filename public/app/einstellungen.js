@@ -7,6 +7,15 @@
    Keine Pro-Abschnitte (R16); nicht Gebautes erscheint nicht. */
 
 Object.assign(EN, {
+  'Stimme': 'Voice', 'Spracherkennung': 'Speech recognition', 'eingerichtet · lokal mit whisper · Pfade nur in config.json (sprache.stt)': 'set up · local with whisper · paths only in config.json (sprache.stt)',
+  'Antworten vorlesen': 'Read answers aloud', 'Automatisch': 'Automatic', 'Immer': 'Always', 'Nie': 'Never',
+  'automatisch = wenn du gesprochen hast oder beim Tagesbericht': 'automatic = when you spoke or for the daily report',
+  'Browser · lokal': 'Browser · local', 'Der Text wird an ElevenLabs (USA) gesendet — auch Kundennamen und Beträge.': 'The text is sent to ElevenLabs (USA) — including customer names and amounts.',
+  'Browser-Stimme': 'Browser voice', 'Stimme dieses Browsers · gilt nur auf diesem Gerät': 'Voice of this browser · this device only', 'Standard des Browsers': 'Browser default',
+  'ElevenLabs-Stimme': 'ElevenLabs voice', 'ID einer Stimme deines Kontos · im Free-Plan nur die Standardstimmen, Voice-Library-Stimmen brauchen ein Abo · keine Stimme einer realen Person': 'ID of a voice in your account · free plan: default voices only, Voice Library voices need a subscription · no clone of a real person', 'Voice Library': 'Voice Library',
+  'Modell kurze Antworten': 'Model for short answers', 'unter 400 Zeichen': 'under 400 characters', 'Modell Briefings': 'Model for briefings', 'ab 400 Zeichen': 'from 400 characters',
+  'Monatslimit Zeichen': 'Monthly character limit', '1.000 bis 1.000.000 · dieser Monat bisher {n} Zeichen · danach Browser-Stimme': '1,000 to 1,000,000 · this month so far {n} characters · then browser voice',
+  'Zeichen': 'characters', 'Probesatz sprechen': 'Speak test sentence', 'Letzter Versuch': 'Last attempt', 'Hallo, ich bin Cira. So klinge ich.': 'Hello, I am Cira. This is how I sound.',
   'Ungültige Serverantwort': 'Invalid server response',
   'Verbindung zum Server abgebrochen — ob das Modell vollständig geladen ist, zeigt „Liste aktualisieren“.': 'Connection to the server lost — "Refresh list" shows whether the model downloaded completely.',
   'Laufzeit nicht erkannt': 'Runtime not detected',
@@ -162,7 +171,7 @@ const E_ABSCHNITTE = [
   { id: 'vorlagen', l: 'Positionsvorlagen', g: '', sub: 'füllen eine Position im Beleg-Editor vor', kw: 'vorlage position template' },
   { id: 'stammdaten', l: 'Stammdaten', g: 'Belege', sub: 'stehen auf jedem Beleg · Name und Anschrift sind Pflicht', stamm: true },
   // Cira (C2): Stufen T1/T2, Claude-Limit, Nicht stoeren. claude.exe nur in config.json.
-  { id: 'cira', l: 'Cira', g: 'Assistent', sub: 'Antwortstufen, Claude-Limit, Nicht stören', kw: 'cira assistent ollama claude limit modell anrede nicht stören assistant model quiet' },
+  { id: 'cira', l: 'Cira', g: 'Assistent', sub: 'Antwortstufen, Claude-Limit, Nicht stören', kw: 'cira assistent ollama claude limit modell anrede nicht stören stimme sprache mikrofon vorlesen elevenlabs whisper assistant model quiet voice speech microphone' },
   { id: 'darstellung', l: 'Darstellung', g: 'System', sub: 'Sprache, Theme und Bewegung', kw: 'sprache englisch deutsch bewegung animation language motion theme hell dunkel light dark' },
   // Geraetekopplung (S1): nur gekoppelte Geraete schreiben.
   { id: 'geraete', l: 'Geräte', g: '', sub: 'Gekoppelte Browser und Programme · nur sie dürfen schreiben', kw: 'gerät geräte koppeln kopplung sicherheit browser device pairing security' },
@@ -779,7 +788,37 @@ function ciraHtml() {
         '<span class="spur"></span>' + esc(uebersetze(c.benachrichtigungDesktop === true ? 'an' : 'aus')) + '</button>', 'cira:benachrichtigungDesktop') +
     zeile('Orb-Stil', esc(uebersetze('Bühne im Cockpit · Partikel oder ruhige Fläche')),
       segment('e-cira-orb', [['partikel', 'Partikel'], ['flaeche', 'Ruhige Fläche']], c.orbStil || 'partikel', 'Orb-Stil'), 'cira:orbStil') +
+    stimmeBlock(c, zeile, feld) +
     '<p class="faint ab-fuss">' + esc(uebersetze('Bewegung reduzieren und Startseite: Darstellung. Pfad zur claude.exe nur in config.json.')) + '</p>';
+}
+// Einstellungen → Cira → Stimme (C10). Pfade und Schluessel bleiben der Datei vorbehalten;
+// die Browser-Stimme ist Geraetesache (localStorage), alles andere geht ueber CIRA_FELDER.
+function stimmeBlock(c, zeile, feld) {
+  const sp = ez.cira.d.sprache || { stt: { bereit: false, grund: '' }, tts: { verbraucht: 0, bereit: true } };
+  const F = ez.cira.d.felder || {};
+  const wahl = (f, label) => '<select class="eingabe" data-cirafeld="' + f + '" aria-label="' + esc(uebersetze(label)) + '" aria-describedby="m-cira:' + f + '">' +
+    ((F[f] && F[f].wahl) || []).map((m) => '<option value="' + esc(m) + '"' + (m === c[f] ? ' selected' : '') + '>' + esc(m) + '</option>').join('') + '</select>';
+  const sprachTeil = istDE() ? 'de' : 'en';
+  const stimmen = typeof speechSynthesis === 'undefined' ? [] : speechSynthesis.getVoices().filter((v) => v.lang.slice(0, 2) === sprachTeil);
+  const gewaehlt = lies('stimme', '');
+  const el = c.stimmeAnbieter === 'elevenlabs';
+  return '<p class="ueberzeile e-stimme-titel">' + esc(uebersetze('Stimme')) + '</p>' +
+    zeile('Spracherkennung', esc(sp.stt.bereit ? uebersetze('eingerichtet · lokal mit whisper · Pfade nur in config.json (sprache.stt)') : (sp.stt.grund || '')), '') +
+    zeile('Antworten vorlesen', esc(uebersetze('automatisch = wenn du gesprochen hast oder beim Tagesbericht')),
+      segment('e-cira-vorlesen', [['auto', 'Automatisch'], ['immer', 'Immer'], ['nie', 'Nie']], c.antwortenVorlesen || 'auto', 'Antworten vorlesen'), 'cira:antwortenVorlesen') +
+    zeile('Stimme', esc(uebersetze('Der Text wird an ElevenLabs (USA) gesendet — auch Kundennamen und Beträge.')) + (el && sp.tts.grund ? ' · <b>' + esc(sp.tts.grund) + '</b>' : '') +
+        (el && !sp.tts.grund && sp.tts.letzterFehler ? ' · <b>' + esc(uebersetze('Letzter Versuch') + ' ' + uhrVon(sp.tts.letzterFehler.zeit) + ': ' + sp.tts.letzterFehler.grund) + '</b>' : ''),
+      segment('e-cira-stimme', [['browser', 'Browser · lokal'], ['elevenlabs', 'ElevenLabs']], c.stimmeAnbieter || 'browser', 'Stimme'), 'cira:stimmeAnbieter') +
+    zeile('Browser-Stimme', esc(uebersetze('Stimme dieses Browsers · gilt nur auf diesem Gerät')),
+      '<select class="eingabe" id="e-browserstimme" aria-label="' + esc(uebersetze('Browser-Stimme')) + '"><option value="">' + esc(uebersetze('Standard des Browsers')) + '</option>' +
+        stimmen.map((v) => '<option value="' + esc(v.voiceURI) + '"' + (v.voiceURI === gewaehlt ? ' selected' : '') + '>' + esc(v.name) + '</option>').join('') + '</select>') +
+    (el ? zeile('ElevenLabs-Stimme', esc(uebersetze('ID einer Stimme deines Kontos · im Free-Plan nur die Standardstimmen, Voice-Library-Stimmen brauchen ein Abo · keine Stimme einer realen Person')) + ' · <a href="https://elevenlabs.io/app/voice-library" target="_blank" rel="noopener noreferrer">' + esc(uebersetze('Voice Library')) + '</a>',
+        feld('stimmeElevenlabs', ' maxlength="40" spellcheck="false" style="max-width:240px"', 'ElevenLabs-Stimme'), 'cira:stimmeElevenlabs') +
+      zeile('Modell kurze Antworten', esc(uebersetze('unter 400 Zeichen')), wahl('stimmeModellKurz', 'Modell kurze Antworten'), 'cira:stimmeModellKurz') +
+      zeile('Modell Briefings', esc(uebersetze('ab 400 Zeichen')), wahl('stimmeModellLang', 'Modell Briefings'), 'cira:stimmeModellLang') +
+      zeile('Monatslimit Zeichen', esc(fuelle('1.000 bis 1.000.000 · dieser Monat bisher {n} Zeichen · danach Browser-Stimme', { n: num(sp.tts.verbraucht || 0) })),
+        feld('stimmeMonatslimitZeichen', ' inputmode="numeric" style="max-width:120px"', 'Monatslimit Zeichen') + '<span class="faint">' + esc(uebersetze('Zeichen')) + '</span>', 'cira:stimmeMonatslimitZeichen') : '') +
+    zeile('', '', '<button type="button" class="knopf klein" data-aktion="e-cira-probe">' + esc(uebersetze('Probesatz sprechen')) + '</button>');
 }
 async function speichereCira(feld, wert) {
   const key = 'cira:' + feld;
@@ -795,6 +834,8 @@ async function speichereCira(feld, wert) {
     kz.ok[mkey] = Date.now();
     blendeOkAus(mkey, () => zeigeMeldung('m-' + mkey, mkey));
     if (typeof ladeCira === 'function') ladeCira();
+    // Stimme: Status (bereit, Grund, Zeichen) kommt aus sprache.js, Knoepfe und Vorlese-Regel folgen ihm.
+    if (/^(stimme|antwortenVorlesen)/.test(feld)) sprache.lade().then((st) => { if (st && ez.cira.d) { ez.cira.d.sprache = st; zeichneAnsicht(); } });
   } catch (err) {
     kz.fehler[mkey] = err.message;
     delete kz.ok[mkey];
@@ -943,6 +984,11 @@ aktion('e-laden-ja', async () => {
 aktion('e-cira-claude', () => speichereCira('claudeErlaubt', !(ez.cira.d && ez.cira.d.cira.claudeErlaubt === true)));
 aktion('e-cira-modell', (m) => speichereCira('claudeModell', m));
 aktion('e-cira-orb', (s) => speichereCira('orbStil', s));
+aktion('e-cira-vorlesen', (s) => speichereCira('antwortenVorlesen', s));
+aktion('e-cira-stimme', (s) => speichereCira('stimmeAnbieter', s));
+aktion('e-cira-probe', () => sprich(uebersetze('Hallo, ich bin Cira. So klinge ich.'), 'probe'));
+// Die Stimmenliste kommt im Browser oft erst nach dem ersten Zeichnen.
+if (typeof speechSynthesis !== 'undefined') speechSynthesis.addEventListener('voiceschanged', () => { if (route().name === 'einstellungen' && document.getElementById('e-browserstimme')) zeichneAnsicht(); });
 // Einschalten nur mit Erlaubnis des Browsers: sonst stuende "an" da und es kaeme nie etwas.
 aktion('e-cira-desktop', async () => {
   const an = !(ez.cira.d && ez.cira.d.cira.benachrichtigungDesktop === true);
@@ -1133,6 +1179,7 @@ function zeichneEinstellungen(w, teile) {
     // Textfelder melden change beim Verlassen oder Enter, das Farbfeld beim Schliessen der Auswahl.
     if (e.target.dataset.abfeld) return speichereArbeitsbereich(e.target.dataset.ab, e.target.dataset.abfeld, e.target.value.trim());
     if (e.target.dataset.cirafeld) return speichereCira(e.target.dataset.cirafeld, e.target.value.trim());
+    if (e.target.id === 'e-browserstimme') { merke('stimme', e.target.value); return; }
     if (e.target.id !== 'e-csv-von' && e.target.id !== 'e-csv-bis') return;
     const von = document.getElementById('e-csv-von').value, bis = document.getElementById('e-csv-bis').value;
     if (!von || !bis) return;
