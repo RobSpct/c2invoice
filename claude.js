@@ -27,7 +27,8 @@ function findeClaude(eingetragen) {
 }
 
 // Umgebung des Kindprozesses ohne Geheimnisse (auch nicht die aus "doppler run").
-const GEHEIM = /(TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|PRIVATE_KEY|DOPPLER|CREDENTIAL)/i;
+// PASS deckt PASSWORD/PASSWORT/PASSWD und SMTP_PASS ab (Passwort-Variablen der Mail-Konfiguration, C11a).
+const GEHEIM = /(TOKEN|SECRET|PASS|PASSWORD|PASSWORT|PASSWD|API_?KEY|PRIVATE_KEY|DOPPLER|CREDENTIAL)/i;
 function kindUmgebung(env = process.env) {
   const aus = {};
   for (const [k, v] of Object.entries(env)) if (!GEHEIM.test(k)) aus[k] = v;

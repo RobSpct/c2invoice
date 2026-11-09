@@ -211,7 +211,8 @@ function erzeuge({ db, vaultPfad, ordnerName = () => 'Briefings', quellenEigen =
     const [y, m] = monat.split('-').map(Number);
     const von = monat + '-01', bis = isoTag(new Date(y, m, 0));
     const o = { from: von, to: bis };
-    const k = metrics.kennzahlen(metrics.byTicket(db, o).concat(metrics.ohneTicket(db, o)), rechnung.abrechnung(db), zeit.kennzahlenZusatz(db, o));
+    const zeilen = metrics.byTicket(db, o).concat(metrics.ohneTicket(db, o));
+    const k = metrics.kennzahlen(zeilen, rechnung.abrechnung(db), { ...zeit.kennzahlenZusatz(db, o), projektKonto: rechnung.projektKonten(db, zeilen, o) });
     const rs = metrics.rechnungsSummen(rechnung.liste(db), { von, bis });
     // Nur Kuerzel der Arbeitsbereiche nach aussen (E13); nicht zugeordnete Projekte als Summe.
     const kuerzel = new Map(bereiche().filter((a) => a.projekt && a.kuerzel).map((a) => [a.projekt, a.kuerzel]));

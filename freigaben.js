@@ -68,6 +68,19 @@ function ersetze(db, daten) {
   return neu;
 }
 
+// Offene Freigaben dieser Art und dieses Bezugs sind ohne Klick erledigt (ein spaeterer Lauf lief durch,
+// der Versand ist wieder bereit). Wie bei ersetze: Protokoll, Ereignis, Zaehler.
+function schliesse(db, { art, bezug, hinweis, quelle }) {
+  const offen = db.prepare("SELECT id FROM freigabe WHERE art = ? AND bezug = ? AND status = 'offen'").all(art, String(bezug));
+  for (const { id } of offen) {
+    if (!db.prepare("UPDATE freigabe SET status = 'erledigt', erledigt_am = ?, hinweis = ? WHERE id = ? AND status = 'offen'").run(jetzt(), hinweis, id).changes) continue;
+    protokoll(db, { quelle, art: art + ':geschlossen', objekt: String(bezug), vorher: { id, status: 'offen' }, nachher: { status: 'erledigt' } });
+    sende('freigabe', { id, status: 'erledigt' });
+  }
+  if (offen.length) meldeZaehler(db);
+  return offen.length;
+}
+
 function liste(db, { status = 'offen' } = {}) {
   const alle = status === 'alle';
   if (!alle && !['offen', 'erledigt', 'abgelehnt', 'fehler'].includes(status)) throw new Error('Status: offen, erledigt, abgelehnt, fehler oder alle.');
@@ -122,4 +135,4 @@ function aufraeumen(db) {
   return db.prepare("UPDATE freigabe SET status = 'fehler', hinweis = 'Server wurde waehrend der Aktion beendet; Ergebnis pruefen.' WHERE status = 'laeuft'").run().changes;
 }
 
-module.exports = { aufraeumen, registriere, anlegen, ersetze, liste, entscheide, offenAnzahl, protokoll, REGISTRY };
+module.exports = { aufraeumen, registriere, anlegen, ersetze, schliesse, liste, entscheide, offenAnzahl, protokoll, REGISTRY };

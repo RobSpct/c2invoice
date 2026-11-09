@@ -4,6 +4,7 @@
 // Herkunfts-Kopfzeilen faelscht. Der Kopplungscode erscheint nur auf dem Desktop.
 const assert = require('node:assert');
 const path = require('node:path');
+const verwirf = require('../verwirf');
 const { EventEmitter } = require('node:events');
 
 module.exports = ({ dbmod, openDbs }) => {
@@ -128,19 +129,19 @@ module.exports = ({ dbmod, openDbs }) => {
     const post = (p, kopf = gefaelscht, body = '{}', method = 'POST') => fetch(basis + p, { method, headers: kopf, body });
     try {
       for (const p of ['/api/einstellungen', '/api/stammdaten', '/api/sitzung', '/api/freigaben/1/entscheide', '/api/rechnung', '/api/saetze', '/api/cira/frage', '/api/refresh']) {
-        const r = await post(p);
+        const r = await verwirf(post(p));
         assert.strictEqual(r.status, 401, p + ' ohne Geraet: ' + r.status);
         assert.strictEqual(r.headers.get('x-c2invoice-kopplung'), 'noetig', p + ': Kopplungs-Kopfzeile fehlt');
       }
       // Andere Methoden auch; fremde Herkunft schon vorher 403.
-      assert.strictEqual((await post('/api/einstellungen', gefaelscht, '{}', 'PUT')).status, 401, 'PUT ohne Geraet');
-      assert.strictEqual((await post('/api/einstellungen', { ...gefaelscht, 'sec-fetch-site': 'cross-site' }, '{}', 'DELETE')).status, 403, 'DELETE fremder Herkunft');
+      assert.strictEqual((await verwirf(post('/api/einstellungen', gefaelscht, '{}', 'PUT'))).status, 401, 'PUT ohne Geraet');
+      assert.strictEqual((await verwirf(post('/api/einstellungen', { ...gefaelscht, 'sec-fetch-site': 'cross-site' }, '{}', 'DELETE'))).status, 403, 'DELETE fremder Herkunft');
       // Lesen bleibt frei; GET loest keinen Abgleich mehr aus.
-      assert.strictEqual((await fetch(basis + '/api/zaehler')).status, 200);
-      assert.notStrictEqual((await fetch(basis + '/api/refresh')).status, 200, 'GET /api/refresh loest noch den Abgleich aus');
+      assert.strictEqual((await verwirf(fetch(basis + '/api/zaehler'))).status, 200);
+      assert.notStrictEqual((await verwirf(fetch(basis + '/api/refresh'))).status, 200, 'GET /api/refresh loest noch den Abgleich aus');
       assert.deepStrictEqual(await (await fetch(basis + '/api/kopplung/status')).json(), { gekoppelt: false, geraet: null, schutz: true });
       // Der Hook prueft sein eigenes Geheimnis (401 ohne Kopplungs-Kopfzeile).
-      const h = await post('/api/hook');
+      const h = await verwirf(post('/api/hook'));
       assert.ok(!h.headers.get('x-c2invoice-kopplung'), 'Hook verlangt ein Geraet');
       // Kopplung ueber HTTP: Code nie in der Antwort; Browser bekommt nur ein HttpOnly-Cookie.
       const st = await post('/api/kopplung/start');
@@ -149,7 +150,7 @@ module.exports = ({ dbmod, openDbs }) => {
       assert.ok(!stText.includes(codes[0]), 'Code in der Antwort');
       const { kopplung } = JSON.parse(stText);
       // Ein zweiter Start ohne ID (fremder Prozess) kippt die laufende Kopplung nicht.
-      assert.strictEqual((await post('/api/kopplung/start')).status, 409);
+      assert.strictEqual((await verwirf(post('/api/kopplung/start'))).status, 409);
       const be = await post('/api/kopplung/bestaetigen', gefaelscht, JSON.stringify({ kopplung, code: codes[0], name: 'Test' }));
       const beText = await be.text();
       assert.strictEqual(be.status, 200, beText);
@@ -160,25 +161,25 @@ module.exports = ({ dbmod, openDbs }) => {
       const token = sc.match(/c2i_geraet=([\w-]+)/)[1];
       const mitCookie = { ...gefaelscht, cookie: 'c2i_geraet=' + token };
       // Ohne Nebenwirkung: ein unbekanntes Geraet entfernen kommt am Schutz vorbei und endet mit 404.
-      const e = await post('/api/geraet/999999/entfernen', mitCookie);
+      const e = await verwirf(post('/api/geraet/999999/entfernen', mitCookie));
       assert.strictEqual(e.status, 404, 'gekoppelt, trotzdem ' + e.status);
       assert.strictEqual((await (await fetch(basis + '/api/kopplung/status', { headers: { cookie: 'c2i_geraet=' + token } })).json()).gekoppelt, true);
       const liste = await (await fetch(basis + '/api/geraete', { headers: { cookie: 'c2i_geraet=' + token } })).json();
       assert.ok(liste.geraete.some((g) => g.dieses && g.name === 'Test') && !JSON.stringify(liste).includes(token), 'Liste falsch oder mit Token');
       // Entfernen (sich selbst): Cookie geloescht, danach wieder 401.
-      const weg = await post('/api/geraet/' + liste.geraete[0].id + '/entfernen', mitCookie);
+      const weg = await verwirf(post('/api/geraet/' + liste.geraete[0].id + '/entfernen', mitCookie));
       assert.strictEqual(weg.status, 200);
       assert.match(weg.headers.get('set-cookie') || '', /Max-Age=0/);
       assert.match(weg.headers.get('set-cookie') || '', /Partitioned; Path=\/; Max-Age=0/, 'eingebettetes Cookie bleibt nach dem Entfernen');
-      assert.strictEqual((await post('/api/geraet/999999/entfernen', mitCookie)).status, 401, 'entferntes Geraet schreibt noch');
+      assert.strictEqual((await verwirf(post('/api/geraet/999999/entfernen', mitCookie))).status, 401, 'entferntes Geraet schreibt noch');
       // Programm (client): Token einmal im Koerper, als Kopfzeile nutzbar.
       const st2 = JSON.parse(await (await post('/api/kopplung/start')).text());
       const cl = await (await post('/api/kopplung/bestaetigen', gefaelscht, JSON.stringify({ kopplung: st2.kopplung, code: codes[1], client: true, name: 'Jarvis' }))).json();
       assert.ok(cl.token, 'client ohne Token');
-      assert.strictEqual((await post('/api/geraet/999999/entfernen', { ...gefaelscht, 'x-c2invoice-geraet': cl.token })).status, 404);
+      assert.strictEqual((await verwirf(post('/api/geraet/999999/entfernen', { ...gefaelscht, 'x-c2invoice-geraet': cl.token }))).status, 404);
       // Ein DB-Fehler in der Pruefung ist kein "nicht gekoppelt" (kein Kopplungsdialog, sondern 500).
       s.setzeGeraeteDienst({ ...d, geraet() { throw new Error('database is locked'); } });
-      const kaputt = await post('/api/einstellungen');
+      const kaputt = await verwirf(post('/api/einstellungen'));
       assert.strictEqual(kaputt.status, 500, 'DB-Fehler als ' + kaputt.status);
       assert.ok(!kaputt.headers.get('x-c2invoice-kopplung'), 'DB-Fehler oeffnet den Kopplungsdialog');
     } finally {

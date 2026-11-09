@@ -150,7 +150,7 @@ async function refresh({ force = false } = {}) {
   }
   try {
     const res = await fetch(LITELLM_URL, { signal: AbortSignal.timeout(10000) });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
+    if (!res.ok) { await res.body?.cancel().catch(() => {}); throw new Error('HTTP ' + res.status); }
     const prices = normalizeLiteLLM(await res.json());
     if (Object.keys(prices).length === 0) throw new Error('leere Preisliste');
     table = prices;

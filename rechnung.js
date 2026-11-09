@@ -9,7 +9,10 @@
 // das bereits beim Kunden liegt.
 const fs = require('node:fs');
 const path = require('node:path');
-const { execFile, execFileSync } = require('node:child_process');
+// execFile ueber das Modulobjekt (nicht entpackt): der Selfcheck prueft so die Kind-Umgebung des Drucks.
+const childProcess = require('node:child_process');
+const { execFileSync } = childProcess;
+const { kindUmgebung } = require('./claude');
 
 const config = require('./config.json');
 const metrics = require('./metrics');
@@ -56,6 +59,8 @@ function pruefeStammdaten() {
 // Glaetten wird daraus 8,07 statt 8,08 (Toolcheck 15.10., H1).
 // Netto = Summe der gerundeten Positionen (siehe dokument()).
 const nettoAus = (positionen) => rund2(positionen.reduce((s, p) => s + (Number(p.betrag_eur) || 0), 0));
+// Alle Stunden einer Rechnung, Kulanz eingeschlossen: was pruefeErwartet gegen die Vorschau haelt.
+const stundenSumme = (positionen) => rund2(positionen.reduce((s, p) => s + (Number(p.stunden) || 0), 0));
 
 function rund2(n) {
   const x = Number(n) || 0;
@@ -79,9 +84,10 @@ const EMPFAENGER_ZUSATZ = {
   kaeufer_referenz: { max: 80, kontakt: 'kaeuferReferenz', label: 'Käuferreferenz' },
   land: { max: 2, kontakt: 'land', label: 'Land', form: /^[A-Za-z]{2}$/, gross: true },
   lieferantennummer: { max: 60, kontakt: 'lieferantennummer', label: 'Lieferantennummer' },
-  // Kommt aus dem Kontakt (dort automatisch, wenn keine eigene vergeben ist).
+  // Nur aus dem Kontakt (dort beim Anlegen fest vergeben); eine mitgeschickte
+  // wird ignoriert, ohne Kontakt traegt die Rechnung keine (C12 R6/R7).
   // Fuellt in der E-Rechnung die Kaeuferreferenz, wenn der Kunde keine nennt.
-  kundennummer: { max: 30, kontakt: 'kundennummer', label: 'Kundennummer' },
+  kundennummer: { max: 30, kontakt: 'kundennummer', label: 'Kundennummer', nurKontakt: true },
   // Je Rechnung, nicht je Kunde: steht deshalb an keinem Kontakt.
   bestellnummer: { max: 60, kontakt: null, label: 'Bestellnummer' },
 };
@@ -123,7 +129,7 @@ function empfaengerAbschrift(db, empfaenger, kontaktId) {
     // Angabe aus dem Kontakt, die die Form nicht haelt (alte Eintraege wurden
     // nie geprueft), bleibt weg, statt das Stellen der Rechnung zu verhindern —
     // die E-Rechnung meldet sie dann als fehlend.
-    let wert = zusatzWert(empfaenger[feld], regel);
+    let wert = regel.nurKontakt ? '' : zusatzWert(empfaenger[feld], regel);
     if (!wert && kontakt && regel.kontakt) {
       try {
         wert = zusatzWert(kontakt[regel.kontakt], regel);
@@ -174,6 +180,12 @@ function tagNach(zeitpunkt, tage) {
   d.setDate(d.getDate() + tage);
   const zwei = (n) => String(n).padStart(2, '0');
   return d.getFullYear() + '-' + zwei(d.getMonth() + 1) + '-' + zwei(d.getDate());
+}
+
+// Ganze Kalendertage von `von` bis `bis` (JJJJ-MM-TT), ueber UTC-Mitternacht: Zeitumstellung verschiebt nichts.
+function tageZwischen(von, bis) {
+  const t = (s) => Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10));
+  return Math.round((t(bis) - t(von)) / 86400000);
 }
 
 function zahlungsziel() {
@@ -315,6 +327,11 @@ function baueMitSperre(db, { from, to, tickets, projekte, posten, eintraege, gru
   // nennt sie "erfasst" und die erfasste Zeit Berechnungsgrundlage — eine von
   // Hand eingetragene Stundenzahl ist beides nicht.
   const freiePositionen = frei.map((p) => freiePosition(p, 0));
+  // Wunschangaben der Projekte ebenfalls vor der Auswertung pruefen.
+  const wuensche = pListe.map(projektWunsch);
+  const namen = wuensche.map((w) => w.name);
+  const doppeltName = namen.find((n, i) => namen.indexOf(n) !== i);
+  if (doppeltName !== undefined) throw new Error('Projekt ' + doppeltName + ' ist doppelt gewaehlt.');
   // Manuelle Zeit als eigene Positionen, vor den Vorgaengen geprueft und frisch
   // gerechnet. Jeder Eintrag muss im Leistungszeitraum liegen (§ 14 UStG).
   const zeitTeil = zeit.fuerRechnung(db, eintraege, gruppierung);
@@ -324,21 +341,12 @@ function baueMitSperre(db, { from, to, tickets, projekte, posten, eintraege, gru
     }
   }
   if (tListe.length === 0 && pListe.length === 0) {
-    return { positionen: [...zeitTeil.positionen, ...freiePositionen], sperre: zeitTeil.sperre };
+    return { positionen: [...zeitTeil.positionen, ...freiePositionen], sperre: zeitTeil.sperre, hinweise: [], projektZeilen: [] };
   }
 
   const gewaehlt = new Set(tListe);
-  const gewaehltP = new Set(pListe);
-  const zeilen = [
-    ...(tListe.length
-      ? metrics.byTicket(db, { from, to }).filter((t) => gewaehlt.has(t.ticket))
-      : []),
-    ...(pListe.length
-      // Nur Projektzeilen: eine Kundenzeile (nur manuelle Zeit) traegt den
-      // Firmennamen als Gruppe und darf nicht als Projekt auf den Beleg.
-      ? metrics.ohneTicket(db, { from, to }).filter((t) => t.art === 'projekt' && gewaehltP.has(t.gruppe))
-      : []),
-  ];
+  // Projekte laufen ueber das Konto (projektTeil), Vorgaenge ueber byTicket.
+  const zeilen = tListe.length ? metrics.byTicket(db, { from, to }).filter((t) => gewaehlt.has(t.ticket)) : [];
   // Nur Zeilen mit Claude-Zeit oder lokalen Modellen: ein Vorgang mit nur
   // manueller Zeit ergaebe sonst eine Position mit 0 Stunden und 0 EUR. Seine
   // Zeit geht ueber die Eintraege auf die Rechnung.
@@ -346,20 +354,18 @@ function baueMitSperre(db, { from, to, tickets, projekte, posten, eintraege, gru
   // Gewaehlt, aber ohne Claude-Zeit: nicht still weglassen, sonst fehlt er auf
   // der Rechnung, ohne dass es jemand merkt.
   const ohne = zeilen.filter((t) => !mitInhalt.includes(t));
-  if (ohne.length && zeitTeil.positionen.length) {
-    throw new Error((ohne[0].ticket ? 'Vorgang ' + ohne[0].ticket : 'Projekt ' + ohne[0].gruppe) +
-      ' hat im Zeitraum keine Claude-Zeit — seine Zeit über die Einträge abrechnen.');
+  const projekt = wuensche.length ? projektTeil(db, wuensche, { to, vFaktor }) : { positionen: [], pauschalen: [], sperre: [], hinweise: [], zeilen: [], leer: [] };
+  if ((ohne.length || projekt.leer.length) && zeitTeil.positionen.length) {
+    throw new Error(ohne.length
+      ? 'Vorgang ' + ohne[0].ticket + ' hat im Zeitraum keine Claude-Zeit — seine Zeit über die Einträge abrechnen.'
+      : 'Projekt ' + projekt.leer[0] + ' hat nichts Offenes zum Abrechnen.');
   }
-  if (mitInhalt.length === 0 && zeitTeil.positionen.length === 0) {
+  if (mitInhalt.length === 0 && projekt.positionen.length === 0 && projekt.pauschalen.length === 0 && zeitTeil.positionen.length === 0) {
     throw new Error('Zu den gewaehlten Vorgaengen gibt es im Zeitraum keine Daten.');
   }
 
   const positionen = mitInhalt.map((t) => ({
-    // Ticketlose Zeilen tragen keinen Vorgangsschluessel. Auf dem Dokument
-    // steht dann der Projektname als Leistungsbezeichnung — kein erfundener
-    // Schluessel, der nach einer Vorgangsnummer aussieht.
-    ticket: t.ticket || t.gruppe,
-    ohne_vorgangsnummer: t.ticket ? undefined : true,
+    ticket: t.ticket,
     von: t.first_day,
     bis: t.last_day,
     stunden: rund2(t.active_hours),
@@ -388,25 +394,196 @@ function baueMitSperre(db, { from, to, tickets, projekte, posten, eintraege, gru
   // Der Betrag stammt aus metrics und wird hier NICHT nachgerechnet — der
   // Rabatt steckt bereits darin (derselbe wie beim Stundensatz). Wer ihn hier
   // noch einmal anwendete, zoege ihn zweimal ab.
+  const pauschalen = [];
   for (const t of mitInhalt) {
-    const betrag = rund2(t.lokal_betrag_eur || 0);
-    if (!(betrag > 0)) continue;
-    const mio = (t.lokal_tokens || 0) / 1e6;
-    positionen.push({
-      ticket: t.ticket || t.gruppe,
-      ohne_vorgangsnummer: t.ticket ? undefined : true,
-      typ: 'pauschal',
-      bezeichnung: `Nutzung lokaler KI-Modelle Vorgang ${t.ticket || t.gruppe}`,
-      von: t.first_day,
-      bis: t.last_day,
-      mio_tokens: Math.round(mio * 1000) / 1000,
-      preis_je_mio: rund2(t.lokal_eur_pro_mio || 0),
-      rabatt_prozent: t.rabatt_prozent || 0,
-      betrag_eur: betrag,
-    });
+    const p = lokalPosition(t);
+    if (p) pauschalen.push(p);
   }
 
-  return { positionen: [...positionen, ...zeitTeil.positionen, ...freiePositionen], sperre: zeitTeil.sperre };
+  return {
+    positionen: [...positionen, ...projekt.positionen, ...pauschalen, ...projekt.pauschalen, ...zeitTeil.positionen, ...freiePositionen],
+    sperre: [...zeitTeil.sperre, ...projekt.sperre],
+    hinweise: projekt.hinweise,
+    projektZeilen: projekt.zeilen,
+  };
+}
+
+// Pauschalposition fuer lokale Modelle aus einer Auswertungszeile (Vorgang oder
+// ticketloses Projekt); null, wenn nichts zu berechnen ist.
+function lokalPosition(t) {
+  const betrag = rund2(t.lokal_betrag_eur || 0);
+  if (!(betrag > 0)) return null;
+  const mio = (t.lokal_tokens || 0) / 1e6;
+  return {
+    ticket: t.ticket || t.gruppe,
+    ohne_vorgangsnummer: t.ticket ? undefined : true,
+    typ: 'pauschal',
+    bezeichnung: `Nutzung lokaler KI-Modelle Vorgang ${t.ticket || t.gruppe}`,
+    von: t.first_day,
+    bis: t.last_day,
+    mio_tokens: Math.round(mio * 1000) / 1000,
+    preis_je_mio: rund2(t.lokal_eur_pro_mio || 0),
+    rabatt_prozent: t.rabatt_prozent || 0,
+    betrag_eur: betrag,
+  };
+}
+
+// --- Projektpositionen aus dem Konto (Block B) -----------------------------------
+// Projekt, auf das eine Position bucht; null, wenn auf keins. Eine Stelle fuer
+// das Konto und die Doppelpruefung: was hier zaehlt, zaehlt in beiden.
+function projektVon(p) {
+  if (!p) return null;
+  if (p.typ === 'zeit') return p.ziel_art === 'projekt' ? p.ziel : null;
+  if (p.typ === 'kulanz') return p.projekt || null;
+  if (p.typ === 'pauschal') return null;
+  return p.ticket && p.ohne_vorgangsnummer ? p.ticket : null;
+}
+
+// Abrunden auf 0,01 h: nie mehr berechnen, als gewuenscht. Der Zuschlag fuer
+// Gleitkomma (14,45 / 85 ist 0,16999...) verhindert ein Abrunden auf 0,16.
+const abrunde = (x) => Math.floor(x * 100 + 1e-9) / 100;
+
+// Eintrag in `projekte`: Name oder Objekt mit Wunschangabe. Geprueft wird hier,
+// weil dieselbe Nutzlast auch ueber die Freigabe kommt (server.js, RECHNUNG_NUTZLAST).
+function projektWunsch(roh) {
+  const w = typeof roh === 'string' ? { name: roh } : roh;
+  if (!w || typeof w !== 'object' || Array.isArray(w) || typeof w.name !== 'string' || !w.name || w.name.length > 200) {
+    throw new Error('Projekt: Name als Text erwartet (hoechstens 200 Zeichen).');
+  }
+  const gesetzt = ['stunden', 'prozent', 'betrag'].filter((k) => w[k] !== undefined && w[k] !== null);
+  if (gesetzt.length > 1) throw new Error('Projekt ' + w.name + ': hoechstens eines von Stunden, Prozent und Betrag.');
+  const wort = { stunden: 'Stunden', prozent: 'Prozent', betrag: 'Betrag' };
+  for (const k of gesetzt) {
+    if (typeof w[k] !== 'number' || !Number.isFinite(w[k]) || w[k] <= 0 || w[k] > (k === 'prozent' ? 100 : 1e6)) {
+      throw new Error('Projekt ' + w.name + ': ' + wort[k] + ' muss eine Zahl ueber 0 bis ' + (k === 'prozent' ? '100' : '1.000.000') + ' sein.');
+    }
+  }
+  if (w.kulanzRest !== undefined && typeof w.kulanzRest !== 'boolean') throw new Error('Projekt ' + w.name + ': kulanzRest ist ja oder nein.');
+  return { name: w.name, stunden: w.stunden, prozent: w.prozent, betrag: w.betrag, kulanzRest: w.kulanzRest === true };
+}
+
+// Abschrift der Positionen aus einer invoices-Zeile (nr, positionen). Unlesbar: lieber abbrechen als still
+// falsch zaehlen, und mit Nummer, damit sich die Rechnung finden laesst.
+function positionenVon(r) {
+  let liste;
+  try { liste = JSON.parse(r.positionen); } catch { liste = null; }
+  if (!Array.isArray(liste)) throw new Error('Rechnung ' + r.nr + ': Abschrift der Positionen unlesbar.');
+  return liste;
+}
+
+// Letzter Tag, bis zu dem die Pauschale fuer lokale Modelle eines Projekts gestellt ist.
+function pauschaleBis(db, projekt) {
+  let bis = null;
+  for (const r of db.prepare("SELECT nr, leistung_bis, positionen FROM invoices WHERE status = 'erstellt'").all()) {
+    for (const p of positionenVon(r)) {
+      if (!p || p.typ !== 'pauschal' || p.ticket !== projekt || !p.ohne_vorgangsnummer) continue;
+      const b = p.bis || r.leistung_bis;
+      if (b && (!bis || b > bis)) bis = b;
+    }
+  }
+  return bis;
+}
+
+// Pauschale lokaler Modelle fuer Tage nach der zuletzt gestellten bis `bisTag`; null, wenn nichts
+// ansteht. Das Ende steht fest auf bisTag: die Auswertungszeile kennt nur ticketlose Events, und
+// pauschaleBis las sonst einen zu frueh endenden Tag (Pauschale doppelt).
+function offenePauschale(db, name, bisTag) {
+  const ab = pauschaleBis(db, name);
+  const fenster = { ...(ab ? { from: tagNach(ab + 'T12:00:00', 1) } : {}), ...(bisTag ? { to: bisTag } : {}) };
+  const p = lokalPosition(metrics.ohneTicket(db, fenster).find((t) => t.art === 'projekt' && t.gruppe === name) || {});
+  // `projekt` nur auf dem Projektweg: der Druck laesst dann die Token-Zeile weg (keine Tokens an Projektpositionen).
+  return p ? { ...p, projekt: name, bezeichnung: 'Nutzung lokaler KI-Modelle Projekt ' + name, bis: bisTag || p.bis } : null;
+}
+
+// Toleranz, mit der Konto-Stunden und Einheiten (ms) gegeneinander laufen duerfen:
+// die gespeicherten Stunden sind auf 0,01 gerundet.
+const KONTO_TOL = 0.005;
+
+// Die Projektpositionen einer Rechnung: je Wunsch die Stunden (auf offen begrenzt),
+// FIFO ueber die Einheiten (aelteste zuerst, schon berechnete Stunden verbrauchen
+// zuerst), auf Wunsch der Rest als Kulanz. Manuelle Eintraege, die danach ganz
+// verbraucht sind, gehen in `sperre`. `leer`: Projekte ohne offene Stunden.
+function projektTeil(db, wuensche, { to, vFaktor }) {
+  const out = { positionen: [], pauschalen: [], sperre: [], hinweise: [], zeilen: [], leer: [] };
+  const zeilenBis = (opts) => metrics.ohneTicket(db, opts).filter((t) => t.art === 'projekt');
+  const alle = zeilenBis(to ? { to } : {});
+  const pauschale = (name, bisTag) => offenePauschale(db, name, bisTag);
+  for (const w of wuensche) {
+    // Eine manuelle Zeile geht hier nicht durch fuerRechnung, das vorher neu
+    // rechnet: ohne das stuende ein veraltet gespeicherter Wert auf der Rechnung.
+    zeit.nachrechnen(db, { seitStunden: Infinity, projekt: w.name });
+    const k = projektKonto(db, w.name, to);
+    // Ohne offene Stunden kann trotzdem eine Pauschale fuer lokale Modelle anstehen.
+    if (!(k.offen_h > 0)) {
+      const p = pauschale(w.name, to);
+      if (p) out.pauschalen.push(p);
+      else { out.leer.push(w.name); out.hinweise.push('Projekt ' + w.name + ': nichts Offenes, ohne Position.'); }
+      continue;
+    }
+    if (k.offen_in_berechnet) out.hinweise.push('Projekt ' + w.name + ': ' + OFFEN_IN_BERECHNET);
+    const si = metrics.satzFuerProjekt(w.name);
+    const satz = rund2(si.satz);
+
+    let h;
+    if (w.stunden !== undefined) h = w.stunden;
+    else if (w.prozent !== undefined) h = (k.offen_h * w.prozent) / 100;
+    else if (w.betrag !== undefined) {
+      if (!(satz > 0)) throw new Error('Projekt ' + w.name + ': Satz 0, ein Betrag laesst sich nicht in Stunden umrechnen.');
+      h = w.betrag / satz;
+    } else h = k.offen_h;
+    h = abrunde(h);
+    if (!(h >= 0.01)) throw new Error('Projekt ' + w.name + ': Der Wunsch ergibt weniger als 0,01 Stunden.');
+    if (h > k.offen_h) {
+      out.hinweise.push('Projekt ' + w.name + ': auf die offenen ' + String(k.offen_h).replace('.', ',') + ' h begrenzt.');
+      h = k.offen_h;
+    }
+    const rest = w.kulanzRest ? rund2(k.offen_h - h) : 0;
+
+    // Einheiten als Strecke auf der Stundenachse; berechnete Stunden belegen den Anfang.
+    let summe = 0;
+    const strecke = metrics.projektEinheiten(db, w.name, to).map((e) => { const a = summe; summe += e.stunden; return { e, a, b: summe }; });
+    const tage = (von, bis) => {
+      const t = strecke.filter((s) => s.b > von + KONTO_TOL && s.a < bis - KONTO_TOL).map((s) => s.e.tag);
+      // Nie leer, solange offen_h > 0; sonst der letzte Tag, statt eine Position ohne Zeitraum zu stellen.
+      return t.length ? [t[0], t[t.length - 1]] : [strecke[strecke.length - 1].e.tag, strecke[strecke.length - 1].e.tag];
+    };
+    const [von, bis] = tage(k.berechnet_h, k.berechnet_h + h);
+    const zeile = alle.find((t) => t.gruppe === w.name);
+    out.positionen.push({
+      ticket: w.name, ohne_vorgangsnummer: true, projekt: w.name,
+      von, bis, stunden: h, satz,
+      basissatz: rund2(si.basissatz), rabatt_prozent: si.rabatt || 0,
+      betrag_eur: rund2(h * satz),
+      zeitmodell: zeile ? zeile.zeitmodell : null,
+      // Nur intern (nicht gedruckt): offen vor dieser Rechnung.
+      erbracht_h: k.offen_h,
+      // Nur zur Information, wie bei Vorgaengen.
+      vergleich_stunden: vFaktor > 1 ? rund2(h * vFaktor) : null,
+      vergleich_faktor: vFaktor > 1 ? vFaktor : null,
+    });
+    // Fuer die Vorschau: was diese Position berechnet und was danach offen bleibt (der Editor rechnet nichts).
+    out.zeilen.push({ projekt: w.name, berechnet_h: h, kulanz_h: rest, offen_h: rund2(k.offen_h - h - rest) });
+    let letzterTag = bis;
+    if (rest > 0) {
+      const [rVon, rBis] = tage(k.berechnet_h + h, k.berechnet_h + h + rest);
+      out.positionen.push({ typ: 'kulanz', projekt: w.name, bezeichnung: 'Kulanz – nicht berechnete Zeit ' + w.name, stunden: rest, satz: 0, betrag_eur: 0, von: rVon, bis: rBis });
+      letzterTag = rBis;
+    }
+
+    // Ganz verbrauchte manuelle Eintraege sperren, wie auf dem Weg ueber `eintraege`.
+    const ende = k.berechnet_h + h + rest;
+    const status = db.prepare('SELECT status FROM zeit_eintrag WHERE id = ?');
+    for (const s of strecke) {
+      if (s.e.art !== 'manuell' || s.b <= k.berechnet_h + KONTO_TOL || s.b > ende + KONTO_TOL) continue;
+      const row = status.get(s.e.eintragId);
+      if (row && row.status === 'offen') out.sperre.push({ id: s.e.eintragId, satz, tag: s.e.tag });
+    }
+
+    // Pauschale fuer lokale Modelle: nur Tage nach der zuletzt gestellten, bis zum Ende dieser Position.
+    const pa = pauschale(w.name, letzterTag);
+    if (pa) out.pauschalen.push(pa);
+  }
+  return out;
 }
 
 // Der fertige Beleg ohne Nummer, ohne Schreiben. erstelle() schreibt ihn,
@@ -429,32 +606,39 @@ function entwurf(db, { from, to, tickets, projekte, posten, eintraege, gruppieru
     }
     zielTage = zahlungszielTage;
   }
-  const { positionen, sperre } = baueMitSperre(db, { from, to, tickets, projekte, posten, eintraege, gruppierung });
+  const { positionen, sperre, hinweise, projektZeilen } = baueMitSperre(db, { from, to, tickets, projekte, posten, eintraege, gruppierung });
   pruefeDoppelt(db, positionen);
-  return { ...dokument(db, { von: from, bis: to, empfaenger, positionen, kontaktId, zielTage }), sperre };
+  // Projektpositionen koennen vor `from` beginnen (FIFO): der Kopf muss sie enthalten, sonst
+  // steht auf der unveraenderlichen Rechnung (und in der E-Rechnung) ein falscher Zeitraum.
+  const projektTage = positionen.filter((p) => p.projekt || p.ohne_vorgangsnummer).flatMap((p) => [p.von, p.bis]).filter(Boolean);
+  const von = projektTage.reduce((m, t) => (t < m ? t : m), from);
+  const bis = projektTage.reduce((m, t) => (t > m ? t : m), to);
+  return { ...dokument(db, { von, bis, empfaenger, positionen, kontaktId, zielTage }), sperre, hinweise, projektZeilen };
 }
 
 // Claude-Zeit eines Vorgangs darf nur einmal auf einer gestellten Rechnung
 // stehen. Manuelle Zeit sperrt sich ueber zeit_eintrag; Vorgangs- und
 // Projektpositionen hatten keine Sperre (Toolcheck 15.10., H4, Owner: 409).
-// Verglichen werden die Tage, die eine gestellte Position abdeckt, mit den
-// Tagen der neuen Position; getrennte Zeitraeume (Teilabrechnung je Monat)
-// bleiben erlaubt.
+// Vorgaenge: verglichen werden die Tage, die eine gestellte Position abdeckt,
+// mit den Tagen der neuen Position; getrennte Zeitraeume (Teilabrechnung je
+// Monat) bleiben erlaubt. Projekte (Block B): das Konto entscheidet, nach
+// Stunden statt nach Tagen (pruefeKonto); nur die Pauschale fuer lokale Modelle
+// folgt weiter der Tagesregel.
 // Nur fuer die Selbstpruefung: aeltere Tests stellen dieselbe Rechnung
 // mehrfach, um anderes zu pruefen. Nicht ueber HTTP erreichbar.
 const pruefung = { doppelt: true };
 function pruefeDoppelt(db, positionen) {
   if (!pruefung.doppelt) return;
-  const neu = positionen.filter((p) => p.ticket && p.typ !== 'zeit' && p.von && p.bis);
+  pruefeKonto(db, positionen);
+  const neu = positionen.filter((p) => p.ticket && p.typ !== 'zeit' && p.von && p.bis && (p.typ === 'pauschal' || !p.ohne_vorgangsnummer));
   if (!neu.length) return;
   const rows = db.prepare("SELECT nr, leistung_von, leistung_bis, positionen FROM invoices WHERE status = 'erstellt'").all();
   for (const r of rows) {
-    let liste;
-    try { liste = JSON.parse(r.positionen); } catch { liste = null; }
     // Unlesbare Abschrift: lieber nicht stellen als still doppelt abrechnen.
-    if (!Array.isArray(liste)) throw new Error('Rechnung ' + r.nr + ': Abschrift der Positionen unlesbar.');
-    for (const alt of liste) {
+    for (const alt of positionenVon(r)) {
       if (!alt || !alt.ticket || alt.typ === 'zeit') continue;
+      // Projektpositionen zaehlt das Konto, sie blockieren hier nichts.
+      if (alt.ohne_vorgangsnummer && alt.typ !== 'pauschal') continue;
       const von = alt.von || r.leistung_von;
       const bis = alt.bis || r.leistung_bis;
       const treffer = neu.find((p) => p.ticket === alt.ticket && p.von <= bis && p.bis >= von);
@@ -467,15 +651,52 @@ function pruefeDoppelt(db, positionen) {
   }
 }
 
+// Kontoregel (Block B): was ein Projekt schon berechnet hat plus das Neue darf
+// das Geleistete bis zum Ende der neuen Positionen nicht uebersteigen. Zeitpositionen
+// sind je Position auf 0,01 h gerundet, das Geleistete nicht: drei Eintraege zu
+// 10 min ergeben 3 x 0,17 = 0,51 h gegen 0,50 h. Je gerundeter Position (alte und
+// neue) deshalb 0,005 h Spielraum, mindestens 0,005 h.
+function pruefeKonto(db, positionen) {
+  const je = new Map();
+  for (const p of positionen) {
+    const name = projektVon(p);
+    if (!name) continue;
+    const e = je.get(name) || { h: 0, rundungen: 0, bis: '' };
+    e.h += Number(p.stunden) || 0;
+    if (p.typ === 'zeit') e.rundungen += 1;
+    if (p.bis && p.bis > e.bis) e.bis = p.bis;
+    je.set(name, e);
+  }
+  for (const [name, e] of je) {
+    const k = projektKonto(db, name, e.bis || undefined);
+    const spielraum = Math.max(0.005, 0.005 * (e.rundungen + k.zeit_positionen));
+    if (k.berechnet_h + e.h > k.geleistet_h + spielraum + 1e-9) {
+      const err = new Error('Projekt ' + name + ': nur noch ' + k.offen_h + ' h offen.');
+      err.abweichung = true;
+      throw err;
+    }
+  }
+}
+
 // Gestellt wird nur, was zu sehen war: der Editor schickt die Summe seiner
 // Vorschau mit. Laeuft inzwischen Zeit auf oder aendert sich ein Satz, entsteht
 // nichts — die Rechnung waere sonst unveraenderlich anders als angezeigt.
 // Ohne Angabe (bisherige Ansicht, API) bleibt es beim Erstellen wie bisher.
-function pruefeErwartet(d, erwartet) {
-  if (erwartet === undefined || erwartet === null) return;
-  if (typeof erwartet !== 'number' || !Number.isFinite(erwartet)) throw new Error('erwartetBrutto: Zahl erwartet.');
-  if (Math.abs(d.brutto_eur - erwartet) > 0.004) {
-    const e = new Error('Der Betrag hat sich seit der Vorschau geaendert (jetzt ' + eur(d.brutto_eur) + '). Bitte pruefen und erneut erstellen.');
+// erwartetStunden: der Kulanz-Rest kostet 0 EUR, ohne die Stunden fiele mehr Kulanz als gezeigt nicht auf.
+function pruefeErwartet(d, erwartet, erwartetStunden) {
+  if (erwartet !== undefined && erwartet !== null) {
+    if (typeof erwartet !== 'number' || !Number.isFinite(erwartet)) throw new Error('erwartetBrutto: Zahl erwartet.');
+    if (Math.abs(d.brutto_eur - erwartet) > 0.004) {
+      const e = new Error('Der Betrag hat sich seit der Vorschau geaendert (jetzt ' + eur(d.brutto_eur) + '). Bitte pruefen und erneut erstellen.');
+      e.abweichung = true;
+      throw e;
+    }
+  }
+  if (erwartetStunden === undefined || erwartetStunden === null) return;
+  if (typeof erwartetStunden !== 'number' || !Number.isFinite(erwartetStunden)) throw new Error('erwartetStunden: Zahl erwartet.');
+  const jetzt = stundenSumme(d.positionen);
+  if (Math.abs(jetzt - erwartetStunden) > 0.004) {
+    const e = new Error('Die Stunden haben sich seit der Vorschau geaendert (jetzt ' + String(jetzt).replace('.', ',') + ' h). Bitte pruefen und erneut erstellen.');
     e.abweichung = true;
     throw e;
   }
@@ -483,8 +704,9 @@ function pruefeErwartet(d, erwartet) {
 
 function erstelle(db, daten = {}) {
   const d = entwurf(db, daten);
-  pruefeErwartet(d, daten.erwartetBrutto);
-  return schreibe(db, d);
+  pruefeErwartet(d, daten.erwartetBrutto, daten.erwartetStunden);
+  // hinweise (z. B. "auf die offenen 8 h begrenzt") gehoeren nicht in die Abschrift, aber zum Aufrufer.
+  return { ...schreibe(db, d), hinweise: d.hinweise };
 }
 
 // Vorschau fuer den Editor (R6): das Druck-HTML mit "ENTWURF" statt Nummer.
@@ -494,7 +716,10 @@ function vorschau(db, daten = {}) {
   return {
     html: renderHtml({ ...d, nr: 'ENTWURF' }),
     netto_eur: d.netto_eur, ust_prozent: d.ust_prozent, ust_eur: d.ust_eur,
-    brutto_eur: d.brutto_eur, kleinunternehmer: d.kleinunternehmer, positionen: d.positionen, faellig_am: d.faellig_am,
+    brutto_eur: d.brutto_eur, kleinunternehmer: d.kleinunternehmer, positionen: d.positionen, faellig_am: d.faellig_am, hinweise: d.hinweise, projekt_zeilen: d.projektZeilen,
+    stunden_summe: stundenSumme(d.positionen),
+    // Kopfzeitraum, wie er auf der Rechnung steht (entwurf weitet ihn ueber Projektpositionen); der Editor zeigt ihn an.
+    leistung_von: d.leistung_von, leistung_bis: d.leistung_bis,
   };
 }
 
@@ -780,6 +1005,11 @@ function kennzahlen(db, opts = {}) {
 // Kennzahlen der Kontakt-Akte (R10, Block 4c). Nur gestellte Rechnungen
 // (status 'erstellt'): eine stornierte und ihre Gegenrechnung tragen weder
 // Umsatz noch Rest — auch nicht die Zahlung, die vor dem Storno einging.
+// Offenes Angebot = offen, nicht abgerechnet, nicht abgelaufen (wie
+// status_abgeleitet in angebot.liste()). Ein Ort fuer Kunden- und Lead-Zaehlung;
+// Spalten von angebote, Parameter: jetzt als ISO-Zeit.
+const ANGEBOT_OFFEN = "status = 'offen' AND rechnung_nr IS NULL AND gueltig_bis >= ?";
+
 function jeKontakt(db) {
   const gezahlt = gezahltJeRechnung(db);
   const m = new Map();
@@ -800,11 +1030,10 @@ function jeKontakt(db) {
       e.dauern.push((Date.parse(g.letzte) - Date.parse(tagNach(r.erstellt_am, 0))) / 86400000);
     }
   }
-  // Offen = nicht abgerechnet und nicht abgelaufen, wie status_abgeleitet in angebot.liste().
   const jetzt = new Date().toISOString();
   for (const a of db.prepare(`
     SELECT kontakt_id FROM angebote
-    WHERE kontakt_id IS NOT NULL AND status = 'offen' AND rechnung_nr IS NULL AND gueltig_bis >= ?
+    WHERE kontakt_id IS NOT NULL AND ${ANGEBOT_OFFEN}
   `).all(jetzt)) eintrag(a.kontakt_id).angebote_offen++;
   for (const e of m.values()) {
     e.umsatz_bezahlt_eur = rund2(e.umsatz_bezahlt_eur);
@@ -830,7 +1059,7 @@ function abrechnung(db) {
   // sondern wuerde beim Lesen das Prototyp-Objekt liefern.
   const map = Object.create(null);
   for (const r of rows) {
-    for (const p of JSON.parse(r.positionen) || []) {
+    for (const p of positionenVon(r)) {
       if (!p || !p.ticket) continue;
       const e = map[p.ticket] || (map[p.ticket] = { betrag_eur: 0, nummern: [] });
       e.betrag_eur = rund2(e.betrag_eur + (Number(p.betrag_eur) || 0));
@@ -840,19 +1069,167 @@ function abrechnung(db) {
   return map;
 }
 
+// Projektkonto (Block B): was bis `bis` geleistet, was schon gestellt ist, was offen
+// bleibt. "Berechnet" liest die Abschriften selbst (nur status='erstellt', Storno faellt
+// heraus): Projektpositionen, Zeitpositionen mit Ziel Projekt und Projekt-Kulanz.
+// Nie negativ: ein Ueberhang steht in ueber_h, nicht als Minus in offen_h.
+// Was die gestellten Rechnungen je Projekt schon berechnet haben. Die Abschriften werden einmal
+// gelesen: `je` laesst viele Konten (offene Projekte ausserhalb des Zeitraums) eine Map teilen.
+function berechnetJe(db) {
+  const je = new Map();
+  for (const r of db.prepare("SELECT nr, positionen FROM invoices WHERE status = 'erstellt' ORDER BY jahr, laufnr").all()) {
+    for (const p of positionenVon(r)) {
+      const name = projektVon(p);
+      if (!name) continue;
+      // zeitPositionen: gerundete Zeitpositionen, Spielraum der Kontoregel (pruefeKonto)
+      const e = je.get(name) || { berechnet: 0, zeitPositionen: 0, nummern: [], bisMax: '' };
+      e.berechnet += Number(p.stunden) || 0;
+      if (p.typ === 'zeit') e.zeitPositionen += 1;
+      if (p.bis && p.bis > e.bisMax) e.bisMax = p.bis;
+      if (!e.nummern.includes(r.nr)) e.nummern.push(r.nr);
+      je.set(name, e);
+    }
+  }
+  return je;
+}
+// R14: offen, aber der letzte Tag mit Leistung ist schon berechnet. Nur Hinweis, keine Sperre: FIFO legt die
+// Stunden auf bereits berechnete Tage, der Owner entscheidet. Gestellte Positionen ohne `bis` zaehlen nicht.
+const OFFEN_IN_BERECHNET = 'offene Stunden liegen in bereits berechneten Tagen — Zeitmodell oder Einlesen geändert?';
+function projektKonto(db, projekt, bis, je = berechnetJe(db)) {
+  const einheiten = metrics.projektEinheiten(db, projekt, bis);
+  const geleistet = einheiten.reduce((a, e) => a + e.stunden, 0);
+  const { berechnet, zeitPositionen, nummern, bisMax } = je.get(projekt) || { berechnet: 0, zeitPositionen: 0, nummern: [], bisMax: '' };
+  const offen = rund2(Math.max(0, geleistet - berechnet));
+  const letzterTag = einheiten.length ? einheiten[einheiten.length - 1].tag : '';
+  return {
+    geleistet_h: rund2(geleistet), berechnet_h: rund2(berechnet), zeit_positionen: zeitPositionen,
+    offen_h: offen, ueber_h: rund2(Math.max(0, berechnet - geleistet)),
+    offen_in_berechnet: offen > 0 && !!bisMax && letzterTag <= bisMax,
+    nummern: [...nummern], satz: metrics.satzFuerProjekt(projekt).satz, letzter_tag: letzterTag || null,
+  };
+}
+
+// Rechnungen, die auf ein Projekt buchen (Projektseite): je Rechnung die Summe der Positionen, deren
+// projektVon() der Name ist. Alle Status, damit Storno und Gegenrechnung sichtbar bleiben; wer nur die
+// gueltigen summieren will, nimmt status 'erstellt' (= berechnetJe). Rechnungen ohne Projektposition fehlen.
+function rechnungenJeProjekt(db, name) {
+  const out = [];
+  for (const r of db.prepare('SELECT nr, erstellt_am, status, storno_von, positionen FROM invoices ORDER BY jahr DESC, laufnr DESC').all()) {
+    const meine = positionenVon(r).filter((p) => projektVon(p) === name);
+    if (!meine.length) continue;
+    out.push({ nr: r.nr, erstellt_am: r.erstellt_am, status: r.status, storno_von: r.storno_von || null,
+      stunden: rund2(meine.reduce((a, p) => a + (Number(p.stunden) || 0), 0)),
+      betrag_eur: rund2(meine.reduce((a, p) => a + (Number(p.betrag_eur) || 0), 0)) });
+  }
+  return out;
+}
+
+// Projektkonten fuer metrics.kennzahlen: je ticketloser Projektzeile das Konto bis zum Ende
+// des ausgewerteten Zeitraums (nie "heute": eine vergangene Ansicht darf keinen Ueberhang
+// von spaeter gestellten Rechnungen zeigen). Ein Konto je Projekt, nicht je Zeile.
+// `zeitraum`: { to, month } wie die Auswertung; ohne beides bis heute.
+function kontoBis(zeitraum) {
+  const z = typeof zeitraum === 'string' ? { to: zeitraum } : (zeitraum || {});
+  let bis = z.to ? String(z.to).slice(0, 10) : undefined;
+  if (!bis && z.month) bis = ortsTag(new Date(Number(z.month.slice(0, 4)), Number(z.month.slice(5, 7)), 0));
+  return bis;
+}
+function projektKonten(db, zeilen, zeitraum) {
+  const bis = kontoBis(zeitraum);
+  const je = berechnetJe(db);
+  const map = new Map();
+  // Nur dann darf kennzahlen() einen Ueberhang melden. Die Oberflaeche schickt immer `to` (Monat: heute),
+  // deshalb zaehlt auch bis >= heute (Ortstag) als Heute-Sicht.
+  map.bisHeute = !bis || bis >= ortsTag(new Date());
+  map.je = je;   // fuer projektKontenRest: dieselben Abschriften, nicht ein zweites Mal gelesen
+  for (const r of zeilen) {
+    if (r.ticket == null && r.art === 'projekt' && r.gruppe && !map.has(r.gruppe)) map.set(r.gruppe, projektKonto(db, r.gruppe, bis, je));
+  }
+  // Mehr berechnet als geleistet, auch ohne Zeile im Zeitraum (z. B. Projekt umbenannt: der alte Name hat
+  // Rechnungen, aber keine Arbeit mehr). Nur Heute-Sicht (R4); so sehen es kennzahlen() und die Anzeige.
+  if (map.bisHeute) {
+    for (const name of je.keys()) {
+      if (map.has(name)) continue;
+      const k = projektKonto(db, name, bis, je);
+      if (k.ueber_h > 0) map.set(name, k);
+    }
+  }
+  return map;
+}
+
+// R12: Projekte mit offenen Stunden, die im ausgewerteten Zeitraum keine Zeile haben (Teilrechnung im
+// August, Rest im Oktober, dort keine neue Arbeit). Ohne sie fiele der Rest aus der Auswahl. Dieselbe
+// Quelle wie projektKonten (das Konto), eine Map, kein Konto je Aufruf; nur offen_h > 0.
+function projektKontenRest(db, konten, zeitraum) {
+  const bis = kontoBis(zeitraum);
+  const rest = new Map();
+  for (const name of metrics.projektNamen(db)) {
+    if (konten.has(name)) continue;
+    const k = projektKonto(db, name, bis, konten.je);
+    if (k.offen_h > 0) rest.set(name, k);
+  }
+  return rest;
+}
+
+// Die Konten fuer die Auswahl im Editor (/api/summary): Klartext je Projekt. `ueberhang` ist die
+// Liste aus metrics.kennzahlen (nur Heute-Sicht und ueber der Toleranz, R4/R9) - nur dort steht
+// ueber_h, sonst 0; die Schwelle haelt metrics, hier steht sie nicht ein zweites Mal.
+function projektKontenAnzeige(konten, ueberhang, rest = new Map()) {
+  // Ohne Prototyp: ein Projekt namens "__proto__" waere sonst kein Schluessel.
+  const aus = Object.create(null);
+  for (const [name, k] of [...konten, ...rest]) {
+    const u = (ueberhang || []).find((x) => x.projekt === name);
+    aus[name] = { geleistet_h: k.geleistet_h, berechnet_h: k.berechnet_h, offen_h: k.offen_h, ueber_h: u ? u.ueber_h : 0, nummern: k.nummern, letzter_tag: k.letzter_tag,
+      ...(konten.bisHeute && k.offen_in_berechnet ? { hinweis: OFFEN_IN_BERECHNET } : {}) };
+  }
+  return aus;
+}
+
+// Sitzung nachtraeglich auf einen Vorgang buchen: Stunden, die schon auf einer Projektrechnung stehen,
+// duerfen das Konto nicht verlassen, sonst stuenden sie auf zwei Rechnungen. `buchen` laeuft mit der
+// Pruefung in einem Savepoint (kein await dazwischen); steigt der Ueberhang eines betroffenen Projekts,
+// bleibt nichts stehen. Projekte ohne Rechnung kosten keine Kontorechnung.
+function bucheOhneDoppelung(db, sessionId, buchen) {
+  const je = berechnetJe(db);
+  const projekte = db.prepare('SELECT project FROM events WHERE session_id = ? UNION SELECT project FROM activity WHERE session_id = ?').all(sessionId, sessionId)
+    .map((r) => r.project).filter((p) => je.has(p));
+  const vorher = new Map(projekte.map((p) => [p, projektKonto(db, p, undefined, je).ueber_h]));
+  return kontakte.inTransaktion(db, () => {
+    const aus = buchen();
+    for (const p of projekte) {
+      if (projektKonto(db, p, undefined, je).ueber_h > vorher.get(p)) throw Object.assign(new Error(gestelltText(p)), { status: 409 });
+    }
+    return aus;
+  });
+}
+
 // Bis zu welchem Tag die Claude-Zeit eines Vorgangs (oder ticketlosen
 // Projekts) schon gestellt ist: je Schluessel das spaeteste Positions-Ende.
 // Nur lesen; dient der Teilabrechnung ab dem Folgetag (C4).
 function abgerechnetBis(db) {
   const map = Object.create(null);
-  for (const r of db.prepare("SELECT leistung_bis, positionen FROM invoices WHERE status = 'erstellt'").all()) {
-    for (const p of JSON.parse(r.positionen) || []) {
-      if (!p || !p.ticket || p.typ === 'zeit') continue;
+  for (const r of db.prepare("SELECT nr, leistung_bis, positionen FROM invoices WHERE status = 'erstellt'").all()) {
+    for (const p of positionenVon(r)) {
+      // Projektpositionen: das Konto sagt, was offen ist, nicht ein Tag.
+      if (!p || !p.ticket || p.typ === 'zeit' || projektVon(p)) continue;
       const bis = p.bis || r.leistung_bis;
       if (bis && (!map[p.ticket] || bis > map[p.ticket])) map[p.ticket] = bis;
     }
   }
   return map;
+}
+
+// Sitzung umbuchen oder Buchung zuruecknehmen: Arbeit bis zum gestellten Stand eines Vorgangs bleibt dort,
+// sonst stuende sie unter dem neuen Ziel ein zweites Mal zur Abrechnung. ziel = neuer Vorgang (gross) oder null.
+function pruefeSitzungGestellt(db, sessionId, ziel) {
+  const bis = Object.create(null);
+  for (const [k, tag] of Object.entries(abgerechnetBis(db))) bis[k.toUpperCase()] = tag;
+  const z = db.prepare(`SELECT ticket, MIN(day) AS tag FROM (SELECT ticket, day FROM events WHERE session_id = ? UNION ALL SELECT ticket, day FROM activity WHERE session_id = ?)
+    WHERE ticket IS NOT NULL GROUP BY ticket`).all(sessionId, sessionId).find((r) => {
+    const k = r.ticket.toUpperCase();
+    return k !== ziel && bis[k] && r.tag <= bis[k];
+  });
+  if (z) throw Object.assign(new Error('Diese Sitzung steht auf ' + z.ticket + ' schon in Rechnung — die Zeit bleibt dort, sonst wäre sie zweimal abrechenbar. Erst stornieren, dann umbuchen.'), { status: 409 });
 }
 
 // Was fuer die genannten Vorgaenge (und ticketlose Projekte) noch offen zum
@@ -880,10 +1257,12 @@ function offeneDaten(db, { vorgaenge = [], projekte = [], kundeId = null } = {},
   }
   const ausgelassen = ab ? [] : teil.map((t) => t.ticket + ' (gestellt bis ' + bisJe[t.ticket] + ', neue Zeit danach: einzeln anfordern mit „Rechnung für ' + t.ticket + '“)');
   const tickets = offen.filter((t) => t.active_hours > 0 || (t.lokal_betrag_eur || 0) > 0);
-  const projektAlle = projekte.length
-    ? metrics.ohneTicket(db, {}).filter((t) => t.art === 'projekt' && projekte.includes(t.gruppe) && (t.active_hours > 0 || (t.lokal_betrag_eur || 0) > 0)) : [];
-  const projektZeilen = projektAlle.filter((t) => !gestellt[t.gruppe]);
-  for (const t of projektAlle) if (teilweise(t.gruppe, t.last_day)) ausgelassen.push('ticketlose Arbeit in ' + t.gruppe + ' (gestellt bis ' + bisJe[t.gruppe] + ', neue Zeit danach im Beleg-Editor)');
+  // Projekte (Block B): das Konto entscheidet, nicht "irgendwann gestellt". Ein Projekt
+  // mit offenen Stunden bleibt offen, auch wenn schon Teile berechnet sind.
+  // Die Gesamtzeile kennt auch gestellte lokale Nutzung: die Pauschale zaehlt nur fuer Tage nach der letzten.
+  const je = projekte.length ? berechnetJe(db) : null;
+  const projektZeilen = projekte.length
+    ? metrics.ohneTicket(db, {}).filter((t) => t.art === 'projekt' && projekte.includes(t.gruppe) && (projektKonto(db, t.gruppe, undefined, je).offen_h > 0 || ((t.lokal_betrag_eur || 0) > 0 && offenePauschale(db, t.gruppe) !== null))) : [];
   // Manuelle Zeit sperrt sich je Eintrag: auch auf gestellten Vorgaengen ist offene Zeit abrechenbar.
   const keys = new Set(vorgaenge.map((t) => t.ticket));
   const liste = vorab.liste || zeit.liste(db, { status: 'offen' });
@@ -892,12 +1271,15 @@ function offeneDaten(db, { vorgaenge = [], projekte = [], kundeId = null } = {},
   if (liste.length >= 2000) return { ...basis, zuViele: true, daten: null };
   const passend = liste.filter((e) => e.abrechenbar && (
     (e.ziel_art === 'vorgang' && keys.has(e.ziel_schluessel))
-    || (e.ziel_art === 'projekt' && projekte.includes(e.ziel_schluessel))
+    // Manuelle Projektzeit steckt im Konto und kommt ueber die Projektposition, nicht zusaetzlich einzeln.
     || (e.ziel_art === 'kunde' && kundeId !== null && e.ziel_schluessel === String(kundeId))));
   // Ab dem Folgetag des letzten Belegs: aeltere offene Eintraege laegen sonst mit im ueberlappenden Zeitraum.
   const eintraege = ab ? passend.filter((e) => e.tag >= ab) : passend;
   if (eintraege.length < passend.length) ausgelassen.push((passend.length - eintraege.length) + ' offene Zeiteinträge vor dem ' + ab + ' (im Beleg-Editor)');
-  const tage = tickets.flatMap((t) => [t.first_day, t.last_day]).concat(projektZeilen.flatMap((t) => [t.first_day, t.last_day]), eintraege.map((e) => e.tag)).filter(Boolean).sort();
+  // Projekte: der letzte Tag der Einheiten zaehlt (auch manuelle Zeit), die Auswertungszeile kennt nur Claude-Events.
+  // `from` braucht keine Einheiten: entwurf() weitet den Kopf auf die Positionen.
+  const projektTage = (t) => { const e = metrics.projektEinheiten(db, t.gruppe).map((x) => x.tag).sort(); return [t.first_day, t.last_day, e[e.length - 1]]; };
+  const tage = tickets.flatMap((t) => [t.first_day, t.last_day]).concat(projektZeilen.flatMap(projektTage), eintraege.map((e) => e.tag)).filter(Boolean).sort();
   const daten = tage.length ? {
     from: ab && ab < tage[0] ? ab : tage[0], to: tage[tage.length - 1], tickets: tickets.map((t) => t.ticket),
     ...(projektZeilen.length ? { projekte: projektZeilen.map((t) => t.gruppe) } : {}), ...(eintraege.length ? { eintraege: eintraege.map((e) => e.id) } : {}),
@@ -953,8 +1335,8 @@ function mitOffenem(db, keys, zeilen = null) {
 function abgerechnetFuerVorgang(db, key) {
   const claude = (abrechnung(db)[key] || { betrag_eur: 0 }).betrag_eur;
   let manuell = 0;
-  for (const r of db.prepare("SELECT positionen FROM invoices WHERE status = 'erstellt'").all()) {
-    for (const p of JSON.parse(r.positionen) || []) {
+  for (const r of db.prepare("SELECT nr, positionen FROM invoices WHERE status = 'erstellt'").all()) {
+    for (const p of positionenVon(r)) {
       if (p && p.typ === 'zeit' && p.ziel_art === 'vorgang' && p.ziel === key) manuell += Number(p.betrag_eur) || 0;
     }
   }
@@ -966,11 +1348,12 @@ function abgerechnetFuerVorgang(db, key) {
 // anlegen"): die gestellte Zeit waere unter dem neuen Schluessel ein zweites
 // Mal abrechenbar.
 // Ohne Gross-/Kleinschreibung, wie das Umbuchen selbst (COLLATE NOCASE).
+const gestelltText = (key) => 'Auf ' + key + ' ist schon etwas in Rechnung gestellt — die Zeit bleibt dort, sonst wäre sie unter dem Jira-Ticket ein zweites Mal abrechenbar.';
 function gestelltAuf(db, key) {
   const k = String(key).toUpperCase();
   const gleich = (v) => v != null && String(v).toUpperCase() === k;
-  for (const r of db.prepare("SELECT positionen FROM invoices WHERE status = 'erstellt'").all()) {
-    for (const p of JSON.parse(r.positionen) || []) {
+  for (const r of db.prepare("SELECT nr, positionen FROM invoices WHERE status = 'erstellt'").all()) {
+    for (const p of positionenVon(r)) {
       if (p && (gleich(p.ticket) || (p.typ === 'zeit' && p.ziel_art === 'vorgang' && gleich(p.ziel)))) return true;
     }
   }
@@ -1052,6 +1435,12 @@ function steuer(netto) {
 // Positionszeilen der Leistungstabelle. Die Vergleichsangabe steht bewusst
 // beim Leistungstext und nicht neben dem Betrag: ein hypothetischer Wert
 // direkt neben einem echten Preis liest sich als Streichpreis.
+// Text einer Position ohne eigene Bezeichnung. Eine Projektposition (Feld projekt) hat keinen Vorgang:
+// das Wort "Vorgang" waere auf dem unveraenderlichen Beleg falsch. Alte Abschriften ohne projekt
+// drucken unveraendert. Eine Stelle fuer HTML und E-Rechnung.
+const positionsName = (p) => p.bezeichnung
+  || (p.projekt ? 'Entwicklungsleistung Projekt ' + p.projekt : 'Entwicklungsleistung Vorgang ' + p.ticket);
+
 function positionsZeilen(positionen, dokument) {
   const std = (n) => Number(n).toLocaleString('de-DE', { maximumFractionDigits: 1 }) + ' h';
   // Im Angebot ist nichts erfasst, sondern kalkuliert — das Wort muss zum
@@ -1080,7 +1469,7 @@ function positionsZeilen(positionen, dokument) {
     return `
       <tr>
         <td>
-          ${esc(p.bezeichnung || ('Entwicklungsleistung Vorgang ' + p.ticket))}<br>
+          ${esc(positionsName(p))}<br>
           <span class="klein">${teile.join(' &middot; ')}</span>
         </td>
         <td class="r">${pauschal ? 'pauschal' : esc(p.stunden.toLocaleString('de-DE', { minimumFractionDigits: 2 }))}</td>
@@ -1101,26 +1490,8 @@ function vergleichsHinweis(positionen, dokument) {
   ${dokument === 'angebot' ? 'kalkulierte' : 'tats&auml;chlich erfasste'} Arbeitszeit.</p>`;
 }
 
-function renderHtml(inv) {
-  const a = inv.aussteller || {};
-  const e = inv.empfaenger || {};
-  const tokens = inv.positionen.reduce((s, p) => s + (p.tokens_gesamt || 0), 0);
-  // Mittags, damit die Umrechnung in die Ortszeit den Tag nicht verschiebt.
-  const faellig = new Date(faelligAm(inv) + 'T12:00:00');
-
-  const zeilen = positionsZeilen(inv.positionen, 'rechnung');
-  const hinweisVergleich = vergleichsHinweis(inv.positionen, 'rechnung');
-
-  const steuerZeile = inv.kleinunternehmer
-    ? '<p class="hinweis">Gemäß § 19 UStG wird keine Umsatzsteuer berechnet.</p>'
-    : `<tr><td colspan="3" class="r">zzgl. ${esc(String(inv.ust_prozent))} % Umsatzsteuer</td>
-         <td class="r">${esc(eur(inv.ust_eur))}</td></tr>`;
-
-  return `<!doctype html>
-<meta charset="utf-8">
-<title>Rechnung ${esc(inv.nr)}</title>
-<style>
-  /* Bewusst hell: das Dokument wird gedruckt und liegt beim Kunden. Der dunkle
+// Papier-Optik der Druckansicht; die Mahnung (mahnung.js) traegt dieselbe.
+const PAPIER_CSS = `  /* Bewusst hell: das Dokument wird gedruckt und liegt beim Kunden. Der dunkle
      Dashboard-Grund waere hier falsch — Drucker unterdruecken Flaechen, und
      Toner kostet. Vom Farbschema traegt nur der Akzent nach aussen. */
   :root { --akzent: #ea580c; --tinte: #111; --grau: #666; --linie: #ddd; }
@@ -1153,7 +1524,30 @@ function renderHtml(inv) {
     body { margin: 0; max-width: none; }
     * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   }
-</style>
+`;
+
+function renderHtml(inv) {
+  const a = inv.aussteller || {};
+  const e = inv.empfaenger || {};
+  const tokens = inv.positionen.reduce((s, p) => s + (p.tokens_gesamt || 0), 0);
+  // Projektpositionen tragen keine Tokens: "gesamt" waere falsch, die Zeile entfaellt (auch bei gemischten Belegen).
+  const mitProjekt = inv.positionen.some((p) => p && p.projekt);
+  // Mittags, damit die Umrechnung in die Ortszeit den Tag nicht verschiebt.
+  const faellig = new Date(faelligAm(inv) + 'T12:00:00');
+
+  const zeilen = positionsZeilen(inv.positionen, 'rechnung');
+  const hinweisVergleich = vergleichsHinweis(inv.positionen, 'rechnung');
+
+  const steuerZeile = inv.kleinunternehmer
+    ? '<p class="hinweis">Gemäß § 19 UStG wird keine Umsatzsteuer berechnet.</p>'
+    : `<tr><td colspan="3" class="r">zzgl. ${esc(String(inv.ust_prozent))} % Umsatzsteuer</td>
+         <td class="r">${esc(eur(inv.ust_eur))}</td></tr>`;
+
+  return `<!doctype html>
+<meta charset="utf-8">
+<title>Rechnung ${esc(inv.nr)}</title>
+<style>
+${PAPIER_CSS}</style>
 <div class="kopf">
   <div>
     <div class="klein">${esc(a.name)}, ${esc((a.anschrift || []).join(', '))}</div>
@@ -1190,7 +1584,7 @@ ${inv.status === 'storniert' ? '<p class="storno">Diese Rechnung wurde storniert
 
 ${inv.kleinunternehmer ? steuerZeile : ''}
 
-<p class="klein">Token-Verbrauch gesamt: ${esc(tokens.toLocaleString('de-DE'))} (informativ, nicht Bestandteil der Berechnung)</p>
+${mitProjekt ? '' : `<p class="klein">Token-Verbrauch gesamt: ${esc(tokens.toLocaleString('de-DE'))} (informativ, nicht Bestandteil der Berechnung)</p>`}
 ${hinweisVergleich}
 
 <div class="fuss">
@@ -1242,40 +1636,48 @@ function findeChrome() {
 // Bewusst asynchron: der Browser holt die Druckansicht bei genau diesem
 // Server ab. Ein blockierender Aufruf wuerde die Antwort verhindern, auf die
 // er wartet — der Prozess bliebe stehen, bis das Zeitlimit greift.
-function erzeugePdf(db, nr, port) {
-  const inv = lade(db, nr);
-  if (!inv) return Promise.reject(new Error('Rechnung nicht gefunden.'));
-
+// Ein Druckweg fuer Rechnung und Angebot. async: fehlt der Browser, kommt
+// eine Ablehnung statt eines Wurfs am Aufrufer vorbei.
+async function druckePdf(url, ziel) {
   const browser = findeChrome();
-  fs.mkdirSync(RECHNUNGS_DIR, { recursive: true });
-  const ziel = path.join(RECHNUNGS_DIR, `${nr}.pdf`);
-
+  fs.mkdirSync(path.dirname(ziel), { recursive: true });
   return new Promise((ok, fehler) => {
-    execFile(browser, [
+    // Ohne Geheimnisse (SMTP-Passwort u. a.): der Browser braucht sie nicht.
+    childProcess.execFile(browser, [
       '--headless=new', '--disable-gpu', '--no-pdf-header-footer',
       `--print-to-pdf=${ziel}`,
-      `http://127.0.0.1:${port}/rechnung/${nr}`,
-    ], { timeout: 30000, windowsHide: true }, (err) => {
+      url,
+    ], { timeout: 30000, windowsHide: true, env: kindUmgebung() }, (err) => {
       // Vollstaendig ins Protokoll, nach aussen nur ein Hinweis: die Meldung
       // des Browsers enthaelt Dateipfade und geht ueber die Schnittstelle raus.
       if (err) {
-        console.error('PDF-Erzeugung fehlgeschlagen fuer', nr, err);
+        console.error('PDF-Erzeugung fehlgeschlagen fuer', url, err);
         return fehler(new Error('PDF-Erzeugung fehlgeschlagen, Details im Serverprotokoll.'));
       }
       if (!fs.existsSync(ziel)) return fehler(new Error('PDF wurde nicht geschrieben.'));
-      db.prepare('UPDATE invoices SET pdf_pfad = ? WHERE nr = ?').run(ziel, nr);
-      ok({ nr, pdf: ziel });
+      ok(ziel);
     });
+  });
+}
+
+function erzeugePdf(db, nr, port) {
+  const inv = lade(db, nr);
+  if (!inv) return Promise.reject(new Error('Rechnung nicht gefunden.'));
+  const ziel = path.join(RECHNUNGS_DIR, `${nr}.pdf`);
+  return druckePdf(`http://127.0.0.1:${port}/rechnung/${nr}`, ziel).then(() => {
+    db.prepare('UPDATE invoices SET pdf_pfad = ? WHERE nr = ?').run(ziel, nr);
+    return { nr, pdf: ziel };
   });
 }
 
 module.exports = {
   pruefung,
-  erstelle, baue, entwurf, vorschau, schreibe, abgerechnetFuerVorgang, abgerechnetBis, gestelltAuf, offeneDaten, offenJeVorgang, mitOffenem, freiePosition, ausPositionen, lade, liste, detail, abrechnung, storniere, renderHtml, erzeugePdf, esc,
-  stammdaten, fehlendeStammdaten, pruefeStammdaten, faelligAm,
+  erstelle, baue, entwurf, vorschau, schreibe, abgerechnetFuerVorgang, abgerechnetBis, pruefeSitzungGestellt, gestelltAuf, gestelltText, bucheOhneDoppelung, berechnetJe, offeneDaten, offenJeVorgang, mitOffenem, freiePosition, ausPositionen, lade, liste, detail, abrechnung, projektKonto, projektKonten, projektKontenRest, projektKontenAnzeige, rechnungenJeProjekt, storniere, renderHtml, PAPIER_CSS, erzeugePdf, druckePdf, esc,
+  stammdaten, fehlendeStammdaten, pruefeStammdaten, faelligAm, tagNach, tageZwischen,
+  ANGEBOT_OFFEN,
   statusOf, faelligFestschreiben, bucheZahlung, loescheZahlung, zahlungenZu, kennzahlen, jeKontakt, istTag, pruefeErwartet,
   // Fuer das Angebotsmodul: dieselbe Steuerlogik, dieselbe Rundung, dasselbe
   // Dokumentgeruest. Ein zweiter Satz Formeln waere die sicherste Art, dass
   // Angebot und Rechnung eines Tages auseinanderlaufen.
-  rund2, steuer, positionsZeilen, vergleichsHinweis, eur, datum,
+  rund2, steuer, positionsZeilen, positionsName, vergleichsHinweis, eur, datum,
 };

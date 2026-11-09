@@ -301,7 +301,7 @@ function kopfKarte(d) {
       '<span class="detail-modus" title="' + esc(uebersetze('Gilt für alle Zahlen dieser Seite: Gauge, Wasserfall, Rechenweg. Rechnung rechnet immer mit manueller Zeit.')) + '">' +
         segment('v-modus', [['claude', 'nur Claude'], ['alle', 'mit manueller Zeit']], detailModus(), 'Zahlen') + '</span></div>' +
     '<div class="detail-chips">' +
-      '<a class="chip" href="#/einstellungen" title="' + esc(uebersetze('Stundensatz in Einstellungen öffnen')) + '">' + esc(d.project || '–') +
+      '<a class="chip" href="' + (d.project ? '#/projekte/p/' + encodeURIComponent(d.project) : '#/einstellungen') + '" title="' + esc(uebersetze(d.project ? 'Projekt öffnen' : 'Stundensatz in Einstellungen öffnen')) + '">' + esc(d.project || '–') +
         '<span class="mono">' + nf2.format(d.stundensatz) + ' EUR/h</span><span aria-hidden="true">↗</span></a>' +
       // Jira-Link haengt am Vorgang, nicht am Branch: auch ohne Branch erreichbar.
       (jira ? '<a class="chip" href="' + esc(jira) + '" target="_blank" rel="noopener" title="' + esc(uebersetze('Vorgang in Jira öffnen')) + '"><span class="mono">' + esc(d.branch || d.ticket) + '</span><span>Jira ↗</span></a>'

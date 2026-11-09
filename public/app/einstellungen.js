@@ -158,6 +158,40 @@ Object.assign(EN, {
   'Nicht stören': 'Do not disturb', 'Nicht stören ab': 'Do not disturb from', 'Nicht stören bis': 'Do not disturb until',
   'in diesem Fenster ist der Orb gedimmt · beide leer = aus': 'the orb is dimmed during this window · both empty = off',
   'Bewegung reduzieren und Startseite: Darstellung. Pfad zur claude.exe nur in config.json.': 'Reduce motion and start page: Appearance. Path to claude.exe only in config.json.',
+  // E-Mail & Versand (C11a)
+  'E-Mail & Versand': 'E-mail & sending', 'Testmodus, Tagesgrenze, Vorlagen · Konto nur in config.json': 'Test mode, daily limit, templates · account only in config.json',
+  'Gültigkeit neuer Angebote in Tagen': 'Validity of new quotes in days', 'für neue Angebote · bestehende behalten ihr Datum': 'for new quotes · existing ones keep their date',
+  'Versandkonto': 'Sending account', 'in config.json': 'in config.json', 'nicht bereit': 'not ready', 'noch keins eingetragen': 'none entered yet',
+  'Getestet mit Google (App-Passwort). Microsoft-Konten (Outlook/Hotmail) gehen noch nicht — die verlangen OAuth und kommen später.':
+    'Tested with Google (app password). Microsoft accounts (Outlook/Hotmail) do not work yet — they require OAuth and will come later.',
+  'heute {n} von {g} Mails — gesendet oder Zustellung unklar': '{n} of {g} e-mails today — sent or delivery unclear',
+  'Testmodus-Adresse': 'Test mode address', 'leer = Mails gehen an die Kunden': 'empty = e-mails go to the customers',
+  'Ist hier eine Adresse eingetragen, geht jede Mail nur an sie. Der eigentliche Empfänger steht im Betreff („[TEST an …]“), Testmails zählen nirgends als zugestellt. Leer lassen, sobald Mails wirklich an Kunden gehen sollen.':
+    'If an address is entered here, every e-mail goes only to it. The real recipient is shown in the subject (“[TEST an …]”); test e-mails never count as delivered. Leave it empty once e-mails should really go to customers.',
+  'Tagesgrenze': 'Daily limit', '1 bis 500 Mails je Kalendertag · schützt vor einer Schleife': '1 to 500 e-mails per calendar day · guards against a loop', 'Mails/Tag': 'e-mails/day',
+  'Vorlage Rechnung': 'Invoice template', 'Vorlage Angebot': 'Quote template', 'eigene Vorlage': 'own template',
+  'Platzhalter': 'Placeholders', 'Standard wiederherstellen': 'Restore default', 'Vorlage zurückgesetzt': 'Template reset', 'Vorlage nicht zurückgesetzt': 'Template not reset',
+  'Vorlage Zahlungserinnerung': 'Payment reminder template', 'Vorlage 1. Mahnung': '1st dunning template', 'Vorlage 2. Mahnung': '2nd dunning template',
+  'Tage nach Fälligkeit bis zur Zahlungserinnerung': 'Days after due date until the payment reminder', 'Tage nach der Erinnerung bis zur 1. Mahnung': 'Days after the reminder until the 1st dunning letter',
+  'Tage nach der 1. Mahnung bis zur 2. Mahnung': 'Days after the 1st dunning letter until the 2nd', 'neue Zahlungsfrist je Schreiben in Tagen': 'New payment deadline per letter in days',
+  'Mahngebühr auf der 2. Mahnung in Euro': 'Dunning fee on the 2nd dunning letter in euros',
+  'Mahnwesen': 'Dunning', 'Fristen je Mahnstufe und Mahngebühr · Texte unter E-Mail & Versand': 'Deadlines per dunning level and fee · texts under E-mail & sending',
+  'ab Fälligkeit gerechnet · ab dann schlägt das Werkzeug die Zahlungserinnerung vor': 'counted from the due date · from then on the tool suggests the payment reminder',
+  'ab dem Versand der Zahlungserinnerung': 'from the day the payment reminder was sent', 'ab dem Versand der 1. Mahnung': 'from the day the 1st dunning letter was sent',
+  'gilt für jedes Schreiben, ab dem Tag des Erzeugens': 'applies to every letter, counted from the day it is created',
+  'nur auf der 2. Mahnung · 0 = keine Gebühr · höchstens 40 € · Gegenüber Unternehmen bis 40 € Pauschale (§ 288 Abs. 5 BGB), gegenüber Verbrauchern nur tatsächliche Kosten.':
+    'on the 2nd dunning letter only · 0 = no fee · at most 40 € · Towards businesses a flat fee of up to 40 € (§ 288 (5) BGB), towards consumers only actual costs.',
+  'Nachfassen': 'Follow-up', 'Vorlage Nachfassen': 'Follow-up template', 'Angebote kurz vor Ablauf · Abstand und Mailtext': 'Quotes shortly before expiry · lead time and e-mail text',
+  'Nachfassen bei Angeboten: Tage vor Ablauf': 'Follow-up on quotes: days before expiry',
+  'Tage vor Ablauf der Gültigkeit · einmal je Angebot · muss unter der Gültigkeit neuer Angebote liegen': 'days before the validity ends · once per quote · must be below the validity of new quotes',
+  'Flows': 'Flows', 'gilt für alle Flows · Ortszeit dieses Rechners': 'applies to all flows · local time of this computer',
+  'Automatische Schreiben ab (Uhr)': 'Automatic letters from (hour)', 'Automatische Schreiben auch am Wochenende': 'Automatic letters on weekends too',
+  'volle Stunde 0 bis 23 · Standard 9': 'full hour 0 to 23 · default 9', '0 = nur Montag bis Freitag · 1 = auch Samstag und Sonntag': '0 = Monday to Friday only · 1 = Saturday and Sunday too',
+  'So wirkt die Versandzeit': 'How the sending time works',
+  'Gilt sofort: der heutige Scan startet binnen einer Minute': 'Applies at once: today’s scan starts within a minute',
+  'Ab dieser Stunde prüft der tägliche Scan offene Rechnungen und Angebote und sendet, was fällig ist; läuft c2invoice zu der Zeit nicht, holt er es nach, sobald es läuft. Ohne Wochenende läuft er nur Montag bis Freitag. „Jetzt ausführen“ im Flow wartet auf keins von beiden. Eine Änderung gilt sofort: liegt die neue Stunde schon hinter dir und lief der Scan heute noch nicht, startet er binnen einer Minute. Gesetzliche Feiertage kennt der Scan nicht.':
+    'From this hour the daily scan checks open invoices and quotes and sends what is due; if c2invoice is not running at that time, it catches up as soon as it runs. Without the weekend it runs Monday to Friday only. “Run now” in the flow waits for neither. A change applies at once: if the new hour has already passed and the scan has not run today, it starts within a minute. The scan does not know public holidays.',
+  'Testmail senden': 'Send test e-mail', 'Testmail gesendet an {a}': 'Test e-mail sent to {a}', 'Testmail nicht gesendet': 'Test e-mail not sent',
 });
 
 // Felder je Abschnitt; Grenzen und Label kommen vom Server.
@@ -170,6 +204,15 @@ const E_ABSCHNITTE = [
   { id: 'taet', l: 'Tätigkeitsarten & Rundung', g: '', sub: 'für manuelle Zeit · eigener Satz optional', kw: 'tätigkeit meeting konzept review rundung activity rounding' },
   { id: 'vorlagen', l: 'Positionsvorlagen', g: '', sub: 'füllen eine Position im Beleg-Editor vor', kw: 'vorlage position template' },
   { id: 'stammdaten', l: 'Stammdaten', g: 'Belege', sub: 'stehen auf jedem Beleg · Name und Anschrift sind Pflicht', stamm: true },
+  // C11a: Konto (smtp, absender) nur in config.json; hier Testmodus, Grenze, Vorlagen.
+  { id: 'versand', l: 'E-Mail & Versand', g: 'Belege', sub: 'Testmodus, Tagesgrenze, Vorlagen · Konto nur in config.json', kw: 'mail e-mail versand smtp gmail google vorlage test umleitung email sending template' },
+  // C11b: Fristen und Gebuehr der Mahnstufen; die Texte stehen unter E-Mail & Versand.
+  // C11c: Nachfassen vor Ablauf eines Angebots (Flow f2); Abstand als Feld, Mailtext darunter.
+  { id: 'nachfassen', l: 'Nachfassen', g: 'Belege', sub: 'Angebote kurz vor Ablauf · Abstand und Mailtext', kw: 'nachfassen angebot ablauf erinnerung follow-up quote expiry reminder', felder: ['nachfassenTageVorAblauf'] },
+  { id: 'mahnwesen', l: 'Mahnwesen', g: 'Belege', sub: 'Fristen je Mahnstufe und Mahngebühr · Texte unter E-Mail & Versand', kw: 'mahnung erinnerung mahngebühr frist zahlungserinnerung dunning reminder fee',
+    felder: ['erinnerungNachTagen', 'mahnung1NachTagen', 'mahnung2NachTagen', 'neueFristTage', 'gebuehrStufe2Eur'] },
+  // C11c-Nachtrag: Versandzeit des Tages-Scans fuer alle Flows (flows.js versandZeit); Wochenende als 0/1 (EINSTELLUNGEN kennt nur Zahlen).
+  { id: 'flows', l: 'Flows', g: 'Belege', sub: 'gilt für alle Flows · Ortszeit dieses Rechners', kw: 'flows scan uhrzeit stunde wochenende samstag sonntag automatisch versandzeit time hour weekend automatic', felder: ['flowsAbStunde', 'flowsWochenende'] },
   // Cira (C2): Stufen T1/T2, Claude-Limit, Nicht stoeren. claude.exe nur in config.json.
   { id: 'cira', l: 'Cira', g: 'Assistent', sub: 'Antwortstufen, Claude-Limit, Nicht stören', kw: 'cira assistent ollama claude limit modell anrede nicht stören stimme sprache mikrofon vorlesen elevenlabs whisper assistant model quiet voice speech microphone' },
   { id: 'darstellung', l: 'Darstellung', g: 'System', sub: 'Sprache, Theme und Bewegung', kw: 'sprache englisch deutsch bewegung animation language motion theme hell dunkel light dark' },
@@ -189,13 +232,21 @@ const E_HINWEIS = {
   gapMinutes: 'Lücke, ab der eine Sitzung als unterbrochen gilt', vergleichsFaktor: '0 schaltet die Kennzahl ab · höchstens 1,5',
   email: 'Kontaktstelle für die E-Rechnung', land: 'zweistelliges Kürzel, z. B. DE', kleinunternehmer: 'Belege ohne Umsatzsteuer, mit Hinweis',
   zahlungszielTage: 'für neue Rechnungen · gestellte behalten ihr Fälligkeitsdatum',
+  angebotGueltigTage: 'für neue Angebote · bestehende behalten ihr Datum',
   tagessollStunden: 'Grundlage für Arbeitszeit heute und Workload',
+  erinnerungNachTagen: 'ab Fälligkeit gerechnet · ab dann schlägt das Werkzeug die Zahlungserinnerung vor',
+  mahnung1NachTagen: 'ab dem Versand der Zahlungserinnerung', mahnung2NachTagen: 'ab dem Versand der 1. Mahnung',
+  neueFristTage: 'gilt für jedes Schreiben, ab dem Tag des Erzeugens',
+  gebuehrStufe2Eur: 'nur auf der 2. Mahnung · 0 = keine Gebühr · höchstens 40 € · Gegenüber Unternehmen bis 40 € Pauschale (§ 288 Abs. 5 BGB), gegenüber Verbrauchern nur tatsächliche Kosten.',
+  nachfassenTageVorAblauf: 'Tage vor Ablauf der Gültigkeit · einmal je Angebot · muss unter der Gültigkeit neuer Angebote liegen',
   limit5hTokens: 'Cira-Karte: Tokens, die du je 5-h-Fenster von Claude erwartest · deine Schätzung · 0 blendet aus',
+  flowsAbStunde: 'volle Stunde 0 bis 23 · Standard 9', flowsWochenende: '0 = nur Montag bis Freitag · 1 = auch Samstag und Sonntag',
 };
 const E_EINHEIT = {
   stundensatz: 'EUR/h', selbstkostenStunde: 'EUR/h', zielmargeProzent: '%', aboPreisMonat: 'EUR', gapMinutes: 'Min', vergleichsFaktor: '×',
-  lokalEurProMioTokens: 'EUR', lokalSelbstkostenStunde: 'EUR/h', lokalZuordnungsfenster: 'Min', ustSatz: '%', zahlungszielTage: 'Tage',
+  lokalEurProMioTokens: 'EUR', lokalSelbstkostenStunde: 'EUR/h', lokalZuordnungsfenster: 'Min', ustSatz: '%', zahlungszielTage: 'Tage', angebotGueltigTage: 'Tage',
   tagessollStunden: 'h', limit5hTokens: 'Tokens',
+  nachfassenTageVorAblauf: 'Tage', erinnerungNachTagen: 'Tage', mahnung1NachTagen: 'Tage', mahnung2NachTagen: 'Tage', neueFristTage: 'Tage', gebuehrStufe2Eur: 'EUR',
 };
 
 const ez = {
@@ -207,6 +258,7 @@ const ez = {
   tNeu: [],                                       // tmp-Ids neuer Taetigkeiten
   ab: { d: null, fehler: null, laedt: false },    // /api/arbeitsbereiche
   cira: { d: null, fehler: null, laedt: false },  // /api/cira/einstellungen
+  mail: { d: null, fehler: null, laedt: false },  // /api/mail/einstellungen
   mod: { d: null, fehler: null, laedt: false },   // /api/modelle (Liste, Laufzeit, Ordner)
   falsch: { d: null, fehler: null, laedt: false }, // /api/cira/falsch
   mv: { ordner: null, ordnerFrage: null, ladeFrage: null, fort: null }, // Ordner aendern / Modell laden
@@ -340,6 +392,8 @@ async function speichereAbschnitt(a) {
     } else {
       const r = await sende('/api/einstellungen', daten);
       for (const [f, v] of Object.entries(r.geaendert || {})) if (W[f]) W[f].wert = v;
+      // Versandzeit (Flows): der Server sagt, ob der heutige Scan dadurch gleich losgeht.
+      if (r.scan_sofort) toast(uebersetze('Gilt sofort: der heutige Scan startet binnen einer Minute'), 'warn');
     }
     for (const f of geaendert) {
       if (kz.entwurf[eKey(f)] === gesendet[f]) delete kz.entwurf[eKey(f)];
@@ -631,9 +685,9 @@ function darstellungHtml() {
         '<span class="spur"></span>' + esc(uebersetze(reduziert ? 'an' : 'aus')) + '</button></div></div></div>' +
     // Startseite (Handoff §4.3): gilt, wenn die Adresse keinen Bereich nennt. Je Browser.
     '<div class="einst-feld"><span class="l">' + esc(uebersetze('Startseite')) + '<small>' + esc(uebersetze('öffnet ohne Adresse eines Bereichs')) + '</small></span>' +
-      '<div class="w"><div class="zeile">' + segment('e-start', STARTSEITEN.map((k) => [k, seitenName(seiteVon(k))]), lies('start', START_STANDARD), 'Startseite') + '</div></div></div>';
+      '<div class="w"><div class="zeile">' + segment('e-start', STARTSEITEN.map((k) => [k, seitenName(seiteVon(k))]), lies('start', START_STANDARD).replace(/^board$/, 'projekte'), 'Startseite') + '</div></div></div>';
 }
-const STARTSEITEN = ['cockpit', 'sitzungen', 'werkzeuge', 'board', 'hub'];
+const STARTSEITEN = ['cockpit', 'sitzungen', 'werkzeuge', 'projekte', 'hub'];
 aktion('e-start', (k) => {
   if (!STARTSEITEN.includes(k)) return;
   merke('start', k);
@@ -1048,6 +1102,115 @@ aktion('e-springe', (wert) => {
   setTimeout(() => { if (ez.hl === hl) { ez.hl = null; const z = document.querySelector('.einst-feld.hl'); if (z) z.classList.remove('hl'); } }, 2600);
 });
 
+/* ---------- E-Mail & Versand (C11a) ----------
+   Speichert beim Verlassen des Felds ueber POST /api/mail/einstellungen. Die
+   Grenzen (Adresse, 1-500, 200/4000 Zeichen, Platzhalter) prueft der Server,
+   die HTML-Attribute spiegeln sie nur. Das Konto bleibt der Datei vorbehalten. */
+const ladeMailEinst = () => eLade(ez.mail, '/api/mail/einstellungen', (d) => (d && d.werte ? d : null));
+const MAIL_VORLAGE_TITEL = { rechnung: 'Vorlage Rechnung', angebot: 'Vorlage Angebot', erinnerung: 'Vorlage Zahlungserinnerung', mahnung1: 'Vorlage 1. Mahnung', mahnung2: 'Vorlage 2. Mahnung', nachfassen: 'Vorlage Nachfassen' };
+// Je Vorlage kommt die Liste vom Server (platzhalter); andere lehnt er beim Speichern ab.
+const MAIL_PLATZHALTER = ['nr', 'datum', 'brutto', 'faellig', 'gueltig', 'anrede', 'absender'];
+const mailEigen = (art) => !!(ez.mail.d.werte.vorlagen || {})[art];
+// Gespeicherter Wert; Vorlagen je Feld vor dem Standard wie belegNachricht in mail.js.
+function mailGespeichert(feld) {
+  const [art, v, t] = feld.split(':');
+  if (art === 'vorlage') return ((ez.mail.d.werte.vorlagen || {})[v] || {})[t] || ez.mail.d.standard[v][t];
+  const w = ez.mail.d.werte[feld];
+  return w == null ? '' : String(w);
+}
+const mailWert = (feld) => (kz.entwurf['mail:' + feld] != null ? kz.entwurf['mail:' + feld] : mailGespeichert(feld));
+
+function versandHtml(nurNachfassen) {
+  if (!ez.mail.d) {
+    ladeMailEinst();
+    return ez.mail.fehler ? leer('liste', 'Einstellungen nicht geladen', ez.mail.fehler, '<button type="button" class="knopf klein" data-aktion="e-neu">' + esc(uebersetze('Erneut versuchen')) + '</button>')
+      : '<div class="leer">' + esc(uebersetze('Lädt …')) + '</div>';
+  }
+  const st = ez.mail.d.status, k = ez.mail.d.konto;
+  const zeile = (titel, unter, rechts, key, fuer) => '<div class="einst-feld"><' + (fuer ? 'label for="' + fuer + '"' : 'span') + ' class="l">' + esc(uebersetze(titel)) +
+      (unter ? '<small>' + unter + '</small>' : '') + '</' + (fuer ? 'label' : 'span') + '>' +
+    '<div class="w"><div class="zeile">' + rechts + '</div>' + (key ? feldMeldung(key) : '') + '</div></div>';
+  const attr = (feld, mkey) => ' id="em-' + feld.replace(/:/g, '-') + '" data-mailfeld="' + feld + '" aria-describedby="m-' + mkey + '"' + (kz.fehler[mkey] ? ' aria-invalid="true"' : '');
+  const konto = k.benutzer || k.host ? [k.benutzer, k.host, k.absender.adresse].filter(Boolean).join(' · ') : uebersetze('noch keins eingetragen');
+  const vorlage = (art) => {
+    const mkey = 'mail:vorlage:' + art, titel = uebersetze(MAIL_VORLAGE_TITEL[art]);
+    return '<div class="einst-feld e-vorlage"><span class="l">' + esc(titel) +
+        '<small>' + esc(uebersetze('Platzhalter') + ': ' + ((ez.mail.d.platzhalter || {})[art] || MAIL_PLATZHALTER).map((p) => '{{' + p + '}}').join(' ') + (mailEigen(art) ? ' · ' + uebersetze('eigene Vorlage') : '')) + '</small></span>' +
+      '<div class="w"><input class="eingabe text" maxlength="200" value="' + esc(mailWert('vorlage:' + art + ':betreff')) + '" aria-label="' + esc(titel + ' · ' + uebersetze('Betreff')) + '"' + attr('vorlage:' + art + ':betreff', mkey) + '>' +
+        '<textarea class="eingabe text" rows="7" maxlength="4000" aria-label="' + esc(titel + ' · ' + uebersetze('Nachricht')) + '"' + attr('vorlage:' + art + ':text', mkey) + '>' + esc(mailWert('vorlage:' + art + ':text')) + '</textarea>' +
+        (mailEigen(art) ? '<div class="zeile"><button type="button" class="knopf klein geist" data-aktion="e-mail-standard" data-wert="' + art + '">' + esc(uebersetze('Standard wiederherstellen')) + '</button></div>' : '') +
+        feldMeldung(mkey) + '</div></div>';
+  };
+  if (nurNachfassen) return vorlage('nachfassen');   // Abschnitt "Nachfassen": nur der Mailtext, das Konto gehoert zu E-Mail & Versand
+  return zeile('Versandkonto', esc(konto) + ' · <span class="faint">' + esc(uebersetze('in config.json')) + '</span> · ' +
+        esc(uebersetze('Getestet mit Google (App-Passwort). Microsoft-Konten (Outlook/Hotmail) gehen noch nicht — die verlangen OAuth und kommen später.')) +
+        '<span class="e-mail-status" id="e-mail-grund"></span>',
+      '<span class="pille ' + (st.bereit ? 'ok' : 'warn') + '">' + esc(uebersetze(st.bereit ? 'bereit' : 'nicht bereit')) + '</span>') +
+    zeile('Testmodus-Adresse', esc(uebersetze('leer = Mails gehen an die Kunden')) + ' ' + infoI('mail-test'),
+      '<input class="eingabe text" type="email" maxlength="254" spellcheck="false" value="' + esc(mailWert('umleitenAn')) + '"' + attr('umleitenAn', 'mail:umleitenAn') + '>', 'mail:umleitenAn', 'em-umleitenAn') +
+    infoText('mail-test', 'Ist hier eine Adresse eingetragen, geht jede Mail nur an sie. Der eigentliche Empfänger steht im Betreff („[TEST an …]“), Testmails zählen nirgends als zugestellt. Leer lassen, sobald Mails wirklich an Kunden gehen sollen.') +
+    zeile('Tagesgrenze', esc(uebersetze('1 bis 500 Mails je Kalendertag · schützt vor einer Schleife')),
+      '<input class="eingabe zahl" type="number" min="1" max="500" step="1" inputmode="numeric" value="' + esc(mailWert('tagesgrenze')) + '"' + attr('tagesgrenze', 'mail:tagesgrenze') + '>' +
+      '<span class="einheit">' + esc(uebersetze('Mails/Tag')) + '</span>', 'mail:tagesgrenze', 'em-tagesgrenze') +
+    Object.keys(MAIL_VORLAGE_TITEL).filter((a) => a !== 'nachfassen').map(vorlage).join('') +
+    zeile('', '', '<button type="button" class="knopf klein" data-aktion="e-mail-test"' + (st.bereit ? '' : ' disabled') + '>' + esc(uebersetze('Testmail senden')) + '</button>');
+}
+// Nach dem Zeichnen: Grund vom Server nur als Text.
+function mailStatusText() {
+  const el = document.getElementById('e-mail-grund');
+  if (!el || !ez.mail.d) return;
+  const st = ez.mail.d.status;
+  el.textContent = (st.bereit ? '' : (st.grund || '') + ' · ') + fuelle('heute {n} von {g} Mails — gesendet oder Zustellung unklar', { n: num(st.heute || 0), g: num(st.grenze) });
+  el.classList.toggle('warn', !st.bereit);
+}
+async function speichereMail(feld) {
+  if (!ez.mail.d) return;
+  const [art, v] = feld.split(':');
+  // Eine Vorlage geht immer mit Betreff und Text zusammen raus, die Meldung gilt fuer beide.
+  const felder = art === 'vorlage' ? ['vorlage:' + v + ':betreff', 'vorlage:' + v + ':text'] : [feld];
+  const mkey = art === 'vorlage' ? 'mail:vorlage:' + v : 'mail:' + feld;
+  if (felder.every((f) => mailWert(f) === mailGespeichert(f))) { for (const f of felder) delete kz.entwurf['mail:' + f]; return; }
+  const gesendet = Object.fromEntries(felder.map((f) => [f, mailWert(f)]));
+  const daten = art === 'vorlage' ? { vorlagen: { [v]: { betreff: gesendet[felder[0]], text: gesendet[felder[1]] } } } : { [feld]: gesendet[feld].trim() };
+  try {
+    ez.mail.d = await sende('/api/mail/einstellungen', daten);
+    for (const f of felder) if (kz.entwurf['mail:' + f] === gesendet[f]) delete kz.entwurf['mail:' + f];
+    delete kz.fehler[mkey];
+    kz.ok[mkey] = Date.now();
+    blendeOkAus(mkey, () => zeigeMeldung('m-' + mkey, mkey));
+    vsStatus.zeit = 0;   // Editor-Knopf fragt beim naechsten Zeichnen neu
+  } catch (err) {
+    kz.fehler[mkey] = err.message;
+    delete kz.ok[mkey];
+  }
+  zeigeMeldung('m-' + mkey, mkey);
+  for (const f of felder) {
+    const i = document.querySelector('[data-mailfeld="' + f + '"]');
+    if (i) { if (kz.fehler[mkey]) i.setAttribute('aria-invalid', 'true'); else i.removeAttribute('aria-invalid'); }
+  }
+  if (!kz.fehler[mkey]) zeichneAnsicht();
+}
+aktion('e-mail-standard', (art, knopf) => mitLauf(knopf, async () => {
+  if (!Object.hasOwn(MAIL_VORLAGE_TITEL, art)) return;
+  try {
+    ez.mail.d = await sende('/api/mail/einstellungen', { vorlagen: { [art]: null } });
+    for (const t of ['betreff', 'text']) delete kz.entwurf['mail:vorlage:' + art + ':' + t];
+    delete kz.fehler['mail:vorlage:' + art];
+    toast(uebersetze('Vorlage zurückgesetzt'), 'ok');
+  } catch (err) { toast(uebersetze('Vorlage nicht zurückgesetzt') + ': ' + err.message, 'err'); }
+  zeichneAnsicht();
+}));
+// Ohne Schluessel: jeder Klick ist eine eigene Testmail; mitLauf sperrt den Doppelklick.
+aktion('e-mail-test', (w, knopf) => mitLauf(knopf, async () => {
+  try {
+    const r = await sende('/api/mail/test', {});
+    if (r.status === 'ok') toast(fuelle('Testmail gesendet an {a}', { a: ez.mail.d.werte.umleitenAn || ez.mail.d.konto.absender.adresse }), 'ok');
+    else toast(uebersetze('Testmail nicht gesendet') + ': ' + (r.fehler || ''), 'err');
+  } catch (err) { toast(uebersetze('Testmail nicht gesendet') + ': ' + err.message, 'err'); }
+  try { ez.mail.d = await hole('/api/mail/einstellungen'); } catch { /* alter Stand bleibt */ }
+  if (route().name === 'einstellungen') zeichneAnsicht();
+}));
+
 /* ---------- Geraete (S1) ----------
    Nur gekoppelte Geraete schreiben; der Code zum Koppeln erscheint auf dem
    Desktop. Entfernen entwertet das Token sofort. */
@@ -1114,7 +1277,9 @@ function zeichneEinstellungen(w, teile) {
     let k;
     if (A.felder) {
       k = ez.e.fehler ? leer('liste', 'Einstellungen nicht geladen', ez.e.fehler, '<button type="button" class="knopf klein" data-aktion="e-neu">' + esc(uebersetze('Erneut versuchen')) + '</button>')
-        : !ez.e.d ? '<div class="leer">' + esc(uebersetze('Lädt …')) + '</div>' : A.felder.map((f) => feldZeile(f, false)).join('') + (A.id === 'lokal' ? modellVerwaltungHtml() : '');
+        : !ez.e.d ? '<div class="leer">' + esc(uebersetze('Lädt …')) + '</div>' : A.felder.map((f) => feldZeile(f, false)).join('') + (A.id === 'lokal' ? modellVerwaltungHtml() : '') + (A.id === 'nachfassen' ? versandHtml(true) : '') +
+          (A.id === 'flows' ? '<p class="faint">' + esc(uebersetze('So wirkt die Versandzeit')) + ' ' + infoI('e-flows') + '</p>' +
+            infoText('e-flows', 'Ab dieser Stunde prüft der tägliche Scan offene Rechnungen und Angebote und sendet, was fällig ist; läuft c2invoice zu der Zeit nicht, holt er es nach, sobald es läuft. Ohne Wochenende läuft er nur Montag bis Freitag. „Jetzt ausführen“ im Flow wartet auf keins von beiden. Eine Änderung gilt sofort: liegt die neue Stunde schon hinter dir und lief der Scan heute noch nicht, startet er binnen einer Minute. Gesetzliche Feiertage kennt der Scan nicht.') : '');
     } else if (A.stamm) {
       k = ez.s.fehler ? leer('liste', 'Stammdaten nicht geladen', ez.s.fehler, '<button type="button" class="knopf klein" data-aktion="e-neu">' + esc(uebersetze('Erneut versuchen')) + '</button>')
         : !ez.s.d ? '<div class="leer">' + esc(uebersetze('Lädt …')) + '</div>' : fehltHtml() + Object.keys(sWerte()).map((f) => feldZeile(f, true)).join('');
@@ -1126,6 +1291,7 @@ function zeichneEinstellungen(w, teile) {
     else if (A.id === 'arbeitsbereiche') k = arbeitsbereicheHtml();
     else if (A.id === 'geraete') k = geraeteHtml();
     else if (A.id === 'cira') k = ciraHtml();
+    else if (A.id === 'versand') k = versandHtml();
     else if (A.id === 'kalender') k = '<div id="e-zkal" class="zkal"></div>';
     else k = datenHtml();
     inhalt = '<div class="einst-karte"><div class="einst-kopf"><h2>' + esc(uebersetze(A.l)) + '</h2><span class="sub">' + esc(uebersetze(A.sub)) + '</span>' +
@@ -1137,6 +1303,7 @@ function zeichneEinstellungen(w, teile) {
   verdrahteSuche(w, 'e-suche', (v) => { ez.q = v; }, suche);
   fokusZurueck(w, fv);
   if (!ez.q.trim() && A.id === 'kalender') zKalLaden();
+  if (!ez.q.trim() && A.id === 'versand') mailStatusText();
   // Sprung aus der Suche: erst nach dem Zeichnen gibt es das Feld.
   if (ez.fokus) {
     const el = w.querySelector('#ef-' + CSS.escape(ez.fokus)) || w.querySelector('[data-feldzeile="' + CSS.escape(ez.fokus) + '"] button');
@@ -1152,6 +1319,7 @@ function zeichneEinstellungen(w, teile) {
     else if (t.dataset.taetfeld) kz.entwurf['ta:' + t.dataset.taet + ':' + t.dataset.taetfeld] = t.value;
     else if (t.dataset.abfeld) kz.entwurf['ab:' + t.dataset.ab + ':' + t.dataset.abfeld] = t.value;
     else if (t.dataset.cirafeld) kz.entwurf['cira:' + t.dataset.cirafeld] = t.value;
+    else if (t.dataset.mailfeld) kz.entwurf['mail:' + t.dataset.mailfeld] = t.value;
   });
   wurzel.addEventListener('focusout', (e) => {
     const t = e.target;
@@ -1179,6 +1347,7 @@ function zeichneEinstellungen(w, teile) {
     // Textfelder melden change beim Verlassen oder Enter, das Farbfeld beim Schliessen der Auswahl.
     if (e.target.dataset.abfeld) return speichereArbeitsbereich(e.target.dataset.ab, e.target.dataset.abfeld, e.target.value.trim());
     if (e.target.dataset.cirafeld) return speichereCira(e.target.dataset.cirafeld, e.target.value.trim());
+    if (e.target.dataset.mailfeld) return speichereMail(e.target.dataset.mailfeld);
     if (e.target.id === 'e-browserstimme') { merke('stimme', e.target.value); return; }
     if (e.target.id !== 'e-csv-von' && e.target.id !== 'e-csv-bis') return;
     const von = document.getElementById('e-csv-von').value, bis = document.getElementById('e-csv-bis').value;
@@ -1187,6 +1356,6 @@ function zeichneEinstellungen(w, teile) {
     document.getElementById('e-csv').href = '/api/export.csv?' + abfrage({ from: von, to: bis });
   });
 }
-aktion('e-neu', () => { ez.e.fehler = null; ez.s.fehler = null; ez.v.fehler = null; ez.t.fehler = null; ez.ab.fehler = null; zeichneAnsicht(); });
+aktion('e-neu', () => { ez.e.fehler = null; ez.s.fehler = null; ez.v.fehler = null; ez.t.fehler = null; ez.ab.fehler = null; ez.mail.fehler = null; zeichneAnsicht(); });
 
 registriere('einstellungen', { zeichne: zeichneEinstellungen });

@@ -271,7 +271,7 @@ function instrumentInhalt(id, D) {
         '<span><span class="leg-p" style="background:var(--accent)"></span>Claude ' + nf1.format(K.aktive_stunden) + '</span>' +
         '<span><span class="leg-p" style="background:var(--zeit-manuell)"></span>' + esc(uebersetze('manuell')) + ' ' + nf1.format(man) + '</span>' +
         '<span><span class="leg-p" style="background:var(--line-hover)"></span>' + esc(uebersetze('von')) + ' ' + nf1.format(K.agent_stunden) + ' h ' + esc(uebersetze('Agentenzeit')) + '</span></span>' +
-      // Offen = Claude-Zeit nicht abgerechneter Vorgaenge + offene manuelle Zeit (kennzahlen.offen_stunden zu offen_eur).
+      // Offen = Claude-Zeit nicht abgerechneter Vorgaenge + offene manuelle Zeit + bei Projekten der Rest laut Projektkonto (kennzahlen.offen_stunden zu offen_eur).
       '<a class="instr-link" href="#/vorgaenge">' + esc(uebersetze('Noch nicht abgerechnet')) + ' <b class="mono">' + nf1.format(K.offen_stunden || 0) + ' h · ' + eur(K.offen_eur) + '</b><span>→</span></a>';
   }
   if (id === 'burn') {
@@ -280,11 +280,13 @@ function instrumentInhalt(id, D) {
       '<div class="instr-fuss mitte"><span class="instr-wert akzent">' + nf2.format(b) + '</span><span class="hinweis">' + esc(uebersetze('USD/h · Skala 0–30')) + '</span></div>';
   }
   if (id === 'quote') {
-    const q = w.arbeitswert > 0 ? K.abgerechnet_eur / w.arbeitswert : 0;
-    const r = ring([{ v: K.abgerechnet_eur, c: 'var(--ok)' }, { v: K.offen_eur, c: OFFEN_FARBE }], 40);
+    const q = w.arbeitswert > 0 ? K.abgerechnet_gesamt_eur / w.arbeitswert : 0;
+    const r = ring([{ v: K.abgerechnet_gesamt_eur, c: 'var(--ok)' }, { v: K.offen_eur, c: OFFEN_FARBE }], 40);
     return '<div class="instr-ring">' + ringSvg(r, 96, 11) + '<div>' + zahlEinheit(nf1.format(q * 100), '%') +
         '<span class="hinweis">' + esc(uebersetze('abgerechnet')) + '</span></div></div>' +
-      '<div class="legenden">' + legende('var(--ok)', 'abgerechnet', eur(K.abgerechnet_eur)) + legende('var(--accent)', 'noch nicht abgerechnet', eur(K.offen_eur), 'var(--accent-text)') + '</div>';
+      '<div class="legenden">' + legende('var(--ok)', 'abgerechnet — Arbeitswert auf gestellten Rechnungen', eur(K.abgerechnet_gesamt_eur)) + legende('var(--accent)', 'noch nicht abgerechnet', eur(K.offen_eur), 'var(--accent-text)') + '</div>' +
+      // Meldung aus kennzahlen().ueberhang (nur Heute-Sicht): ein Projekt hat mehr Stunden berechnet als geleistet.
+      (K.ueberhang && K.ueberhang.length ? '<span class="hinweis">' + esc(uebersetze('mehr berechnet als geleistet')) + ': ' + K.ueberhang.map((u) => esc(u.projekt) + ' (+' + nf1.format(u.ueber_h) + ' h)').join(', ') + '</span>' : '');
   }
   if (id === 'agent') {
     const a = K.agent_stunden > 0 ? K.aktive_stunden / K.agent_stunden : 0;
@@ -347,7 +349,7 @@ const WIDGETS = [
   ['status', 'Vorgänge nach Status', 'noch nicht abgerechnet · abgerechnet', 2, 'vorgaenge', '◧', 'Was offen oder abgerechnet ist.'],
   ['heat', 'Aktivität', 'Heatmap + Serie', 2, 'analyse', '▦', 'Deine aktiven Tage und Serien.'],
   ['top', 'Top-Vorgänge', 'nach Gegenwert', 2, 'vorgaenge', '▲', 'Vorgänge mit dem meisten Gegenwert.'],
-  ['projekte', 'Nach Projekt', 'Anteil API-Gegenwert', 2, 'analyse', '≡', 'Verbrauch je Projekt.'],
+  ['projekte', 'Nach Projekt', 'Anteil API-Gegenwert', 2, 'projekte', '≡', 'Verbrauch je Projekt.'],
   ['rechnungen', 'Letzte Rechnungen', 'Status & Betrag', 3, 'rechnungen', '▤', 'Letzte Rechnungen mit Status.'],
   ['angebote', 'Angebote', 'offen / angenommen', 2, 'angebote', '▢', 'Offene und angenommene Angebote.'],
 ];
@@ -377,7 +379,7 @@ function statusInhalt(K) {
   const zeilen = [
     ['noch nicht abgerechnet', K.offen_vorgaenge, K.offen_vorgang_eur, 'var(--text-faint)'],
     ['abgerechnet', K.abgerechnet_vorgaenge, K.abgerechnet_eur, 'var(--ok)'],
-    ['ohne Vorgang', null, K.ohne_vorgang_eur, 'var(--line-hover)'],
+    ['ohne Vorgang — geleistet ohne Vorgang abzüglich berechneter Stunden', null, K.ohne_vorgang_eur, 'var(--line-hover)'],
   ];
   for (const z of zeilen) z[2] = Number(z[2]) || 0;
   const ges = zeilen.reduce((a, z) => a + z[2], 0) || 1;
@@ -470,8 +472,8 @@ function widgetInhalt(id, D) {
   if (id === 'projekte') {
     const p = (S.projects || []).filter((x) => !x.overhead && x.cost_usd > 0).sort((a, b) => b.cost_usd - a.cost_usd).slice(0, 6);
     const ges = p.reduce((a, x) => a + x.cost_usd, 0) || 1;
-    return '<div class="balken-liste">' + p.map((x) => '<div><span class="ell">' + esc(x.project) + '</span><span class="balken-duenn"><span style="width:' + (x.cost_usd / ges * 100).toFixed(1) + '%;background:var(--accent)"></span></span>' +
-      '<span class="mono">' + nf1.format(x.cost_usd / ges * 100) + ' %</span></div>').join('') + '</div>';
+    return '<div class="balken-liste">' + p.map((x) => '<a href="#/projekte/p/' + encodeURIComponent(x.project) + '"><span class="ell">' + esc(x.project) + '</span><span class="balken-duenn"><span style="width:' + (x.cost_usd / ges * 100).toFixed(1) + '%;background:var(--accent)"></span></span>' +
+      '<span class="mono">' + nf1.format(x.cost_usd / ges * 100) + ' %</span></a>').join('') + '</div>';
   }
   if (id === 'rechnungen' || id === 'angebote') {
     const liste = id === 'rechnungen' ? (state.rechnungen || []) : (state.angebote || []);
@@ -599,7 +601,7 @@ function hubHero(D) {
   let summe = 0;
   const kum = (S.days || []).map((d) => (summe += d.active_seconds || 0));
   const a = area(kum.length > 1 ? kum : [0, summe], 600, 160, 10);
-  const abgA = w.arbeitswert > 0 ? Math.min(100, K.abgerechnet_eur / w.arbeitswert * 100) : 0;
+  const abgA = w.arbeitswert > 0 ? Math.min(100, K.abgerechnet_gesamt_eur / w.arbeitswert * 100) : 0;
   const z = aktuellerZeitraum();
   const L = state.live;
   const b = L ? L.burn_usd_per_hour : 0;
@@ -616,7 +618,7 @@ function hubHero(D) {
         '<div class="hero-zahl"><span class="mono" id="hero-erloes">' + nf2.format(w.erloes) + '</span><span class="einheit">EUR</span>' +
           (state.vergleich && vorher ? '<span class="hero-delta">' + delta(w.erloes, vorher) + '<span>' + esc(uebersetze('ggü.')) + ' ' + esc(zeitraumText({ von: z.vorVon, bis: z.vorBis })) + '</span></span>' : '') + '</div>' +
         '<div class="hero-band"><div class="band"><span style="width:' + abgA.toFixed(1) + '%;background:var(--ok)"></span><span class="offen" style="width:' + (100 - abgA).toFixed(1) + '%"></span></div>' +
-          '<div class="band-leg"><span><span class="leg-p" style="background:var(--ok)"></span>' + esc(uebersetze('abgerechnet')) + ' <b class="mono">' + eur(K.abgerechnet_eur) + '</b></span>' +
+          '<div class="band-leg"><span><span class="leg-p" style="background:var(--ok)"></span>' + esc(uebersetze('abgerechnet — Arbeitswert auf gestellten Rechnungen')) + ' <b class="mono">' + eur(K.abgerechnet_gesamt_eur) + '</b></span>' +
           '<span><span class="leg-p" style="background:var(--accent)"></span>' + esc(uebersetze('noch nicht abgerechnet')) + ' <b class="mono akzent">' + eur(K.offen_eur) + '</b> ' +
             esc(uebersetze('in')) + ' ' + K.offen_vorgaenge + ' ' + esc(uebersetze(K.offen_vorgaenge === 1 ? 'Vorgang' : 'Vorgängen')) + '</span></div></div>' +
       '</div></div>' +

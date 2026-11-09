@@ -6,7 +6,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const DATA_DIR = path.join(__dirname, 'data');
-const DB_PATH = path.join(DATA_DIR, 'ledger.db');
+// C2I_DB (absoluter Pfad) biegt die Ablage um; test/config-kopie.js setzt sie
+// auf eine Wegwerf-Datei, damit Tests nie die echte DB migrieren oder beschreiben.
+const DB_PATH = process.env.C2I_DB ? path.resolve(process.env.C2I_DB) : path.join(DATA_DIR, 'ledger.db');
 
 function open(dbPath = DB_PATH) {
   if (dbPath !== ':memory:') fs.mkdirSync(path.dirname(dbPath), { recursive: true });
@@ -271,6 +273,7 @@ function migrate(db) {
   // Eigene Kundennummer, nur wenn von Hand vergeben. Leer heisst: die
   // automatische aus der Kontakt-ID (kontakte.js), die nie neu vergeben wird.
   addColumn(db, 'kontakte', 'kundennummer', 'TEXT');
+  addColumn(db, 'kontakte', 'mahnpause_bis', 'TEXT'); // C11b: bis dahin keine Mahnung
   // An der Rechnung: der Tag der Faelligkeit. Vorher wurde er beim Anzeigen
   // aus dem aktuellen Zahlungsziel gerechnet — ein geaendertes Zahlungsziel
   // verschob damit die Faelligkeit bereits gestellter Rechnungen.
@@ -613,7 +616,142 @@ function migrate(db) {
       fehler   TEXT
     );
   `);
+  // C11a: Versandprotokoll. Je Mail eine Zeile (ok/fehler); lauf_id+nr und schluessel
+  // sind die Sperren gegen doppelten Versand (Engine-Lauf bzw. Mahnstufe).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS versand (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      zeit        TEXT NOT NULL,
+      art         TEXT NOT NULL CHECK(art IN ('rechnung','angebot','erinnerung','mahnung1','mahnung2','nachfassen','test','benachrichtigung')),
+      bezug       TEXT,
+      an          TEXT,
+      an_original TEXT,
+      betreff     TEXT,
+      status      TEXT NOT NULL CHECK(status IN ('ok','fehler')),
+      fehler      TEXT,
+      message_id  TEXT,
+      eml_pfad    TEXT,
+      test        INTEGER NOT NULL DEFAULT 0,
+      lauf_id     INTEGER,
+      nr          INTEGER,
+      schluessel  TEXT
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS versand_lauf ON versand(lauf_id, nr) WHERE lauf_id IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS versand_schluessel ON versand(schluessel) WHERE schluessel IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS versand_bezug ON versand(bezug, zeit);
+  `);
+  // C11b: Mahnschreiben als Abschrift (Betreff, Text, Betraege, Frist beim Erzeugen eingefroren).
+  // Stufe 1 = Zahlungserinnerung, 2 = 1. Mahnung, 3 = 2. Mahnung. Je Rechnung und Stufe
+  // hoechstens ein 'gesendet' (Testversand und Fehlversuche sperren nicht).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS mahnung (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      rechnung_nr TEXT NOT NULL,
+      stufe       INTEGER NOT NULL CHECK(stufe IN (1,2,3)),
+      erstellt    TEXT NOT NULL,
+      frist       TEXT NOT NULL,
+      offen_eur   REAL NOT NULL,
+      gebuehr_eur REAL NOT NULL DEFAULT 0,
+      betreff     TEXT NOT NULL,
+      text        TEXT NOT NULL,
+      an          TEXT,
+      pdf_pfad    TEXT,
+      versand_id  INTEGER,
+      kanal       TEXT CHECK(kanal IN ('mail','post')),
+      status      TEXT NOT NULL CHECK(status IN ('erzeugt','gesendet','test','fehler')),
+      fehler      TEXT,
+      gesendet_am TEXT
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS mahnung_einmal ON mahnung(rechnung_nr, stufe) WHERE status = 'gesendet';
+    CREATE INDEX IF NOT EXISTS mahnung_rechnung ON mahnung(rechnung_nr, stufe);
+  `);
+  // C11c: Flows. Kanten stehen als `outs` im Knoten (knoten_json); ein Lauf schreibt je Schritt eine Zeile.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS flow (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      titel          TEXT NOT NULL,
+      aktiv          INTEGER NOT NULL DEFAULT 0,
+      ausloeser_json TEXT NOT NULL DEFAULT '{}',
+      knoten_json    TEXT NOT NULL DEFAULT '[]',
+      version        INTEGER NOT NULL DEFAULT 1,
+      vorlage        TEXT UNIQUE
+    );
+    CREATE TABLE IF NOT EXISTS flow_lauf (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      flow_id        INTEGER NOT NULL,
+      wurzel_id      INTEGER,
+      start          TEXT NOT NULL,
+      ende           TEXT,
+      status         TEXT NOT NULL CHECK(status IN ('laeuft','ok','warn','err','skip')),
+      betreff        TEXT,
+      ausloeser_json TEXT,
+      bezug          TEXT,
+      schluessel     TEXT,
+      test           INTEGER NOT NULL DEFAULT 0,
+      fehler         TEXT,
+      fehler_schritt INTEGER
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS flow_lauf_schluessel ON flow_lauf(flow_id, schluessel) WHERE schluessel IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS flow_lauf_flow ON flow_lauf(flow_id, start);
+    CREATE TABLE IF NOT EXISTS flow_schritt (
+      lauf_id      INTEGER NOT NULL,
+      nr           INTEGER NOT NULL,
+      node_id      TEXT NOT NULL,
+      typ          TEXT NOT NULL,
+      titel        TEXT,
+      status       TEXT NOT NULL,
+      ms           INTEGER,
+      meldung      TEXT,
+      eingang_json TEXT,
+      ausgang_json TEXT,
+      PRIMARY KEY(lauf_id, nr)
+    );
+  `);
+  addColumn(db, 'flow_lauf', 'kein_retry', 'INTEGER NOT NULL DEFAULT 0');   // C11c: Mail ging raus, Status fehlt: der Lauf darf nie wiederholt werden
+  db.prepare("UPDATE flow_lauf SET kein_retry = 1 WHERE status = 'err' AND kein_retry = 0 AND fehler LIKE 'Mail ging raus%'").run();
   addColumn(db, 'cira_nachricht', 'gesprochen', 'INTEGER');
+  // C12: Leads als eigene Datensaetze. Lead-ID = 'L-'+id (AUTOINCREMENT, nie
+  // neu vergeben, deshalb nicht gespeichert). kunde_id: Bezug solange offen,
+  // Ziel nach der Umwandlung. kontakte.status bleibt physisch, jede Zeile ist Kunde.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS leads (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      firma          TEXT NOT NULL DEFAULT '',
+      vorname        TEXT NOT NULL DEFAULT '',
+      nachname       TEXT NOT NULL DEFAULT '',
+      email          TEXT NOT NULL DEFAULT '',
+      telefon        TEXT NOT NULL DEFAULT '',
+      anschrift      TEXT NOT NULL DEFAULT '[]',
+      notiz          TEXT NOT NULL DEFAULT '',
+      quelle         TEXT NOT NULL DEFAULT 'sonstiges',
+      status         TEXT NOT NULL DEFAULT 'offen',
+      verloren_grund TEXT,
+      verloren_am    TEXT,
+      kunde_id       INTEGER,
+      umgewandelt_am TEXT,
+      umwandlung_art TEXT,
+      erstellt_am    TEXT NOT NULL,
+      geaendert_am   TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_leads_email ON leads(email COLLATE NOCASE);
+  `);
+  // Angebot an einen Lead (ohne FK, wie kontakt_id).
+  addColumn(db, 'angebote', 'lead_id', 'INTEGER');
+  if (getMeta(db, 'c12_leads_umzug') === null) {
+    // IMMEDIATE + zweiter Blick: starten zwei Prozesse gleichzeitig, wartet der
+    // zweite (busy_timeout) und findet den Waechter dann gesetzt.
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      if (getMeta(db, 'c12_leads_umzug') === null) {
+        leadsUmzug(db);
+        setMeta(db, 'c12_leads_umzug', new Date().toISOString());
+      }
+      db.exec('COMMIT');
+    } catch (err) {
+      db.exec('ROLLBACK');
+      throw err;
+    }
+  }
   // Saat genau einmal: eine geloeschte Taetigkeit kaeme sonst bei jedem Start zurueck.
   if (getMeta(db, 'taetigkeiten_gesaet') === null) {
     const ein = db.prepare('INSERT OR IGNORE INTO taetigkeitsart (name, satz, parallel) VALUES (?, NULL, ?)');
@@ -622,6 +760,93 @@ function migrate(db) {
     }
     setMeta(db, 'taetigkeiten_gesaet', new Date().toISOString());
   }
+}
+
+// C12 Einmal-Umzug (in der Transaktion des Aufrufers):
+// 1. Leads ohne Bindung (Rechnung, Projekt, Zeit- oder Terminbuchung auf den
+//    Kunden) ziehen nach leads, ihre Angebote haengen dann am Lead.
+// 2. Alle verbleibenden Kontakte sind Kunden.
+// 3. Jeder Kunde bekommt eine gespeicherte Kundennummer, nach erstellt_am:
+//    eigene behalten, sonst die aus der neuesten Rechnungsabschrift, sonst neu.
+//    Neue Nummern liegen ueber jeder K-Nummer, behalten oder auf einem Beleg (R13).
+// 4. Unique-Index + Zaehler. Doppelte Nummern (NOCASE) wuerden den Index und
+//    damit den Start scheitern lassen: der zeitlich erste behaelt sie, der
+//    spaetere bekommt eine neue (console.warn, Paar in meta c12_umnummeriert).
+function leadsUmzug(db) {
+  const jetzt = new Date().toISOString();
+  const frei = db.prepare(`
+    SELECT k.* FROM kontakte k WHERE k.status = 'lead'
+      AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.kontakt_id = k.id)
+      AND NOT EXISTS (SELECT 1 FROM projekt_kontakt p WHERE p.kontakt_id = k.id)
+      AND NOT EXISTS (SELECT 1 FROM zeit_eintrag z WHERE z.ziel_art = 'kunde' AND z.ziel_schluessel = CAST(k.id AS TEXT))
+      AND NOT EXISTS (SELECT 1 FROM termin t WHERE t.ziel_art = 'kunde' AND t.ziel_schluessel = CAST(k.id AS TEXT))
+  `).all();
+  const partner = db.prepare('SELECT name, email, telefon, rolle FROM ansprechpartner WHERE kontakt_id = ? ORDER BY id');
+  const neuerLead = db.prepare(`INSERT INTO leads (firma, vorname, nachname, email, telefon, anschrift, notiz, quelle, status, erstellt_am, geaendert_am)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'sonstiges', 'offen', ?, ?)`);
+  const t = (v) => String(v || '').trim();
+  for (const k of frei) {
+    const ps = partner.all(k.id);
+    // Was leads nicht als Spalte hat, wandert in die Notiz (der Umzug laeuft nur einmal).
+    const zeilen = [['Steuernummer', k.steuernummer], ['USt-IdNr.', k.ust_id_nr], ['Käuferreferenz', k.kaeufer_referenz],
+      ['Land', k.land], ['Lieferantennummer', k.lieferantennummer]].filter(([, v]) => t(v)).map(([n, v]) => n + ': ' + t(v));
+    for (const p of ps) {
+      const kopf = t(p.name) + (t(p.rolle) ? ' (' + t(p.rolle) + ')' : '');
+      const teile = [kopf, t(p.email), t(p.telefon)].filter(Boolean);
+      if (teile.length) zeilen.push('Ansprechpartner: ' + teile.join(', '));
+    }
+    const notiz = [t(k.notiz), zeilen.length ? 'Aus Kontakt übernommen:\n' + zeilen.join('\n') : ''].filter(Boolean).join('\n');
+    const email = t(k.email) || t((ps.find((p) => t(p.email)) || {}).email);
+    const telefon = t((ps.find((p) => t(p.telefon)) || {}).telefon);
+    const leadId = Number(neuerLead.run(k.firma, k.vorname, k.nachname, email, telefon,
+      k.anschrift, notiz, k.erstellt_am, k.geaendert_am || jetzt).lastInsertRowid);
+    db.prepare('UPDATE angebote SET lead_id = ?, kontakt_id = NULL WHERE kontakt_id = ?').run(leadId, k.id);
+    db.prepare('DELETE FROM ansprechpartner WHERE kontakt_id = ?').run(k.id);
+    db.prepare('DELETE FROM kontakte WHERE id = ?').run(k.id);
+  }
+  db.exec("UPDATE kontakte SET status = 'kunde'");
+
+  const ausBeleg = db.prepare(`SELECT json_extract(empfaenger, '$.kundennummer') AS kn FROM invoices
+    WHERE kontakt_id = ? AND json_valid(empfaenger) AND TRIM(COALESCE(json_extract(empfaenger, '$.kundennummer'), '')) <> ''
+    ORDER BY erstellt_am DESC, nr DESC LIMIT 1`);
+  const kunden = db.prepare('SELECT id, kundennummer FROM kontakte ORDER BY erstellt_am, id').all();
+  const vergeben = new Set();
+  const offen = [];
+  // Zaehlerstart (R13): ueber jeder K-Nummer, die auf einem Beleg steht — auch der
+  // eines geloeschten Kunden. Nur bis 9 Ziffern (S2): eine riesige Nummer liefe als
+  // 1e25 in den Zaehler, und zwei neue Kunden bekaemen dieselbe Nummer.
+  let zaehler = 0;
+  const zaehle = (nr) => {
+    const m = /^K-(\d{1,9})$/i.exec(String(nr || '').trim());
+    if (m) zaehler = Math.max(zaehler, Number(m[1]));
+  };
+  for (const r of db.prepare(`SELECT json_extract(empfaenger, '$.kundennummer') AS kn FROM invoices
+    WHERE json_valid(empfaenger) AND json_type(empfaenger, '$.kundennummer') = 'text'`).all()) zaehle(r.kn);
+  const umnummeriert = [];
+  for (const k of kunden) {
+    const eigen = (k.kundennummer || '').trim();
+    const nr = eigen || String((ausBeleg.get(k.id) || {}).kn || '').trim();
+    if (nr && !vergeben.has(nr.toUpperCase())) {
+      vergeben.add(nr.toUpperCase());
+      k.neu = nr;
+      zaehle(nr);
+    } else {
+      if (nr) console.warn(`[db] C12: Kundennummer ${nr} doppelt, Kontakt ${k.id} bekommt eine neue.`);
+      k.alt = nr;
+      offen.push(k);
+    }
+  }
+  for (const k of offen) {
+    k.neu = 'K-' + String(++zaehler).padStart(4, '0');
+    if (k.alt) umnummeriert.push({ kontakt_id: k.id, alt: k.alt, neu: k.neu });
+  }
+  const setze = db.prepare('UPDATE kontakte SET kundennummer = ? WHERE id = ?');
+  for (const k of kunden) if (k.neu !== k.kundennummer) setze.run(k.neu, k.id);
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS kontakte_kundennummer ON kontakte(kundennummer COLLATE NOCASE)
+    WHERE kundennummer IS NOT NULL AND kundennummer <> ''`);
+  setMeta(db, 'kundennummer_zaehler', zaehler);
+  // R12: gestellte Rechnungen tragen die alte Nummer; das Paar bleibt nachlesbar.
+  if (umnummeriert.length) setMeta(db, 'c12_umnummeriert', JSON.stringify(umnummeriert));
 }
 
 // ALTER TABLE ... ADD COLUMN wirft, wenn die Spalte schon da ist. Deshalb

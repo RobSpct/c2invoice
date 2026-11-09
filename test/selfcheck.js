@@ -20,32 +20,24 @@ if (!fs.existsSync(path.join(__dirname, '..', 'config.json'))) {
 // nur hier abgeschaltet; test/cira/s1.js schaltet den Schutz fuer sich wieder ein.
 process.env.C2I_GERAETESCHUTZ = 'aus';
 
-// Die Tests schreiben ueber schreibeConfig() und configGeschuetzt() in die
-// Konfiguration. Das landet in einer Kopie: bricht der Lauf mittendrin ab,
-// bleibt die echte config.json unberuehrt (Toolcheck 15.10., H8). Lesen geht
-// ebenfalls an die Kopie, sonst saehen Tests ihr eigenes Schreiben nicht.
-// Dasselbe Verfahren wie design/werkzeuge/probe.js.
-{
-  const echt = path.join(__dirname, '..', 'config.json');
-  const kopie = path.join(os.tmpdir(), 'c2invoice-selfcheck-' + process.pid + '-config.json');
-  fs.copyFileSync(echt, kopie);
-  const norm = (p) => (typeof p === 'string' || p instanceof URL ? path.resolve(String(p)).toLowerCase() : null);
-  const um = (p) => (norm(p) === echt.toLowerCase() ? kopie : norm(p) === (echt + '.tmp').toLowerCase() ? kopie + '.tmp' : p);
-  for (const name of ['readFileSync', 'writeFileSync', 'existsSync', 'rmSync', 'statSync']) {
-    const orig = fs[name];
-    fs[name] = (p, ...r) => orig(um(p), ...r);
-  }
-  const benenne = fs.renameSync;
-  fs.renameSync = (a, b) => benenne(um(a), um(b));
-  process.on('exit', () => { for (const f of [kopie, kopie + '.tmp']) try { fs.unlinkSync(f); } catch { /* weg */ } });
-}
+// Schreiben in die Konfiguration landet in einer Kopie (test/config-kopie.js).
+require('./config-kopie');
 
 const dbmod = require('../db');
 const ingest = require('../ingest');
 const metrics = require('../metrics');
 const pricing = require('../pricing');
+const verwirf = require('./verwirf');
 
 let failed = 0;
+// Jede FAIL-Zeile, gleich von welcher der rund 20 Meldestellen, fuer die
+// Zusammenfassung am Ende mitschreiben.
+const failZeilen = [];
+const logOriginal = console.log;
+console.log = (...args) => {
+  if (typeof args[0] === 'string' && args[0].startsWith('  FAIL ')) failZeilen.push(args[0].split('\n')[0]);
+  logOriginal(...args);
+};
 // Offene In-Memory-Datenbanken. Bleiben sie beim Prozessende offen, bricht
 // libuv unter Windows mit einer Assertion ab und der Exitcode wird unbrauchbar.
 const openDbs = [];
@@ -1854,6 +1846,33 @@ function testBuchenUnbekannteSitzung() {
     'Waisen-Override angelegt');
 }
 
+// Testlaeufe tragen keine Vorgaenge (P-R8). Ein Erfolg ohne Wirkung waere
+// schlimmer als ein Fehler: der Benutzer haelt die Zeit fuer gebucht.
+function testBuchenReineTestsitzung() {
+  const { bucheVorgang } = require('../server');
+  const { db, ereignis } = backfillDb();
+  ereignis('t1', 0, 's-rein', metrics.TEST_PROJEKT, null, 'dev', null);
+  ereignis('t2', 1, 's-misch', metrics.TEST_PROJEKT, null, 'dev', null);
+  ereignis('t3', 2, 's-misch', 'Projekt', null, 'dev', null);
+
+  assert.throws(() => bucheVorgang(db, { session_id: 's-rein', vorgang: 'PROJ-1' }), /Testlauf/,
+    'reine Testsitzung meldet Erfolg ohne Wirkung');
+  assert.strictEqual(db.prepare('SELECT COUNT(*) AS n FROM overrides').get().n, 0,
+    'Override auf reine Testsitzung angelegt');
+
+  // Gegenprobe: gemischte Sitzung bucht, und ihr Testteil bleibt ohne Vorgang.
+  assert.strictEqual(bucheVorgang(db, { session_id: 's-misch', vorgang: 'PROJ-1' }).ticket, 'PROJ-1');
+  const je = (id) => db.prepare('SELECT ticket FROM events WHERE request_id = ?').get(id).ticket;
+  assert.strictEqual(je('t3'), 'PROJ-1', 'echter Teil nicht gebucht');
+  assert.strictEqual(je('t2'), null, 'Testteil hat einen Vorgang bekommen');
+
+  // Aufheben bleibt moeglich: alte Eintraege muessen sich entfernen lassen.
+  db.prepare("INSERT INTO overrides (session_id, ticket, note, created_at) VALUES ('s-rein','ALT-1','alt','2026-01-01')").run();
+  bucheVorgang(db, { session_id: 's-rein', vorgang: '' });
+  assert.strictEqual(db.prepare("SELECT COUNT(*) AS n FROM overrides WHERE session_id = 's-rein'").get().n, 0,
+    'alter Eintrag laesst sich nicht aufheben');
+}
+
 function testBuchenUmbuchen() {
   const { bucheVorgang } = require('../server');
   const { db, ereignis } = backfillDb();
@@ -2440,31 +2459,24 @@ function testERechnung() {
 // Kleine Kunden nennen keine Referenz; die E-Rechnung verlangt aber eine
 // Kaeuferreferenz (BT-10). Die Kundennummer fuellt sie dann aus und steht
 // ausserdem als Kaeuferkennung (BT-46) in der Datei und auf dem Dokument.
+// Seit C12 fest vergeben und nicht mehr eingebbar (Zaehler, Dubletten, Wirkungslosigkeit
+// einer mitgeschickten Nummer: test/cira/c12.js).
 function testKundennummer() {
   rechnungsUmgebung((config) => {
     const rechnung = require('../rechnung');
     const erechnung = require('../erechnung');
     const kontakte = require('../kontakte');
     Object.assign(config.rechnung.aussteller, { email: 'rechnung@testfirma.example', telefon: '+49 221 123456' });
-    const auto = (id) => 'K-' + String(id).padStart(4, '0');
 
-    // 1. Automatisch, ueberschreibbar, eindeutig.
+    // 1. Automatisch vergeben und gespeichert; eine mitgeschickte bleibt wirkungslos.
     const db = rechnungsDb();
     const a = kontakte.speichere(db, { firma: 'Kleine Firma', anschrift: ['Weg 2', '10115 Berlin'], email: 'info@klein.example' });
-    assert.strictEqual(a.kundennummer, auto(a.id), 'keine automatische Kundennummer');
-    assert.strictEqual(a.kundennummer_eigen, false);
+    assert.strictEqual(a.kundennummer, 'K-0001', 'keine automatische Kundennummer');
+    assert.strictEqual(db.prepare('SELECT kundennummer FROM kontakte WHERE id = ?').get(a.id).kundennummer, 'K-0001',
+      'Kundennummer nicht gespeichert');
+    assert.ok(!('kundennummer_eigen' in a), 'kundennummer_eigen noch in der Antwort');
     const b = kontakte.speichere(db, { firma: 'Zweite GmbH', kundennummer: '10023' });
-    assert.strictEqual(b.kundennummer, '10023', 'eigene Kundennummer nicht uebernommen');
-    assert.strictEqual(b.kundennummer_eigen, true);
-    assert.throws(() => kontakte.speichere(db, { firma: 'Dritte', kundennummer: '10023' }), /Kundennummer/,
-      'doppelte Kundennummer angenommen');
-    // Das automatische Muster ist reserviert: K-0099 bekaeme spaeter der 99. Kontakt.
-    assert.throws(() => kontakte.speichere(db, { firma: 'Vierte', kundennummer: 'K-0099' }), /Kundennummer/,
-      'Kundennummer im automatischen Muster angenommen');
-    assert.strictEqual(kontakte.speichere(db, { id: a.id, kundennummer: a.kundennummer }).kundennummer, a.kundennummer,
-      'die eigene automatische Nummer laesst sich nicht bestaetigen');
-    assert.strictEqual(kontakte.speichere(db, { id: b.id, kundennummer: '' }).kundennummer, auto(b.id),
-      'leere Kundennummer faellt nicht auf die automatische zurueck');
+    assert.strictEqual(b.kundennummer, 'K-0002', 'eigene Kundennummer angenommen');
 
     // 2. Ohne Kaeuferreferenz: die Kundennummer traegt BT-10 und BT-46.
     const daten = {
@@ -2538,13 +2550,13 @@ async function testERechnungRoute() {
   const port = srv.server.address().port;
   try {
     for (const pfad of ['9999-9998', '9999-9998.xml']) {
-      const r = await fetch(`http://127.0.0.1:${port}/rechnung-xml/${pfad}`);
+      const r = await verwirf(fetch(`http://127.0.0.1:${port}/rechnung-xml/${pfad}`));
       assert.strictEqual(r.status, 404, 'Pfad "' + pfad + '" liefert ' + r.status + ' statt 404');
       assert.ok((r.headers.get('content-type') || '').includes('application/json'),
         'Route fehlt: "' + pfad + '" fiel bis zur Dateiauslieferung durch');
     }
     for (const pfad of ['..%2f..%2fconfig.json', 'abcd-efgh']) {
-      const r = await fetch(`http://127.0.0.1:${port}/rechnung-xml/${pfad}`);
+      const r = await verwirf(fetch(`http://127.0.0.1:${port}/rechnung-xml/${pfad}`));
       assert.strictEqual(r.status, 404, 'Pfad "' + pfad + '" liefert ' + r.status + ' statt 404');
     }
   } finally {
@@ -3172,7 +3184,9 @@ function testKontakte() {
     anschrift: ['Musterweg 1', '40210 Duesseldorf'], email: 'kontakt@muster.de',
   });
   assert.ok(k.id > 0, 'Kontakt bekam keine id');
-  assert.strictEqual(k.status, 'lead', 'Neuer Kontakt ist nicht als Lead angelegt');
+  // C12: jeder Kontakt ist Kunde (Leads sind eigene Datensaetze in leads.js).
+  assert.strictEqual(db.prepare('SELECT status FROM kontakte WHERE id = ?').get(k.id).status, 'kunde', 'Neuer Kontakt ist nicht als Kunde angelegt');
+  assert.ok(!('status' in k), 'ausZeile liefert noch status (C12: kein Statuswechsel mehr)');
   assert.deepStrictEqual(k.anschrift, ['Musterweg 1', '40210 Duesseldorf'],
     'Anschrift nicht als Liste gespeichert');
 
@@ -3194,8 +3208,11 @@ function testKontakte() {
     'ueberlange Firma angenommen');
   assert.throws(() => kontakte.speichere(db, { firma: {} }), /Text/,
     'Objekt als Firma angenommen');
-  assert.throws(() => kontakte.speichere(db, { firma: 'X', status: 'interessent' }),
-    /lead oder kunde/, 'unbekannter Status angenommen');
+  // status ist kein Eingabefeld mehr: mitgeschickt wird es verworfen, nie 'lead'.
+  const mitStatus = kontakte.speichere(db, { firma: 'X', status: 'lead' });
+  assert.strictEqual(db.prepare('SELECT status FROM kontakte WHERE id = ?').get(mitStatus.id).status, 'kunde',
+    'mitgeschickter Status lead landete in der Datenbank');
+  kontakte.loesche(db, mitStatus.id);
   assert.throws(() => kontakte.speichere(db, { firma: 'X', email: 'keine-adresse' }),
     /E-Mail/, 'Adresse ohne @ angenommen');
   assert.throws(() => kontakte.speichere(db, {
@@ -3214,14 +3231,7 @@ function testKontakte() {
     firma: 'X', anschrift: ['Werftstra�e 12'],
   }), /Kodierung/, 'Ersatzzeichen in der Anschrift angenommen');
 
-  // Umwandlung Lead -> Kunde, wiederholbar und ohne Wirkung auf Kunden.
-  assert.strictEqual(kontakte.macheKunde(db, k.id), true, 'Lead wurde nicht zum Kunden');
-  assert.strictEqual(kontakte.lade(db, k.id).status, 'kunde', 'Status nicht gesetzt');
-  assert.strictEqual(kontakte.macheKunde(db, k.id), false, 'Zweiter Aufruf hat erneut geaendert');
-  assert.strictEqual(kontakte.macheKunde(db, 9999), false,
-    'Umwandlung eines unbekannten Kontakts meldete Erfolg');
-  assert.doesNotThrow(() => kontakte.macheKunde(db, null),
-    'Umwandlung ohne Kontakt hat geworfen');
+  // Umwandlung Lead -> Kunde: seit C12 in leads.js (test/cira/c12.js).
 
   // Beim Erstellen eines Dokuments dagegen hart: ein Tippfehler soll auffallen.
   assert.strictEqual(kontakte.pruefeId(db, undefined), null, 'fehlende id nicht toleriert');
@@ -3522,46 +3532,55 @@ function testVorlagen() {
 }
 
 // --- Umwandlung Lead zu Kunde ------------------------------------------------
-// Der Verweis vom Dokument auf den Kontakt ist die einzige Verbindung. Bricht
+// Der Verweis vom Dokument auf Kunde bzw. Lead ist die einzige Verbindung. Bricht
 // sie, bleibt ein zahlender Kunde in der Lead-Liste stehen — und wird weiter
-// als offene Gelegenheit gezaehlt.
+// als offene Gelegenheit gezaehlt. Seit C12 sind Leads eigene Datensaetze
+// (leads.js); Annahme und Rechnung wandeln sie in einen Kunden um.
 function testKontaktKonversion() {
   rechnungsUmgebung(() => {
     const angebot = require('../angebot');
     const kontakte = require('../kontakte');
+    const leads = require('../leads');
     const db = rechnungsDb();
     const empf = { name: 'Muster GmbH', anschrift: ['Weg 1'] };
+    const neuerLead = (firma) => leads.anlegen(db, { firma }).lead;
 
     try {
       // Annahme macht aus dem Lead einen Kunden.
-      const lead = kontakte.speichere(db, { firma: 'Muster GmbH' });
+      const lead = neuerLead('Muster GmbH');
       const a = angebot.erstelle(db, {
-        posten: [{ bezeichnung: 'X', stunden: 1 }], empfaenger: empf, kontaktId: lead.id,
+        posten: [{ bezeichnung: 'X', stunden: 1 }], empfaenger: empf, leadId: lead.id,
       });
-      assert.strictEqual(a.kontakt_id, lead.id, 'Verweis nicht am Angebot gespeichert');
+      assert.deepStrictEqual([a.lead_id, a.kontakt_id], [lead.id, null], 'Verweis nicht am Angebot gespeichert');
       angebot.setzeStatus(db, a.nr, 'angenommen');
-      assert.strictEqual(kontakte.lade(db, lead.id).status, 'kunde',
-        'Annahme hat den Lead nicht zum Kunden gemacht');
+      const kundeA = angebot.lade(db, a.nr).kontakt_id;
+      assert.ok(kundeA && kontakte.lade(db, kundeA), 'Annahme hat aus dem Lead keinen Kunden gemacht');
+      assert.strictEqual(leads.lade(db, lead.id).status, 'umgewandelt', 'Lead nach Annahme nicht umgewandelt');
 
       // Ablehnung dagegen nicht.
-      const lead2 = kontakte.speichere(db, { firma: 'Zweite AG' });
+      const lead2 = neuerLead('Zweite AG');
       const b = angebot.erstelle(db, {
-        posten: [{ bezeichnung: 'X', stunden: 1 }], empfaenger: empf, kontaktId: lead2.id,
+        posten: [{ bezeichnung: 'X', stunden: 1 }], empfaenger: empf, leadId: lead2.id,
       });
+      const kundenVorher = db.prepare('SELECT COUNT(*) n FROM kontakte').get().n;
       angebot.setzeStatus(db, b.nr, 'abgelehnt');
-      assert.strictEqual(kontakte.lade(db, lead2.id).status, 'lead',
-        'Ablehnung hat den Lead zum Kunden gemacht');
+      assert.strictEqual(leads.lade(db, lead2.id).status, 'offen', 'Ablehnung hat den Lead umgewandelt');
+      assert.strictEqual(db.prepare('SELECT COUNT(*) n FROM kontakte').get().n, kundenVorher, 'Ablehnung hat einen Kunden angelegt');
 
       // Auch die Uebernahme in eine Rechnung wandelt um.
-      const lead3 = kontakte.speichere(db, { firma: 'Dritte KG' });
+      const lead3 = neuerLead('Dritte KG');
       const c = angebot.erstelle(db, {
-        posten: [{ bezeichnung: 'X', stunden: 1 }], empfaenger: empf, kontaktId: lead3.id,
+        posten: [{ bezeichnung: 'X', stunden: 1 }], empfaenger: empf, leadId: lead3.id,
       });
       const uebernahme = angebot.inRechnung(db, c.nr);
-      assert.strictEqual(kontakte.lade(db, lead3.id).status, 'kunde',
+      assert.strictEqual(leads.lade(db, lead3.id).status, 'umgewandelt',
         'Rechnungsuebernahme hat den Lead nicht umgewandelt');
-      assert.strictEqual(uebernahme.rechnung.kontakt_id, lead3.id,
+      assert.strictEqual(uebernahme.rechnung.kontakt_id, leads.lade(db, lead3.id).kunde_id,
         'Verweis nicht an die Rechnung uebergegangen');
+      // Ein Angebot an einen Kunden traegt den Verweis weiter unveraendert.
+      const kunde3 = kontakte.speichere(db, { firma: 'Kunde KG' });
+      const c2 = angebot.erstelle(db, { posten: [{ bezeichnung: 'X', stunden: 1 }], empfaenger: empf, kontaktId: kunde3.id });
+      assert.strictEqual(angebot.inRechnung(db, c2.nr).rechnung.kontakt_id, kunde3.id, 'Kundenverweis nicht an die Rechnung uebergegangen');
 
       // Ein geloeschter Kontakt darf die Annahme nicht scheitern lassen: das
       // Dokument traegt seine eigene Abschrift und bleibt gueltig.
@@ -3584,23 +3603,27 @@ function testKontaktKonversion() {
         'Annahme ohne Kontakt scheiterte');
 
       // Kanban (Nacharbeit 14.10.): Zeitpunkte, Wiederoeffnen, Rueckgaengig.
-      const lead4 = kontakte.speichere(db, { firma: 'Vierte GmbH' });
-      const e = angebot.erstelle(db, { posten: [{ bezeichnung: 'X', stunden: 1 }], empfaenger: empf, kontaktId: lead4.id });
+      const lead4 = neuerLead('Vierte GmbH');
+      const e = angebot.erstelle(db, { posten: [{ bezeichnung: 'X', stunden: 1 }], empfaenger: empf, leadId: lead4.id });
       const vorE = angebot.lade(db, e.nr);
       const zu = angebot.setzeStatus(db, e.nr, 'angenommen');
       assert.ok(zu.angenommen_am && Math.abs(Date.parse(zu.angenommen_am) - Date.now()) < 60000, 'angenommen_am nicht jetzt');
       assert.strictEqual(zu.abgelehnt_am, null, 'abgelehnt_am bei Annahme gesetzt');
       assert.strictEqual(zu.kunde_geworden, true, 'kunde_geworden fehlt, obwohl der Lead umgewandelt wurde');
       assert.strictEqual(angebot.setzeStatus(db, ohne.nr, 'angenommen').kunde_geworden, false, 'ohne Kontakt als Kunde gemeldet');
-      // Rueckgaengig stellt Angebot und Kontakt her — in einem Schritt.
+      // Rueckgaengig stellt das Angebot her. Kunde und Umwandlung bleiben (C12
+      // Festlegung 2: die Kundennummer ist verbraucht); ein alter Client schickt
+      // noch lead: true mit, das wirkt nicht mehr.
+      const kunde4 = zu.umwandlung.kontakt_id;
       angebot.setzeStatus(db, e.nr, 'offen', { gueltig_bis: vorE.gueltig_bis, angenommen_am: null, abgelehnt_am: null, lead: true });
       const zurueck = angebot.lade(db, e.nr);
       assert.deepStrictEqual([zurueck.status, zurueck.gueltig_bis, zurueck.angenommen_am, zurueck.abgelehnt_am],
         ['offen', vorE.gueltig_bis, null, null], 'Rueckgaengig stellt das Angebot nicht her');
-      assert.strictEqual(kontakte.lade(db, lead4.id).status, 'lead', 'Rueckgaengig macht den Kunden nicht wieder zum Lead');
-      // Ein Kunde, der nicht durch diese Annahme Kunde wurde, bleibt Kunde (lead fehlt im Stand).
+      assert.ok(kontakte.lade(db, kunde4), 'Rueckgaengig hat den Kunden entfernt');
+      assert.strictEqual(leads.lade(db, lead4.id).status, 'umgewandelt', 'Rueckgaengig hat die Umwandlung zurueckgenommen');
+      // Rueckgaengig ohne lead: der Kunde aus Angebot a bleibt erst recht.
       angebot.setzeStatus(db, a.nr, 'offen', { gueltig_bis: a.gueltig_bis, angenommen_am: null, abgelehnt_am: null });
-      assert.strictEqual(kontakte.lade(db, lead.id).status, 'kunde', 'Rueckgaengig ohne lead hat einen Kunden zurueckgestuft');
+      assert.ok(kontakte.lade(db, kundeA), 'Rueckgaengig ohne lead hat einen Kunden entfernt');
       // Ablehnung haelt ihren Zeitpunkt fest und loescht den der Annahme.
       angebot.setzeStatus(db, e.nr, 'angenommen');
       const ab = angebot.setzeStatus(db, e.nr, 'abgelehnt');
@@ -3630,17 +3653,23 @@ function testKontaktKonversion() {
       assert.strictEqual(angebot.lade(db, e.nr).status, 'offen', 'kaputter Stand hat den Status geaendert');
       assert.throws(() => angebot.setzeStatus(db, e.nr, 'offen', { gueltig_bis: '+275760-09-13T00:00:00.000Z' }), /erlaubten Bereichs/, 'Jahr ausserhalb angenommen');
       assert.throws(() => angebot.setzeStatus(db, e.nr, 'offen', { gueltig_bis: vorE.gueltig_bis, angenommen_am: vorE.gueltig_bis }), /passt nicht/, 'Zeitpunkt zum falschen Status angenommen');
-      // lead wirkt nur als Rueckgaengig einer Annahme: auf einem offenen Angebot bleibt der Kunde Kunde.
+      // lead im Stand wirkt nie: der Kunde bleibt Kunde.
       const kunde5 = kontakte.speichere(db, { firma: 'Fuenfte GmbH' });
       const g5 = angebot.erstelle(db, { posten: [{ bezeichnung: 'X', stunden: 1 }], empfaenger: empf, kontaktId: kunde5.id });
-      kontakte.macheKunde(db, kunde5.id);
       angebot.setzeStatus(db, g5.nr, 'abgelehnt', { gueltig_bis: g5.gueltig_bis, abgelehnt_am: g5.gueltig_bis, lead: true });
-      assert.strictEqual(kontakte.lade(db, kunde5.id).status, 'kunde', 'lead ohne vorherige Annahme hat einen Kunden zurueckgestuft');
+      assert.strictEqual(db.prepare('SELECT status FROM kontakte WHERE id = ?').get(kunde5.id).status, 'kunde', 'lead im Stand hat einen Kunden zurueckgestuft');
 
       // Ein Tippfehler in der id soll dagegen sofort auffallen.
       assert.throws(() => angebot.erstelle(db, {
         posten: [{ bezeichnung: 'X', stunden: 1 }], empfaenger: empf, kontaktId: 9999,
       }), /Unbekannter Kontakt/, 'Angebot mit unbekanntem Kontakt angenommen');
+      assert.throws(() => angebot.erstelle(db, { posten: [{ bezeichnung: 'X', stunden: 1 }], empfaenger: empf, leadId: 9999 }),
+        /Unbekannter Lead/, 'Angebot mit unbekanntem Lead angenommen');
+      assert.throws(() => angebot.erstelle(db, { posten: [{ bezeichnung: 'X', stunden: 1 }], empfaenger: empf, leadId: lead2.id, kontaktId: kunde5.id }),
+        /nicht beides/, 'Angebot an Kunde und Lead zugleich angenommen');
+      assert.throws(() => angebot.erstelle(db, { posten: [{ bezeichnung: 'X', stunden: 1 }], empfaenger: empf, leadId: lead.id }),
+        (e) => e.message === 'Lead ' + lead.lead_nr + ' ist bereits umgewandelt (Kunde ' + kontakte.lade(db, kundeA).kundennummer +
+          ' Muster GmbH) — Angebot an den Kunden richten.', 'Angebot an umgewandelten Lead angenommen oder Kunde nicht genannt');
     } finally {
       db.close();
     }
@@ -5305,16 +5334,16 @@ async function testSicherheitsHeader() {
       assert.ok(styleSrc.includes(new URL(href).origin), 'Stylesheet von der CSP blockiert: ' + new URL(href).origin);
     }
     if (/fonts\.googleapis\.com/.test(html)) assert.ok(/font-src[^;]*https:\/\/fonts\.gstatic\.com/.test(csp), 'Schriftdateien blockiert');
-    assert.strictEqual((await fetch(url('/api/kontakte'))).headers.get('x-content-type-options'), 'nosniff', 'API ohne nosniff');
+    assert.strictEqual((await verwirf(fetch(url('/api/kontakte')))).headers.get('x-content-type-options'), 'nosniff', 'API ohne nosniff');
     // POST einer fremden Seite: Browser ohne Sec-Fetch-Site schicken trotzdem Origin.
     const post = (p, body, origin) => fetch(url(p), { method: 'POST', headers: { 'content-type': 'text/plain', ...(origin ? { origin } : {}) }, body });
-    let a = await post('/api/rechnung-storno', '{"nr":"2099-0001"}', 'http://evil.example');
+    let a = await verwirf(post('/api/rechnung-storno', '{"nr":"2099-0001"}', 'http://evil.example'));
     assert.strictEqual(a.status, 403, 'fremde Herkunft durchgelassen: ' + a.status);
     a = await post('/api/rechnung-storno', 'null', 'http://127.0.0.1:' + srv.server.address().port);
     const ad = await a.json();
     assert.ok(a.status === 400 && !/Cannot read/.test(ad.error), 'eigene Herkunft / null-Koerper: ' + a.status + ' ' + ad.error);
     // Alter Einstieg (R15): Lesezeichen auf /app.html landen auf /.
-    const alt = await fetch(url('/app.html?x=1'), { redirect: 'manual' });
+    const alt = await verwirf(fetch(url('/app.html?x=1'), { redirect: 'manual' }));
     assert.deepStrictEqual([alt.status, alt.headers.get('location')], [301, '/'], 'app.html leitet nicht um');
   } finally {
     if (!lauscht) await new Promise((ok) => srv.server.close(ok));
@@ -5572,7 +5601,7 @@ function testManuellOhneEvents() {
     assert.ok(kun && kun.gruppe === 'Kunde GmbH' && kun.kunde_id === k.id && kun.manuell_hours === 1, 'Kundenzeile fehlt');
     assert.ok(Math.abs(kun.arbeitswert - cfg.stundensatz) < 1e-9, 'Kunde ohne Projekt nicht zum Standardsatz');
     assert.ok(!o.some((r) => r.gruppe === 'Planung'), 'interne Zeit als Zeile');
-    const kz = metrics.kennzahlen(t.concat(o), {}, require('../zeit').kennzahlenZusatz(db, {}));
+    const kz = metrics.kennzahlen(t.concat(o), {}, { ...require('../zeit').kennzahlenZusatz(db, {}), projektKonto: require('../rechnung').projektKonten(db, t.concat(o), {}) });
     assert.strictEqual(kz.intern_stunden, 2, 'interne Stunden ' + kz.intern_stunden);
     assert.ok(Math.abs(kz.wert.arbeitswert - (1.5 + 1.5 + 1) * cfg.stundensatz) < 1e-9, 'interne Zeit im Arbeitswert');
     assert.ok(Math.abs(kz.wert.zeitkosten - (1.5 + 1.5 + 1 + 2) * 40) < 1e-9, 'interne Zeit fehlt in den Zeitkosten: ' + kz.wert.zeitkosten);
@@ -5967,7 +5996,7 @@ async function testKalenderRouten() {
       const [s, e] = await post(p, body);
       assert.deepStrictEqual([s, re.test(e)], [400, true], p + ': ' + s + ' ' + e);
     }
-    let r = await fetch(url('/api/termine?from=gestern&to=2026-08-31'));
+    let r = await verwirf(fetch(url('/api/termine?from=gestern&to=2026-08-31')));
     assert.strictEqual(r.status, 400, 'termine mit kaputtem Datum: ' + r.status);
     r = await fetch(url('/api/termine?from=2026-08-01&to=2026-08-31'));
     assert.deepStrictEqual([r.status, Array.isArray((await r.json()).termine)], [200, true], 'GET /api/termine');
@@ -6401,21 +6430,21 @@ async function testZeitRouten() {
     assert.deepStrictEqual([s, /Wahl: beides, claude, meine oder keins/.test(e)], [400, true], 'wahl: ' + s + ' ' + e);
     [s, e] = await post('/api/zeit/wahl', { eintrag_id: 'abc', session_id: 's', wahl: 'meine' });
     assert.deepStrictEqual([s, /Eintrag nicht gefunden/.test(e)], [400, true], 'wahl ohne Eintrag: ' + s + ' ' + e);
-    let r = await fetch(url('/api/zeit/ueberlappung?id=abc'));
+    let r = await verwirf(fetch(url('/api/zeit/ueberlappung?id=abc')));
     assert.strictEqual(r.status, 400, 'ueberlappung mit kaputter id: ' + r.status);
     for (const pfad of ['/api/zeit/woche?montag=2026-08-18', '/api/zeit/monat?from=2026-01-01&to=2026-12-31',
       '/api/zeit/ziele-tabelle?from=x&to=2026-08-31', '/api/zeit/analyse']) {
-      r = await fetch(url(pfad));
+      r = await verwirf(fetch(url(pfad)));
       assert.strictEqual(r.status, 400, pfad + ' liefert ' + r.status);
     }
-    r = await fetch(url('/api/zeit/woche?montag=2026-08-17'));
+    r = await verwirf(fetch(url('/api/zeit/woche?montag=2026-08-17')));
     assert.strictEqual(r.status, 200, 'woche mit Montag: ' + r.status);
-    r = await fetch(url('/api/zeit/ziele?q=' + 'x'.repeat(101)));
+    r = await verwirf(fetch(url('/api/zeit/ziele?q=' + 'x'.repeat(101))));
     assert.strictEqual(r.status, 400, 'zu lange Suche angenommen');
-    r = await fetch(url('/api/zeit?from=gestern'));
+    r = await verwirf(fetch(url('/api/zeit?from=gestern')));
     assert.strictEqual(r.status, 400, 'GET /api/zeit mit kaputtem Datum: ' + r.status);
     for (const p of ['/api/zeit/timer', '/api/taetigkeitsarten', '/api/zeit?from=2026-08-01&to=2026-08-31']) {
-      r = await fetch(url(p));
+      r = await verwirf(fetch(url(p)));
       assert.strictEqual(r.status, 200, p + ' liefert ' + r.status);
     }
   } finally {
@@ -7182,6 +7211,7 @@ async function main() {
   test('Buchen: Sitzung wirkt sofort in events und activity', testBuchenSchreibtDurch);
   test('Buchen: unzulaessige Vorgangsnamen prallen ab', testBuchenGrenzen);
   test('Buchen: unbekannte Sitzung legt keinen Waisen-Eintrag an', testBuchenUnbekannteSitzung);
+  test('Buchen: reine Testsitzung meldet einen Fehler statt Erfolg ohne Wirkung', testBuchenReineTestsitzung);
   test('Buchen: Umbuchen ersetzt statt zu haeufen', testBuchenUmbuchen);
   test('Buchen: Aufheben stellt die automatische Zuordnung wieder her', testBuchenAufheben);
   test('Live: erkannte und gebuchte Zuordnung sind unterscheidbar', testLiveHerkunft);
@@ -7192,7 +7222,7 @@ async function main() {
   test('Rechnung: Abschrift bleibt unveraendert, Storno statt Loeschen', testRechnungUnveraenderlich);
   test('Rechnung: beide Steuermodi, Escaping, keine Werkzeugdaten', testRechnungSteuerUndEscaping);
   test('E-Rechnung: Pflichtfelder, Summen, Steuerarten und Storno', testERechnung);
-  test('Kundennummer: automatisch, eindeutig, fuellt Kaeuferreferenz und Kaeuferkennung', testKundennummer);
+  test('Kundennummer: fest vergeben, fuellt Kaeuferreferenz und Kaeuferkennung', testKundennummer);
   test('Abrechnungsstand: Betrag je Vorgang aus gestellten Rechnungen, Storno faellt raus', testAbrechnungsStatus);
   test('Einstellungen: Grenzen halten, fremde Felder prallen ab, Datei bleibt vollstaendig', testEinstellungenGrenzen);
   test('Stammdaten: Grenzen halten, Teileingabe meldet Fehlendes, Nachbarbloecke bleiben', testStammdatenGrenzen);
@@ -7222,7 +7252,7 @@ async function main() {
   test('Kontakte: Kennzahlen je Kontakt zählen nur gestellte Rechnungen', testKennzahlenJeKontakt);
   test('Darstellung: Bewegung reduzieren nur an oder aus', testBewegung);
   test('Navigation: geplante Bereiche nur mit Schalter, Vorlage blendet aus', testNavGeplant);
-  test('Kontakte: Grenzen halten, Teileingabe bleibt harmlos, Lead wird einmal zum Kunden', testKontakte);
+  test('Kontakte: Grenzen halten, Teileingabe bleibt harmlos, Kontakt ist immer Kunde', testKontakte);
   test('Vorlagen: Grenzen halten, fehlender Satz bleibt leer statt null Euro', testVorlagen);
   test('Vorgang traegt Satz und Projekt aus derselben Wahl', testTicketProjekt);
   test('Herkunft: Summen stimmen, Bezugsgroesse ohne lokale Modelle', testHerkunft);
@@ -7375,6 +7405,12 @@ async function main() {
     ...require('./cira/c9a')({ dbmod, openDbs }),
     ...require('./cira/c9c')({ dbmod, openDbs }),
     ...require('./cira/c10')({ dbmod, openDbs, configGeschuetzt }),
+    ...require('./cira/c11a')({ dbmod, openDbs, configGeschuetzt }),
+    ...require('./cira/c11b')({ dbmod, openDbs, configGeschuetzt }),
+    ...require('./cira/c11c')({ dbmod, openDbs, configGeschuetzt }),
+    ...require('./cira/b')({ dbmod, openDbs }),
+    ...require('./cira/c12')({ dbmod, openDbs, rechnungsUmgebung, rechnungsDb }),
+    ...require('./cira/p')({ dbmod, openDbs }),
   ]) {
     try {
       await fn();
@@ -7408,6 +7444,8 @@ async function main() {
     try { db.close(); } catch { /* bereits geschlossen */ }
   }
 
+  // Echte FAIL-Zeilen gehen sonst im beabsichtigten Fehlerrauschen unter (Issue #1).
+  if (failZeilen.length) console.log('\nFehlgeschlagen:\n' + failZeilen.join('\n'));
   console.log(failed === 0 ? '\nAlle Pruefungen bestanden.' : `\n${failed} Pruefung(en) fehlgeschlagen.`);
   // Exitcode setzen statt den Prozess abzuschiessen: so laufen offene Handles
   // geordnet aus und der Code bleibt fuer Automatisierung verwertbar.

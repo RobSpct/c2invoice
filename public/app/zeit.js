@@ -237,7 +237,7 @@ function zZiele(d) {
   return [
     ...d.vorgaenge.map((v) => ({ art: 'vorgang', schluessel: v.schluessel, l: v.schluessel, t: v.projekt || '', satz: v.satz, rundung: v.rundung, projekt: v.projekt })),
     ...d.projekte.map((p) => ({ art: 'projekt', schluessel: p.schluessel, l: p.schluessel, t: '', satz: p.satz, rundung: p.rundung, projekt: p.schluessel })),
-    ...d.kunden.map((k) => ({ art: 'kunde', schluessel: k.schluessel, l: k.name, t: k.status === 'lead' ? 'Lead' : 'Kunde', satz: k.satz, rundung: k.rundung })),
+    ...d.kunden.map((k) => ({ art: 'kunde', schluessel: k.schluessel, l: k.name, t: 'Kunde', satz: k.satz, rundung: k.rundung })),
     ...d.intern.map((i) => ({ art: 'intern', schluessel: i.schluessel, l: i.schluessel, t: '', satz: null, selbstkosten: i.selbstkosten })),
   ];
 }

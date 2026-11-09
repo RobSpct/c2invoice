@@ -5,6 +5,8 @@
    mit aktion(name, fn) an — kein Zuhoerer je Knopf, der beim Neuzeichnen
    verloren ginge. */
 
+Object.assign(EN, { 'Kein Treffer.': 'No match.' });
+
 const AKTIONEN = Object.create(null);
 function aktion(name, fn) { AKTIONEN[name] = fn; }
 
@@ -95,7 +97,7 @@ function fokusZurueck(w, sel) {
 const STATUS_TEXT = {
   offen: 'offen', teilbezahlt: 'teilbezahlt', bezahlt: 'bezahlt', storniert: 'storniert', storno: 'Storno',
   angenommen: 'angenommen', abgelehnt: 'abgelehnt', abgelaufen: 'abgelaufen', abgerechnet: 'abgerechnet',
-  lead: 'Lead', kunde: 'Kunde',
+  lead: 'Lead', kunde: 'Kunde', umgewandelt: 'umgewandelt', verloren: 'verloren',
 };
 function pille(status) {
   const bekannt = Object.prototype.hasOwnProperty.call(STATUS_TEXT, status);
@@ -130,6 +132,154 @@ function schliesseDialog() {
   dialogVorher = null;
 }
 aktion('dialog-zu', () => schliesseDialog());
+
+/* Kontakt-Suchfeld: Combobox nach WAI-ARIA statt <select>. Das versteckte Feld
+   traegt Id und Daten-Attribute (attr), die Auswahl setzt es und loest ein
+   bubbelndes change darauf aus — bestehende Handler bleiben. Die Eintraege
+   stehen alle im Markup und werden nur ein- und ausgeblendet; ein Zustand
+   ausserhalb des DOM gibt es nicht, ein Neuzeichnen ersetzt das Ganze.
+   gruppen = [{ gruppe, liste: [{ wert, text, such }] }], gruppe leer = ohne
+   Ueberschrift. Der Leer-Eintrag (leerText, Wert '') steht immer oben.
+   ACHTUNG: attr und textAttr sind ungeescaptes Markup und duerfen nur Literale/Konstanten
+   tragen, nie Nutzerdaten (Namen, Notizen, Suchtexte).
+   textAttr: Attribute fuer das sichtbare Textfeld (id fuer label for, aria-describedby,
+   aria-invalid); ohne id heisst es <id>-q.
+   Programmatisch setzen: kontaktSucheSetze(feld, wert) — Text und Id laufen
+   nie auseinander, ein change loest das nicht aus. */
+let ksN = 0;
+function kontaktSuche({ attr = '', textAttr = '', gruppen = [], leerText, wert = '', label }) {
+  const m = / id="([^"]*)"/.exec(attr);
+  const id = m ? m[1] : 'ks-' + (++ksN);
+  // Eine unbekannte Id bleibt nicht im versteckten Feld stehen: Text und Id laufen nie auseinander.
+  const gewuenscht = String(wert == null ? '' : wert);
+  const aktuell = gruppen.some((g) => g.liste.some((e) => String(e.wert) === gewuenscht)) ? gewuenscht : '';
+  const tm = / id="([^"]*)"/.exec(textAttr);
+  let n = 0, text = '';
+  const opt = (w, t, such, extra) => {
+    const gew = String(w) === aktuell;
+    if (gew && w !== '') text = t;
+    return '<div class="ks-opt' + (extra || '') + '" role="option" id="' + id + '-o' + (n++) + '" data-wert="' + esc(w) + '"' +
+      ' data-such="' + esc(String(such || '').toLowerCase()) + '" aria-selected="' + gew + '">' + esc(t) + '</div>';
+  };
+  const leerOpt = opt('', uebersetze(leerText), '', ' ks-leer');
+  const liste = gruppen.map((g) => {
+    const os = g.liste.map((e) => opt(e.wert, e.text, e.such)).join('');
+    return g.gruppe ? '<div role="group" aria-label="' + esc(uebersetze(g.gruppe)) + '"><div class="ks-gruppe" aria-hidden="true">' + esc(uebersetze(g.gruppe)) + '</div>' + os + '</div>' : os;
+  }).join('');
+  return '<div class="ksuche">' +
+    '<input type="hidden"' + attr + ' value="' + esc(aktuell) + '">' +
+    '<input type="text" class="eingabe ks-text"' + textAttr + (tm ? '' : ' id="' + id + '-q"') + ' role="combobox" aria-expanded="false" aria-controls="' + id + '-l"' +
+      ' aria-autocomplete="list" aria-label="' + esc(uebersetze(label || '')) + '" autocomplete="off" spellcheck="false"' +
+      ' placeholder="' + esc(uebersetze(leerText)) + '" value="' + esc(text) + '">' +
+    '<div class="ks-pop" hidden><div class="ks-liste" id="' + id + '-l" role="listbox" aria-label="' + esc(uebersetze(label || '')) + '">' + leerOpt + liste + '</div>' +
+      '<div class="ks-keine" role="status"></div></div></div>';
+}
+const ksWurzel = (el) => (el && el.closest ? el.closest('.ksuche') : null);
+const ksIstText = (el) => !!(el && el.classList && el.classList.contains('ks-text'));
+const ksText = (w) => w.querySelector('.ks-text');
+const ksOpts = (w) => [...w.querySelectorAll('[role="option"]')];
+const ksOffen = (w) => !w.querySelector('.ks-pop').hidden;
+const ksGewaehlt = (w) => w.querySelector('[role="option"][aria-selected="true"]');
+function ksAktiv(w, o) {
+  for (const x of w.querySelectorAll('.ks-opt.aktiv')) x.classList.remove('aktiv');
+  if (o) { o.classList.add('aktiv'); ksText(w).setAttribute('aria-activedescendant', o.id); o.scrollIntoView({ block: 'nearest' }); }
+  else ksText(w).removeAttribute('aria-activedescendant');
+}
+function ksFilter(w, q) {
+  const teile = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  let treffer = 0;
+  for (const o of ksOpts(w)) {
+    const leer = o.classList.contains('ks-leer');
+    o.hidden = !leer && !teile.every((t) => o.dataset.such.includes(t));
+    if (!o.hidden && !leer) treffer++;
+  }
+  for (const g of w.querySelectorAll('[role="group"]')) g.hidden = !g.querySelector('[role="option"]:not([hidden])');
+  w.querySelector('.ks-keine').textContent = teile.length && !treffer ? uebersetze('Kein Treffer.') : '';
+}
+function ksAuf(w) {
+  w.querySelector('.ks-pop').hidden = false;
+  ksText(w).setAttribute('aria-expanded', 'true');
+  ksFilter(w, '');
+  ksAktiv(w, ksGewaehlt(w));
+}
+function ksZu(w) {
+  w.querySelector('.ks-pop').hidden = true;
+  ksText(w).setAttribute('aria-expanded', 'false');
+  ksAktiv(w, null);
+}
+// Angezeigter Text zurueck auf die gewaehlte Person (Esc, Fokusverlust ohne Wahl).
+function ksZurueck(w) {
+  const g = ksGewaehlt(w);
+  ksText(w).value = g && g.dataset.wert !== '' ? g.textContent : '';
+}
+function ksSetze(w, o, melde) {
+  const h = w.querySelector('input[type="hidden"]');
+  const alt = h.value;
+  for (const x of ksOpts(w)) x.setAttribute('aria-selected', String(x === o));
+  h.value = o ? o.dataset.wert : '';
+  ksZurueck(w);
+  if (melde && h.value !== alt) h.dispatchEvent(new Event('change', { bubbles: true }));
+}
+function kontaktSucheSetze(feld, wert) {
+  const w = ksWurzel(feld);
+  if (!w) return;
+  const os = ksOpts(w);
+  ksSetze(w, os.find((x) => x.dataset.wert === String(wert == null ? '' : wert)) || os[0], false);
+}
+// Ein Satz Zuhoerer fuer alle Instanzen; keydown in der Capture-Phase, damit Esc
+// weder den Dialog noch den Editor schliesst, solange die Liste offen ist.
+if (typeof document !== 'undefined') {   // ohne DOM (Tests per vm) nichts registrieren
+document.addEventListener('focusin', (e) => {
+  if (!ksIstText(e.target)) return;
+  ksAuf(ksWurzel(e.target));
+  e.target.select();
+});
+document.addEventListener('focusout', (e) => {
+  if (!ksIstText(e.target)) return;
+  const w = ksWurzel(e.target);
+  ksZu(w); ksZurueck(w);
+});
+document.addEventListener('click', (e) => {
+  if (!ksIstText(e.target)) return;
+  const w = ksWurzel(e.target);
+  if (!ksOffen(w)) ksAuf(w);
+});
+document.addEventListener('input', (e) => {
+  if (!ksIstText(e.target) || e.isComposing) return;
+  const w = ksWurzel(e.target);
+  if (!ksOffen(w)) ksAuf(w);
+  ksFilter(w, e.target.value);
+  ksAktiv(w, e.target.value.trim() ? ksOpts(w).find((o) => !o.hidden && !o.classList.contains('ks-leer')) || null : ksGewaehlt(w));
+});
+document.addEventListener('keydown', (e) => {
+  if (!ksIstText(e.target)) return;
+  const w = ksWurzel(e.target);
+  const auf = ksOffen(w);
+  if (e.key === 'Escape') {
+    if (!auf) return;
+    e.preventDefault(); e.stopPropagation();
+    ksZu(w); ksZurueck(w);
+  } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (!auf) { ksAuf(w); return; }
+    const s = ksOpts(w).filter((o) => !o.hidden);
+    const i = s.indexOf(w.querySelector('.ks-opt.aktiv'));
+    ksAktiv(w, s[e.key === 'ArrowDown' ? (i + 1) % s.length : (i <= 0 ? s.length - 1 : i - 1)]);
+  } else if (e.key === 'Enter' && auf) {
+    e.preventDefault(); e.stopPropagation();
+    const a = w.querySelector('.ks-opt.aktiv');
+    if (a) { ksSetze(w, a, true); ksZu(w); }
+  }
+}, true);
+// mousedown statt click: der Fokus bleibt im Feld, focusout schliesst die Liste nicht vor der Wahl.
+document.addEventListener('mousedown', (e) => {
+  const pop = e.target.closest && e.target.closest('.ks-pop');
+  if (!pop) return;
+  e.preventDefault();
+  const o = e.target.closest('[role="option"]');
+  if (o) { const w = ksWurzel(o); ksSetze(w, o, true); ksZu(w); }
+});
+}
 
 const LEER_ZEICHEN = {
   liste: '<path d="M4 6h16M4 12h16M4 18h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"/>',
@@ -213,7 +363,7 @@ function ladeBereich(schluessel, pfad, alter = 0) {
     e.laedt = false;
     if (!e.d) e.fehler = err.message || 'Fehler';
     else toast(uebersetze('Bereich nicht aktualisiert') + ': ' + (err.message || 'Fehler'), 'err');
-  }).then(() => { if (['analyse', 'hub'].includes(route().name)) zeichneAnsicht(); });
+  }).then(() => { if (['analyse', 'hub', 'projekte'].includes(route().name)) zeichneAnsicht(); });
   return e;
 }
 const bereichWarte = (e) => (e.d ? null : e.fehler

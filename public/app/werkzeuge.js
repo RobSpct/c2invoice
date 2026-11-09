@@ -6,6 +6,7 @@
    nur, wo es nicht geht und warum. */
 
 Object.assign(EN, {
+  'außerhalb des Plugins, verworfen': 'outside the plugin, discarded', 'weder Ordner noch .md': 'neither a folder nor .md', 'installPath fehlt': 'installPath missing', 'fehlt': 'missing',
   'Werkzeuge': 'Tools', 'Commands': 'Commands', 'Plugins': 'Plugins', 'Mods': 'Mods', 'MCPs': 'MCPs',
   'Liste': 'List', 'Matrix': 'Matrix', 'Ansicht': 'View', 'Global': 'Global', 'Arbeitsbereich wählen': 'Choose workspace',
   'Kontext messen': 'Measure context', 'gemessen {z}': 'measured {z}', 'noch nicht gemessen': 'not measured yet', 'Kontext gemessen': 'Context measured',
@@ -19,7 +20,7 @@ Object.assign(EN, {
     'Basis: context × requests × cache read + sessions × cache write, prices of the most used model, last 30 days.',
   'Aktiv {n}': 'Active {n}', 'Lager {n}': 'Stash {n}', 'Deaktiviert {n}': 'Disabled {n}', 'Alle aufklappen': 'Expand all', 'Alle zuklappen': 'Collapse all',
   'Name': 'Name', 'Herkunft': 'Source', 'Kontext': 'Context', 'Sitzungen 30 T': 'Sessions 30 d', 'Kosten 30 T': 'Cost 30 d', 'Status': 'Status',
-  'global': 'global', 'projekt': 'project', 'lager': 'stash', 'claude.ai': 'claude.ai', 'mcpjson': '.mcp.json',
+  'global': 'global', 'projekt': 'project', 'lager': 'stash', 'claude.ai': 'claude.ai', 'mcpjson': '.mcp.json', 'plugin': 'plugin', 'eingebaut': 'built-in',
   'lädt bei Bedarf': 'loads on demand', 'voll {k} Tokens, geladen erst bei Bedarf': 'full {k} tokens, loaded only on demand',
   'geschätzt aus der Beschreibung': 'estimated from the description', 'Installieren': 'Install', 'nur Anzeige': 'display only',
   'wirkt über Hooks – Nutzung nicht vollständig messbar': 'works via hooks – usage not fully measurable',
@@ -219,7 +220,7 @@ function wkZeichnen(w) {
   const leerInventar = WK_ARTEN.every(([a]) => !d.arten[a].length);
   w.innerHTML = '<div class="wk">' + wkKopf(d) +
     (wkZustand.fehler ? '<p class="wk-fehler">' + esc(uebersetze('Stand nicht aktualisiert') + ': ' + wkZustand.fehler) + '</p>' : '') +
-    d.ebenenFehler.map((f) => '<p class="wk-fehler">' + esc(fuelle('{d} ist nicht lesbar – diese Ebene wird nur angezeigt.', { d: f.datei })) + '</p>').join('') +
+    d.ebenenFehler.map((f) => '<p class="wk-fehler">' + esc(f.grund.startsWith('nicht lesbar') ? fuelle('{d} ist nicht lesbar – diese Ebene wird nur angezeigt.', { d: f.datei }) : f.datei + ': ' + uebersetze(f.grund)) + '</p>').join('') +
     (leerInventar ? leer('liste', 'Keine Claude-Code-Konfiguration gefunden.') :
       wkKacheln(d) + wkBanner(d) + (wkAnsicht() === 'matrix' ? wkMatrix(d) : wkListe(d))) +
     '<p class="hinweis wk-fuss">' + esc(uebersetze('Schreibt in ~/.claude/settings.json, <Bereich>/.claude/settings.local.json bzw. ~/.claude.json · Sicherung vor jeder Änderung · wirkt ab der nächsten Sitzung · Kosten aus c2invoice')) + '</p>' +

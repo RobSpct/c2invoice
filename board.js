@@ -162,7 +162,7 @@ const UMBUCHEN = [
 ];
 function uebernehmeZeit(db, alt, neu) {
   if (!alt || !neu) throw fehler(400, 'Alter und neuer Schlüssel fehlen.');
-  if (rechnung.gestelltAuf(db, alt)) throw fehler(409, 'Auf ' + alt + ' ist schon etwas in Rechnung gestellt — die Zeit bleibt dort, sonst wäre sie unter dem Jira-Ticket ein zweites Mal abrechenbar.');
+  if (rechnung.gestelltAuf(db, alt)) throw fehler(409, rechnung.gestelltText(alt));
   const n = {};
   db.exec('BEGIN');
   try {
@@ -310,7 +310,7 @@ function erzeuge({ db, bereiche, loeseHeim, gesperrt = () => [], jira = require(
     } catch (e) { db.exec('ROLLBACK'); throw e; }
     for (const i of liste) {
       const von = vorher.get(i.key);
-      if (von !== undefined && von !== i.status) ereignisse.sende('jira_status', { key: i.key, von, nach: i.status });
+      if (von !== undefined && von !== i.status) ereignisse.sende('jira_status', { key: i.key, von, nach: i.status, kat: i.statusKat });
     }
     return { karten: ausCache(projekt), stand: { geholt, fehler: null, hinweis }, geaendert: true };
   }
@@ -385,11 +385,15 @@ function erzeuge({ db, bereiche, loeseHeim, gesperrt = () => [], jira = require(
     // Gibt es ueberhaupt einen aktiven Sprint (vor dem Filter)? Sonst waere „Aktiver
     // Sprint“ still leer (Kanban-Projekt, Sprint-Feld unbekannt, Cache noch alt).
     let aktivVorhanden = false;
+    // Offene Karten je Bereich (alles ausser Spalte erledigt), vor dem Sprint-Filter: der Sprint
+    // aendert nichts an der Zahl. Quelle und Bereich wirken: nicht geladene Bereiche bleiben null.
+    const offenN = new Map();
     for (const b of liste) {
       const r = await karten(b, quelle, zeilen);
       sync.dateien.push({ bereich: b.name, datei: r.datei, hinweis: r.hinweis });
       if (r.jira) sync.jira = { host: hostVon(), geholt: r.jira.geholt, fehler: r.jira.fehler || (sync.jira && sync.jira.fehler) || null };
       if (r.jira && r.jira.hinweis) sync.hinweise.push(r.jira.hinweis);
+      offenN.set(b.name, r.karten.filter((k) => k.spalte !== 'erledigt').length);
       for (const k of r.karten) {
         if (k.sprintStatus === 'active') aktivVorhanden = true;
         if (SPRINT[sprint](k)) spalten[k.spalte].push(k);
@@ -411,7 +415,7 @@ function erzeuge({ db, bereiche, loeseHeim, gesperrt = () => [], jira = require(
         const w = werte.get(k.schluessel);
         const o = s === 'erledigt';
         const g = gruppe === 'keine' ? null : GRUPPE[gruppe](k) || { schluessel: '', titel: OHNE[gruppe] };
-        return { ...k, issue: undefined, stunden: w ? w.active_hours : 0, wert_eur: o ? offen[k.schluessel] : (w ? w.arbeitswert : 0), wert_art: o ? 'offen' : 'gesamt', sitzung_laeuft: laeuft.has(k.schluessel), gruppe: g, budget: budget.get(String(k.schluessel).toUpperCase()) || null };
+        return { ...k, issue: undefined, hat_daten: !!w, stunden: w ? w.active_hours : 0, wert_eur: o ? offen[k.schluessel] : (w ? w.arbeitswert : 0), wert_art: o ? 'offen' : 'gesamt', sitzung_laeuft: laeuft.has(k.schluessel), gruppe: g, budget: budget.get(String(k.schluessel).toUpperCase()) || null };
       }).filter((k) => s !== 'erledigt' || k.wert_eur > 0);
       aus[s] = { karten: mitWert, summe_eur: rechnung.rund2(mitWert.reduce((a, k) => a + (k.wert_eur || 0), 0)),
         summe_punkte: rechnung.rund2(mitWert.reduce((a, k) => a + (Number(k.punkte) || 0), 0)), ...(s === 'erledigt' && offenFehler ? { fehler: offenFehler } : {}) };
@@ -428,7 +432,8 @@ function erzeuge({ db, bereiche, loeseHeim, gesperrt = () => [], jira = require(
     return {
       scrum,
       bereiche: bereiche().map((b) => ({ name: b.name, kuerzel: KUERZEL_RE.test(b.kuerzel || '') ? b.kuerzel.toUpperCase() : '', farbe: FARBE_RE.test(b.farbe || '') ? b.farbe.toLowerCase() : '',
-        jira: !!(b.jiraProjekt && jira.jiraAn()), jiraProjekt: b.jiraProjekt || null, datei: todoPfad(b) })),
+        jira: !!(b.jiraProjekt && jira.jiraAn()), jiraProjekt: b.jiraProjekt || null, datei: todoPfad(b),
+        projekt: b.projekt || null, offen_n: offenN.has(b.name) ? offenN.get(b.name) : null })),
       spalten: aus, sync,
     };
   }
@@ -524,7 +529,7 @@ function erzeuge({ db, bereiche, loeseHeim, gesperrt = () => [], jira = require(
       if (row) {
         const i = { ...JSON.parse(row.felder_json), status: wahl.nach, statusKat: wahl.nachKat };
         db.prepare('UPDATE jira_issue SET status = ?, status_kat = ?, felder_json = ? WHERE key = ?').run(i.status, i.statusKat, JSON.stringify(i), k.jira);
-        if (row.status !== i.status) ereignisse.sende('jira_status', { key: k.jira, von: row.status, nach: i.status });
+        if (row.status !== i.status) ereignisse.sende('jira_status', { key: k.jira, von: row.status, nach: i.status, kat: i.statusKat });
       }
     } catch (e) {
       console.error('Board: Cache nach Uebergang ' + k.jira + ':', e);

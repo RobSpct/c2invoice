@@ -10,34 +10,42 @@
 // wiederholbar — auch nach dem naechsten Einlesen, das die Branch-Zuordnung
 // per UPSERT zurueckschreibt (siehe refreshData in server.js).
 const metrics = require('./metrics');
-const { ticketOf } = require('./ingest');
+const { ticketOf, projectOf, istTemp, PROJEKT_ALIAS, CIRA_PROJEKT, LOKAL_PROJEKT, TEST_PROJEKT } = require('./ingest');
+const { inTransaktion } = require('./kontakte');
+
+// Testlaeufe tragen nie ein Ticket, keine Stufe gibt ihnen eines. Eine Sitzung kann aber
+// gemischt sein (cd in den Temp-Ordner): deshalb je Zeile pruefen. Nur wo die ganze
+// Sitzung aus Testlaeufen besteht, gehoeren auch ihre Zeilen ohne cwd dazu.
+const NUR_TEST = 'SELECT session_id FROM events GROUP BY session_id HAVING SUM(project <> ?) = 0';
 
 // Sitzungsweise statt ereignisweise zuordnen: Tokens stehen in events,
 // die Aktivzeit in activity. Wandern die getrennt, gehoeren Arbeitswert und
 // Kosten desselben Zeitraums ploetzlich zu verschiedenen Tickets.
 function setzeSession(db, sessionId, ticket, quelle) {
   const e = db.prepare(
-    'UPDATE events SET ticket = ?, ticket_quelle = ? WHERE session_id = ? AND ticket IS NULL'
-  ).run(ticket, quelle, sessionId);
+    'UPDATE events SET ticket = ?, ticket_quelle = ? WHERE session_id = ? AND ticket IS NULL AND project <> ?'
+  ).run(ticket, quelle, sessionId, TEST_PROJEKT);
   db.prepare(
-    'UPDATE activity SET ticket = ?, ticket_quelle = ? WHERE session_id = ? AND ticket IS NULL'
-  ).run(ticket, quelle, sessionId);
+    'UPDATE activity SET ticket = ?, ticket_quelle = ? WHERE session_id = ? AND ticket IS NULL AND project <> ?'
+  ).run(ticket, quelle, sessionId, TEST_PROJEKT);
   return e.changes;
 }
 
 // Stufe 1: manuelle Nachtraege. Als einzige Stufe schlagen sie auch eine
 // bereits vorhandene Zuordnung — wer hier etwas eintraegt, weiss es besser
-// als die Automatik.
+// als die Automatik. Testlaeufe bleiben trotzdem ohne Ticket; der Eintrag bleibt stehen.
 function stufeOverrides(db) {
-  const zeilen = db.prepare('SELECT session_id, ticket FROM overrides WHERE ticket IS NOT NULL').all();
+  const zeilen = db.prepare(
+    `SELECT session_id, ticket FROM overrides WHERE ticket IS NOT NULL AND session_id NOT IN (${NUR_TEST})`
+  ).all(TEST_PROJEKT);
   let n = 0;
   for (const o of zeilen) {
     const e = db.prepare(
-      'UPDATE events SET ticket = ?, ticket_quelle = ? WHERE session_id = ? AND (ticket IS NULL OR ticket <> ?)'
-    ).run(o.ticket, 'override', o.session_id, o.ticket);
+      'UPDATE events SET ticket = ?, ticket_quelle = ? WHERE session_id = ? AND (ticket IS NULL OR ticket <> ?) AND project <> ?'
+    ).run(o.ticket, 'override', o.session_id, o.ticket, TEST_PROJEKT);
     db.prepare(
-      'UPDATE activity SET ticket = ?, ticket_quelle = ? WHERE session_id = ? AND (ticket IS NULL OR ticket <> ?)'
-    ).run(o.ticket, 'override', o.session_id, o.ticket);
+      'UPDATE activity SET ticket = ?, ticket_quelle = ? WHERE session_id = ? AND (ticket IS NULL OR ticket <> ?) AND project <> ?'
+    ).run(o.ticket, 'override', o.session_id, o.ticket, TEST_PROJEKT);
     n += e.changes;
   }
   return n;
@@ -55,8 +63,8 @@ function stufeCwd(db) {
     const ticket = ticketOf(cwd);
     if (!ticket) continue;
     const r = db.prepare(
-      'UPDATE events SET ticket = ?, ticket_quelle = ? WHERE cwd = ? AND ticket IS NULL'
-    ).run(ticket, 'cwd', cwd);
+      'UPDATE events SET ticket = ?, ticket_quelle = ? WHERE cwd = ? AND ticket IS NULL AND project <> ?'
+    ).run(ticket, 'cwd', cwd, TEST_PROJEKT);
     n += r.changes;
   }
   return n;
@@ -92,7 +100,7 @@ function stufeSessionKonsens(db) {
 function stufeZeitfenster(db) {
   const overhead = [...metrics.OVERHEAD];
   const platz = overhead.map(() => '?').join(',');
-  const nichtOverhead = overhead.length ? `AND project NOT IN (${platz})` : '';
+  const nichtOverhead = `AND project NOT IN (${platz})`;
 
   const sessions = db.prepare(`
     SELECT session_id, project, COUNT(*) AS anzahl
@@ -139,8 +147,64 @@ function stufeZeitfenster(db) {
   return n;
 }
 
+// Vorstufe: Projektnamen vorhandener Zeilen an die heutigen Regeln angleichen.
+// Bewusst nur Temp-Pfade und Alias-Paare: projectRoots war frueher anders, und
+// alte Zuordnungen sollen nicht wandern. activity kennt kein cwd und folgt der
+// Sitzung. Danach verlieren (test)-Zeilen ihr Ticket: erst nach allen Umzuegen, sonst
+// entgingen ihr die Zeilen, die ein Alias auf (test) gerade erst hergebracht hat.
+// Rechnungen, Zeiteintraege, Kontakte und overrides bleiben unberuehrt.
+// Synchron, damit keine Transaktion ueber ein await offen bleibt. Reine UPDATEs, idempotent.
+function zieheProjekteNach(db) {
+  const fest = (p) => p === CIRA_PROJEKT || p === LOKAL_PROJEKT;
+  const aus = { events: 0, activity: 0, tickets: 0 };
+  try {
+    inTransaktion(db, () => {
+      const ereignisse = db.prepare('UPDATE events SET project = ? WHERE cwd = ? AND project = ?');
+      // Steht nach dem Umzug noch ein Ereignis der Sitzung unter dem alten Namen, liegt dort echte
+      // Arbeit: activity kennt kein cwd, also bleibt sie ganz dort, samt Ticket.
+      const sitzungen = db.prepare(
+        `UPDATE activity SET project = ? WHERE project = ? AND session_id IN (SELECT session_id FROM events WHERE cwd = ?)
+         AND session_id NOT IN (SELECT session_id FROM events WHERE project = ?)`
+      );
+      for (const { project: alt, cwd } of db.prepare('SELECT DISTINCT project, cwd FROM events WHERE cwd IS NOT NULL').all()) {
+        const neu = projectOf(cwd);
+        if (neu === alt || fest(alt)) continue;
+        if (!istTemp(cwd) && !(Object.hasOwn(PROJEKT_ALIAS, alt) && PROJEKT_ALIAS[alt] === neu)) continue;
+        aus.events += ereignisse.run(neu, cwd, alt).changes;
+        aus.activity += sitzungen.run(neu, alt, cwd, alt).changes;
+      }
+      // Reste ohne Ereignis in der Sitzung. Ist ein Name selbst Ziel eines Alias, stehen dort
+      // schon umgezogene Zeilen, und der naechste Start reichte sie weiter (einstufig, wie projectOf).
+      const ziele = new Set(Object.values(PROJEKT_ALIAS));
+      const rest = db.prepare('UPDATE activity SET project = ? WHERE project = ?');
+      for (const [alt, neu] of Object.entries(PROJEKT_ALIAS)) {
+        if (!fest(alt) && !ziele.has(alt)) aus.activity += rest.run(neu, alt).changes;
+      }
+      const ohneTicket = 'SET ticket = NULL, ticket_quelle = NULL WHERE (ticket IS NOT NULL OR ticket_quelle IS NOT NULL) AND ';
+      aus.tickets += db.prepare('UPDATE events ' + ohneTicket + 'project = ?').run(TEST_PROJEKT).changes;
+      aus.tickets += db.prepare('UPDATE activity ' + ohneTicket + `(project = ? OR (project = ? AND session_id IN (${NUR_TEST})))`)
+        .run(TEST_PROJEKT, metrics.UNBEKANNT, TEST_PROJEKT).changes;
+    });
+  } catch (err) {
+    console.error('Projekt-Nachzug fehlgeschlagen, nichts geaendert:', err);
+    return { events: 0, activity: 0, tickets: 0 };
+  }
+  if (aus.events || aus.activity || aus.tickets) {
+    console.log(`Projekt-Nachzug: ${aus.events} Ereignisse, ${aus.activity} Activity-Zeilen, ${aus.tickets} Tickets entfernt`);
+  }
+  return aus;
+}
+
+// Einmal je Verbindung und Prozess, nicht in jedem 30-s-Takt: neue Zeilen stimmen schon beim Einlesen.
+// Nie in einer offenen Transaktion (bucheVorgang): ihr ROLLBACK naehme den Nachzug mit, der dann als erledigt gaelte.
+const nachgezogen = new WeakSet();
+
 function run({ db, verbose = false } = {}) {
   const start = Date.now();
+  if (!nachgezogen.has(db) && !db.isTransaction) {
+    nachgezogen.add(db);
+    zieheProjekteNach(db);
+  }
   const stufen = {
     override: stufeOverrides(db),
     cwd: stufeCwd(db),
@@ -163,7 +227,7 @@ function run({ db, verbose = false } = {}) {
 }
 
 // stufeOverrides ist bewusst nicht dabei: sie wird ueber run() mitgeprueft.
-module.exports = { run, stufeCwd, stufeSessionKonsens, stufeZeitfenster };
+module.exports = { run, zieheProjekteNach, stufeCwd, stufeSessionKonsens, stufeZeitfenster };
 
 if (require.main === module) {
   const dbmod = require('./db');

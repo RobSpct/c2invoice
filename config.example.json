@@ -125,7 +125,9 @@
   "overheadProjekte": [
     ".claude-mem"
   ],
-  "//rechnung": "Stammdaten fuer die Rechnungsstellung. Pflicht nach Par. 14 UStG: vollstaendiger Name und Anschrift des Ausstellers sowie steuernummer ODER ustIdNr. Ohne diese Angaben verweigert das Erstellen einer Rechnung den Dienst. kleinunternehmer=true weist keine Umsatzsteuer aus und druckt stattdessen den Par.-19-Hinweis.",
+  "//projektAlias": "Umbenannte Projekte: alter Name -> neuer Name, einstufig. Gilt beim Einlesen; vorhandene Zeilen zieht der naechste Start nach. Beispiel: {\"altes-projekt\": \"neues-projekt\"}. Saetze, Kundenzuordnung und Rechnungen folgen dem Namen nicht.",
+  "projektAlias": {},
+  "//rechnung": "Stammdaten fuer die Rechnungsstellung. Pflicht nach Par. 14 UStG: vollstaendiger Name und Anschrift des Ausstellers sowie steuernummer ODER ustIdNr. Ohne diese Angaben verweigert das Erstellen einer Rechnung den Dienst. email, telefon und land (zweistelliges Kuerzel, leer = DE) braucht nur die E-Rechnung (XRechnung). kleinunternehmer=true weist keine Umsatzsteuer aus und druckt stattdessen den Par.-19-Hinweis. Wer umsatzsteuerpflichtig ist (GmbH, UG oder Einzelunternehmen ueber der Kleinunternehmergrenze), setzt kleinunternehmer=false und prueft ustSatz. Alles auch unter Einstellungen -> Belege -> Stammdaten aenderbar.",
   "rechnung": {
     "aussteller": {
       "name": "",
@@ -134,13 +136,30 @@
       "ustIdNr": "",
       "bank": "",
       "iban": "",
-      "bic": ""
+      "bic": "",
+      "email": "",
+      "telefon": "",
+      "land": "DE"
     },
     "kleinunternehmer": true,
     "ustSatz": 19,
     "zahlungszielTage": 14,
+    "angebotGueltigTage": 30,
     "//chromePfad": "Nur setzen, wenn weder Chrome noch Edge am ueblichen Ort liegen. Wird fuer den PDF-Druck gebraucht.",
     "chromePfad": ""
+  },
+  "//mahnwesen": "Fristen des Mahnwesens in ganzen Tagen (1-90); gebuehrStufe2Eur 0-40 Euro, nur auf der 2. Mahnung. Auch unter Einstellungen aenderbar.",
+  "mahnwesen": { "erinnerungNachTagen": 7, "mahnung1NachTagen": 14, "mahnung2NachTagen": 14, "neueFristTage": 7, "gebuehrStufe2Eur": 0 },
+  "//angebot": "Nachfassen bei Angeboten: einmal, so viele Tage (1-60) vor Ablauf; muss kleiner sein als rechnung.angebotGueltigTage. Auch unter Einstellungen aenderbar.",
+  "angebot": { "nachfassenTageVorAblauf": 3 },
+  "//flows": "Versandzeit der Flows (Ortszeit): abStunde 0-23, ab dann laeuft der Tages-Scan; wochenende 1 = auch Samstag und Sonntag, 0 = nur Montag bis Freitag. Auch unter Einstellungen -> Flows aenderbar.",
+  "flows": { "abStunde": 9, "wochenende": 0 },
+  "mail": {
+    "//": "Versand per SMTP. Getestet mit Google (App-Passwort). Microsoft-Konten (Outlook/Hotmail) gehen noch nicht, die brauchen OAuth und kommen später.",
+    "smtp": { "host": "smtp.gmail.com", "port": 465, "sicher": "tls", "benutzer": "", "passwortEnvVar": "C2I_SMTP_PASSWORT" },
+    "absender": { "name": "", "adresse": "" },
+    "transport": "smtp",
+    "umleitenAn": "", "tagesgrenze": 100, "benachrichtigungAn": "", "vorlagen": {}
   },
   "port": 4747,
   "//jsonlDir": "Verzeichnis mit den Claude-Code-Sitzungsdateien (*.jsonl). Der Standard passt auf allen Systemen: das Tildezeichen wird zum Benutzerverzeichnis aufgeloest. Nur aendern, wenn die Logs woanders liegen.",

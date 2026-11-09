@@ -4,6 +4,7 @@
 const assert = require('node:assert');
 const http = require('node:http');
 const path = require('node:path');
+const verwirf = require('../verwirf');
 
 const CFG = path.join(__dirname, '..', '..', 'config.json');
 
@@ -92,7 +93,8 @@ module.exports = ({ configGeschuetzt, dbmod, openDbs }) => {
     await mitServer(async (url) => {
       const z = await (await fetch(url('/api/zaehler'))).json();
       // Felder kommen je Block dazu (C2: freigaben, C5: sitzungen), nie als Platzhalter vorab.
-      assert.deepStrictEqual(Object.keys(z), ['live', 'freigaben', 'sitzungen', 'briefings'], 'Felder: ' + Object.keys(z));
+      assert.deepStrictEqual(Object.keys(z), ['live', 'freigaben', 'sitzungen', 'briefings', 'flows_fehler'], 'Felder: ' + Object.keys(z));
+      assert.ok(Number.isInteger(z.flows_fehler) && z.flows_fehler >= 0);
       assert.ok(Number.isInteger(z.live) && z.live >= 0);
       assert.ok(Number.isInteger(z.sitzungen) && z.sitzungen >= 0);
       await mitConfig({ limit5hTokens: 1000000 }, async () => {
@@ -133,7 +135,7 @@ module.exports = ({ configGeschuetzt, dbmod, openDbs }) => {
           assert.ok(d.every((x) => typeof x.detail === 'string' && typeof x.ok === 'boolean'));
           // Zwischenspeicher: ein zweiter Abruf binnen 10 s fragt Ollama nicht erneut.
           const vorher = ollamaAufrufe;
-          await fetch(url('/api/dienste'));
+          await verwirf(fetch(url('/api/dienste')));
           assert.strictEqual(ollamaAufrufe, vorher, 'Dienst-Status ohne Zwischenspeicher');
         });
         await mitConfig({ lokaleModelle: { ...lm, upstreamUrl: 'http://127.0.0.1:1', proxyPort: 1 }, jira: { enabled: true }, dienste: { n8nUrl: 'http://127.0.0.1:1' } }, async () => {

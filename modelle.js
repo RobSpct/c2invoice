@@ -176,7 +176,7 @@ async function lade({ cfg, name, bestaetigt, fetchFn = fetch, melde = () => {}, 
   try {
     wecke();
     const r = await fetchFn(basis(cfg) + '/api/pull', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: n, stream: true }), redirect: 'error', signal: ac.signal });
-    if (!r.ok || !r.body) throw new Error('Ollama: HTTP ' + r.status);
+    if (!r.ok || !r.body) { if (r.body && typeof r.body.cancel === 'function') await r.body.cancel().catch(() => {}); throw new Error('Ollama: HTTP ' + r.status); }
     let rest = '', letzter = null, kaputt = null;
     const zeile = (z) => {
       if (!z.trim()) return;

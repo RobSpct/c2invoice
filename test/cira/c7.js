@@ -377,7 +377,7 @@ module.exports = ({ dbmod, openDbs } = {}) => {
           const r3 = await x.jiraKarten('DEV', []);
           assert.strictEqual(suche(), 2);
           assert.strictEqual(r3.karten[0].spalte, 'arbeit');
-          assert.deepStrictEqual(gesehen, [{ key: 'DEV-1', von: 'To Do', nach: 'In Progress' }]);
+          assert.deepStrictEqual(gesehen, [{ key: 'DEV-1', von: 'To Do', nach: 'In Progress', kat: 'indeterminate' }]);
           assert.strictEqual(db.prepare('SELECT status FROM jira_issue WHERE key = ?').get('DEV-1').status, 'In Progress');
         } finally { ereignisse.bus.off('ereignis', hoerer); }
       });

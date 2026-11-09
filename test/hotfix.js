@@ -1,4 +1,5 @@
 'use strict';
+require('./config-kopie');   // Schreiben in config.json landet in einer Kopie
 // Hotfix 2.0.2: Befunde aus einem externen Review (15.10.2026). Jeder Test ist
 // einmal gegen den alten Code rot gelaufen.
 const assert = require('node:assert');
@@ -193,7 +194,7 @@ module.exports = ({ dbmod, openDbs, rechnungsUmgebung, rechnungsDb, configGeschu
   function h6() {
     rechnungsUmgebung(() => {
       const db = rechnungsDb();
-      const k = kontakte.speichere(db, { firma: 'Angebot GmbH', status: 'lead' });
+      const k = kontakte.speichere(db, { firma: 'Angebot GmbH' });
       const an = angebot.erstelle(db, { posten: [frei(100)], empfaenger: { name: 'Angebot GmbH' }, kontaktId: k.id });
       const r1 = angebot.inRechnung(db, an.nr);
       rechnung.storniere(db, r1.rechnung.nr);
@@ -204,11 +205,11 @@ module.exports = ({ dbmod, openDbs, rechnungsUmgebung, rechnungsDb, configGeschu
       rechnung.storniere(db, r2.rechnung.nr);
       const zaehle = () => db.prepare('SELECT COUNT(*) n FROM invoices').get().n;
       const vorher = zaehle();
-      const echt = kontakte.macheKunde;
-      kontakte.macheKunde = () => { throw new Error('Kontakt kaputt'); };
+      // Fehler im Nachziehen selbst (frueher ueber macheKunde, das es seit C12 nicht mehr gibt).
+      db.exec("CREATE TEMP TRIGGER kaputt BEFORE UPDATE OF rechnung_nr ON angebote WHEN NEW.rechnung_nr IS NOT NULL BEGIN SELECT RAISE(ABORT, 'Angebot kaputt'); END");
       try {
-        assert.throws(() => angebot.inRechnung(db, an.nr), /Kontakt kaputt/);
-      } finally { kontakte.macheKunde = echt; }
+        assert.throws(() => angebot.inRechnung(db, an.nr), /Angebot kaputt/);
+      } finally { db.exec('DROP TRIGGER kaputt'); }
       assert.strictEqual(zaehle(), vorher, 'Rechnung ohne Angebotsvermerk geschrieben');
       assert.strictEqual(angebot.lade(db, an.nr).rechnung_nr, null);
     });

@@ -8,6 +8,7 @@ const fs = require('node:fs');
 const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
+const verwirf = require('../verwirf');
 
 const W = path.join(__dirname, '..', '..');
 const CFG = path.join(W, 'config.json');
@@ -187,8 +188,6 @@ module.exports = ({ configGeschuetzt, dbmod, openDbs }) => {
       assert.ok(freigaben.REGISTRY.has('rechnung'), 'server.js traegt die Art rechnung nicht ein');
       const d = dienst(db);
       const k = mitKunde(db);
-      // Als Lead: stelleRechnung macht ihn zum Kunden (wie POST /api/rechnung).
-      db.prepare("UPDATE kontakte SET status = 'lead' WHERE id = ?").run(k.id);
       manuell(db);
       const n = await d.frage({ text: 'Rechnung für Kunde', kanal: 'cockpit' });
       const f = offene(db)[0];
@@ -203,7 +202,6 @@ module.exports = ({ configGeschuetzt, dbmod, openDbs }) => {
       nah(e.ergebnis.brutto_eur, inv.brutto_eur, 'Ergebnis-Betrag');
       assert.ok(Array.isArray(e.ergebnis.erechnung_fehlt), 'erechnung_fehlt fehlt (nicht ueber stelleRechnung?)');
       assert.strictEqual(inv.kontakt_id, k.id);
-      assert.strictEqual(kontakte.lade(db, k.id).status, 'kunde', 'Kontakt nicht zum Kunden gemacht');
       // Manuelle Zeit ist mitgestellt und gesperrt.
       assert.ok(inv.positionen.some((p) => p.typ === 'zeit'), 'manuelle Zeit fehlt auf der Rechnung');
       assert.strictEqual(zeit.liste(db, { status: 'offen' }).length, 0, 'Eintrag noch offen');
@@ -369,10 +367,10 @@ module.exports = ({ configGeschuetzt, dbmod, openDbs }) => {
         assert.strictEqual(r.status, 200);
         const g = await r.json();
         for (const key of ['titel', 'schritte', 'knoten', 'links']) assert.ok(key in g, key + ' fehlt');
-        assert.strictEqual((await hole('art=foo&id=x')).status, 400);
-        assert.strictEqual((await hole('art=rechnung&id=2099-9999')).status, 404);
-        assert.strictEqual((await hole('art=marge&id=')).status, 400);
-        assert.strictEqual((await hole('art=offene-posten')).status, 200);
+        assert.strictEqual((await verwirf(hole('art=foo&id=x'))).status, 400);
+        assert.strictEqual((await verwirf(hole('art=rechnung&id=2099-9999'))).status, 404);
+        assert.strictEqual((await verwirf(hole('art=marge&id='))).status, 400);
+        assert.strictEqual((await verwirf(hole('art=offene-posten'))).status, 200);
         // Jede Szene traegt einen Bezug, der sich aufloesen laesst.
         for (const [frage, art] of [['Wie lief der Monat?', 'marge'], ['Was ist überfällig?', 'offene-posten'], ['Wie entwickelt sich die Marge?', 'marge'], ['Rechnung für ABC-2', 'rechnung']]) {
           const n = await d.frage({ text: frage, kanal: 'cockpit' });
@@ -385,7 +383,8 @@ module.exports = ({ configGeschuetzt, dbmod, openDbs }) => {
         const m = await d.frage({ text: 'Wie entwickelt sich die Marge?', kanal: 'cockpit' });
         const [von, bis] = m.szene.herleitung.id.split('_');
         assert.strictEqual(von, m.szene.punkte.filter((p) => p.v != null).pop().x);
-        assert.strictEqual((new Date(bis + 'T12:00:00') - new Date(von + 'T12:00:00')) / 864e5, 6, 'Woche nicht Montag bis Sonntag');
+        // UTC: in Ortszeit hat die Woche der Zeitumstellung 6 Tage und 1 Stunde.
+        assert.strictEqual((new Date(bis + 'T00:00:00Z') - new Date(von + 'T00:00:00Z')) / 864e5, 6, 'Woche nicht Montag bis Sonntag');
       } finally { await new Promise((ok) => { s.closeAllConnections(); s.close(ok); }); }
     });
   }
@@ -416,7 +415,7 @@ module.exports = ({ configGeschuetzt, dbmod, openDbs }) => {
         // Fehlender Projektordner: nur die globalen, kein Fehler.
         r = await (await hole('?arbeitsbereich=Leer')).json();
         assert.deepStrictEqual(r.skills.map((x) => x.name), ['debug', 'plan-mode']);
-        assert.strictEqual((await hole('?arbeitsbereich=Fremd')).status, 404);
+        assert.strictEqual((await verwirf(hole('?arbeitsbereich=Fremd'))).status, 404);
         // Ohne Claude Code (kein Ordner): leere Liste, 200.
         process.env.CLAUDE_CONFIG_DIR = path.join(tmp, 'ohne-claude');
         const o = await hole('?arbeitsbereich=Leer');

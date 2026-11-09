@@ -5,6 +5,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
+const verwirf = require('../verwirf');
 const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
 
@@ -383,8 +384,8 @@ module.exports = ({ configGeschuetzt, dbmod, openDbs }) => {
       const f = zeilen[zeilen.length - 1];
       assert.ok(f.typ === 'fertig' && f.stufe === 'T0' && f.quelle === 'Zahlen aus c2invoice' && f.antwort.includes('Arbeitswert') && Array.isArray(f.sprung), JSON.stringify(f));
       for (const k of ['kosten_eur', 'tokens', 'szene', 'herleitung_id', 'freigabe_id']) assert.ok(k in f, k + ' fehlt');
-      assert.strictEqual((await post('/api/cira/frage', { text: '' })).status, 400);
-      assert.strictEqual((await post('/api/cira/frage', { text: 'x'.repeat(2001) })).status, 400);
+      assert.strictEqual((await verwirf(post('/api/cira/frage', { text: '' }))).status, 400);
+      assert.strictEqual((await verwirf(post('/api/cira/frage', { text: 'x'.repeat(2001) }))).status, 400);
       const v = await (await fetch(url('/api/cira/verlauf?kanal=dock'))).json();
       assert.deepStrictEqual(v.verlauf.map((x) => x.rolle), ['ich', 'cira']);
       assert.strictEqual(v.verlauf[1].stufe, 'T0');
@@ -405,18 +406,19 @@ module.exports = ({ configGeschuetzt, dbmod, openDbs }) => {
       assert.ok(liste.freigaben.some((x) => x.id === fg.id && x.ausfuehrbar === false));
       // Entscheiden nur aus der eigenen Seite: ohne Browser-Herkunft 403, auch fuer curl.
       const ent = (body, kopf = {}) => fetch(url('/api/freigaben/' + fg.id + '/entscheide'), { method: 'POST', headers: { 'content-type': 'application/json', ...kopf }, body: JSON.stringify(body) });
-      assert.strictEqual((await ent({ wahl: 'ablehnen' })).status, 403);
-      assert.strictEqual((await ent({ wahl: 'ablehnen' }, { 'sec-fetch-site': 'cross-site' })).status, 403);
-      assert.strictEqual((await ent({ wahl: 'ok' }, { 'sec-fetch-site': 'same-origin' })).status, 409);
+      assert.strictEqual((await verwirf(ent({ wahl: 'ablehnen' }))).status, 403);
+      assert.strictEqual((await verwirf(ent({ wahl: 'ablehnen' }, { 'sec-fetch-site': 'cross-site' }))).status, 403);
+      assert.strictEqual((await verwirf(ent({ wahl: 'ok' }, { 'sec-fetch-site': 'same-origin' }))).status, 409);
       assert.strictEqual((await (await ent({ wahl: 'ablehnen' }, { origin: 'http://127.0.0.1:' + s.address().port })).json()).freigabe.status, 'abgelehnt');
       // SSE nur fuer die eigene Seite und begrenzt.
-      assert.strictEqual((await fetch(url('/api/ereignisse'), { headers: { 'sec-fetch-site': 'cross-site' } })).status, 403);
+      assert.strictEqual((await verwirf(fetch(url('/api/ereignisse'), { headers: { 'sec-fetch-site': 'cross-site' } }))).status, 403);
+      // Antworten festhalten: sonst raeumt die Speicherbereinigung die Stroeme vor der 429-Pruefung ab.
       const offen = [];
       try {
-        for (let i = 0; i < ereignisse.MAX_VERBINDUNGEN; i++) { const c = new AbortController(); const r2 = await fetch(url('/api/ereignisse'), { signal: c.signal }); offen.push(c); assert.strictEqual(r2.status, 200); }
-        assert.strictEqual((await fetch(url('/api/ereignisse'))).status, 429);
-      } finally { for (const c of offen) c.abort(); }
-      assert.strictEqual((await fetch(url('/api/freigaben?status=quatsch'))).status, 400);
+        for (let i = 0; i < ereignisse.MAX_VERBINDUNGEN; i++) { const c = new AbortController(); const r2 = await fetch(url('/api/ereignisse'), { signal: c.signal }); offen.push([c, r2]); assert.strictEqual(r2.status, 200); }
+        assert.strictEqual((await verwirf(fetch(url('/api/ereignisse')))).status, 429);
+      } finally { for (const [c] of offen) c.abort(); }
+      assert.strictEqual((await verwirf(fetch(url('/api/freigaben?status=quatsch')))).status, 400);
     } finally {
       await new Promise((ok) => { s.closeAllConnections(); s.close(ok); });
     }

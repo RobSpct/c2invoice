@@ -61,6 +61,8 @@ module.exports = ({ dbmod, openDbs }) => {
       'alt@markt': [{ scope: 'user', installPath: path.join(heim, 'cache', 'alt') }],
     } });
     schreib('cache/helfer/.claude-plugin/plugin.json', { name: 'helfer', description: 'Hilft' });
+    // Installiert heisst: der Ordner ist da. Fehlt er, meldet das Inventar ihn.
+    for (const d of ['mods/regel', 'cache/alt']) fs.mkdirSync(path.join(heim, d), { recursive: true });
     schreib('.claude/plugins/known_marketplaces.json', {
       markt: { source: { source: 'github', repo: 'x/y' } },
       eigene: { source: { source: 'directory', path: path.join(heim, 'mods') } },
@@ -279,6 +281,68 @@ module.exports = ({ dbmod, openDbs }) => {
       const notiz = zeile(inv, 'skills', 'notiz').kontext.Proj;
       assert.deepStrictEqual([notiz.geschaetzt, notiz.tokens > 0], [true, true]);
     }],
+    ['Inventar: Plugin-Agents folgen ihrem Plugin, eingebaute stehen dabei', () => {
+      const f = fixtureHeim();
+      const schreib = (rel, t) => { const d = path.join(f.heim, rel); fs.mkdirSync(path.dirname(d), { recursive: true }); fs.writeFileSync(d, t); };
+      schreib('cache/helfer/agents/pruef.md', '---\nname: pruef\ndescription: >\n  Prueft\n  alles\ntools: Read\n---\nText');
+      schreib('cache/helfer/agents/notiz.txt', 'keine Agent-Datei');
+      schreib('cache/alt/agents/altag.md', '---\nname: altag\ndescription: Alt\n---\nText');
+      schreib('cache/helfer-projekt/agents/nur-projekt.md', '---\nname: nur-projekt\n---\nText');
+      const liste = path.join(f.heim, '.claude/plugins/installed_plugins.json');
+      const inst = JSON.parse(fs.readFileSync(liste, 'utf8'));
+      inst.plugins['helfer@markt'].unshift({ scope: 'project', projectPath: f.p, installPath: path.join(f.heim, 'cache', 'helfer-projekt') });
+      fs.writeFileSync(liste, JSON.stringify(inst));
+      const inv = wz.inventar({ heim: f.heim, bereiche: f.bereiche, lager: f.lager, kontext: {} });
+      const pruef = zeile(inv, 'agents', 'helfer:pruef');
+      assert.deepStrictEqual([pruef.herkunft, pruef.schaltbar, pruef.beschreibung, pruef.teilVon], ['plugin', false, 'Prueft alles', 'helfer@markt']);
+      assert.deepStrictEqual(pruef.zellen, { global: 'an', Proj: 'erbt', Ohne: '—' });
+      assert.strictEqual(pruef.wirksam.Proj, true);
+      const alt = zeile(inv, 'agents', 'alt:altag');
+      assert.deepStrictEqual([alt.zellen.global, alt.wirksam.global, alt.zellen.Proj, alt.wirksam.Proj], ['aus', false, 'an', true], 'folgt dem Plugin je Spalte');
+      assert.ok(!zeile(inv, 'agents', 'helfer:nur-projekt'), 'Nutzer-Installation vor Projekt-Kopie');
+      assert.ok(!zeile(inv, 'agents', 'helfer:notiz'));
+      const eingebaut = inv.arten.agents.filter((e) => e.herkunft === 'eingebaut');
+      assert.deepStrictEqual(eingebaut.map((e) => e.name).sort(), ['Explore', 'Plan', 'claude', 'claude-code-guide', 'general-purpose', 'statusline-setup'].sort());
+      assert.deepStrictEqual(eingebaut[0].zellen, { global: 'an', Proj: 'erbt', Ohne: '—' });
+      assert.strictEqual(eingebaut[0].schaltbar, false);
+      assert.strictEqual(inv.arten.agents.length, 1 + 2 + 6, 'eigener + Plugin-Agents + eingebaute');
+    }],
+    ['Inventar: Plugin-Skills und -Commands, Messung ergaenzt eingebaute und claude.ai', () => {
+      const f = fixtureHeim();
+      const schreib = (rel, t) => { const d = path.join(f.heim, rel); fs.mkdirSync(path.dirname(d), { recursive: true }); fs.writeFileSync(d, t); };
+      schreib('cache/helfer/skills/eins/SKILL.md', '---\nname: eins\ndescription: Erster\n---\nText');
+      schreib('cache/helfer/skills/zwei_alt/SKILL.md', '---\nname: zwei-neu\ndescription: Zweiter\n---\nText');
+      schreib('cache/helfer/skills/leer/notiz.txt', 'kein Skill');
+      schreib('cache/helfer/extra/drei/SKILL.md', '---\ndescription: Dritter\n---\nText');
+      schreib('cache/helfer/commands/machen.md', '---\ndescription: Macht\n---\nText');
+      schreib('cache/helfer/commands/machen.toml', 'fuer andere Werkzeuge');
+      schreib('cache/helfer/.claude-plugin/plugin.json', JSON.stringify({ name: 'helfer', description: 'Hilft', skills: './extra/', commands: './commands/machen.md' }));
+      schreib('cache/alt/skills/aus/SKILL.md', '---\nname: aus\ndescription: Alt\n---\nText');
+      const k = { kategorien: {}, deferred: false, mcp: {}, agents: {}, skills: {
+        'helfer:eins': { quelle: 'Plugin (helfer)', tokens: 40 }, 'helfer:machen': { quelle: 'Plugin (helfer)', tokens: 7 },
+        dataviz: { quelle: 'Built-in', tokens: 30 }, 'anthropic-skills:docx': { quelle: 'claude.ai sync', tokens: 20 },
+        aufraeumen: { quelle: 'Built-in', tokens: 9 } } };
+      const inv = wz.inventar({ heim: f.heim, bereiche: f.bereiche, lager: f.lager, kontext: { Proj: k } });
+      const eins = zeile(inv, 'skills', 'helfer:eins');
+      assert.deepStrictEqual([eins.herkunft, eins.schaltbar, eins.beschreibung, eins.teilVon], ['plugin', false, 'Erster', 'helfer@markt']);
+      assert.deepStrictEqual(eins.zellen, { global: 'an', Proj: 'erbt', Ohne: '—' });
+      assert.strictEqual(eins.kontext.Proj.tokens, 40);
+      assert.ok(zeile(inv, 'skills', 'helfer:zwei-neu'), 'Name aus dem Frontmatter, wie Claude Code ihn fuehrt');
+      assert.ok(!zeile(inv, 'skills', 'helfer:zwei_alt'));
+      assert.ok(!zeile(inv, 'skills', 'helfer:leer'));
+      assert.ok(zeile(inv, 'skills', 'helfer:drei'), 'Pfad aus dem Manifest');
+      const aus = zeile(inv, 'skills', 'alt:aus');
+      assert.deepStrictEqual([aus.wirksam.global, aus.wirksam.Proj], [false, true], 'folgt dem Plugin je Spalte');
+      const machen = zeile(inv, 'commands', 'helfer:machen');
+      assert.deepStrictEqual([machen.herkunft, machen.schaltbar, machen.beschreibung, machen.kontext.Proj.tokens], ['plugin', false, 'Macht', 7]);
+      assert.deepStrictEqual(inv.arten.commands.map((e) => e.name).sort(), ['helfer:machen', 'uebergabe'], 'toml gehoert nicht zu Claude Code');
+      const dv = zeile(inv, 'skills', 'dataviz');
+      assert.deepStrictEqual([dv.herkunft, dv.schaltbar, dv.zellen.global, dv.zellen.Proj, dv.wirksam.Proj], ['eingebaut', false, 'an', 'erbt', true]);
+      assert.strictEqual(zeile(inv, 'skills', 'anthropic-skills:docx').herkunft, 'claude.ai');
+      const auf = zeile(inv, 'skills', 'aufraeumen');
+      assert.deepStrictEqual([auf.herkunft, auf.schaltbar, auf.zellen.Proj], ['global', true, 'aus'], 'Datei gewinnt gegen gleichnamigen Messwert');
+      assert.deepStrictEqual(inv.ebenenFehler, []);
+    }],
     ['C8 Inventar: ohne ~/.claude → leer, kein Fehler', () => {
       const inv = wz.inventar({ heim: tmp(), bereiche: [], lager: null, kontext: {} });
       for (const art of ['skills', 'agents', 'commands', 'plugins', 'mods', 'mcps']) assert.deepStrictEqual(inv.arten[art], []);
@@ -430,6 +494,25 @@ module.exports = ({ dbmod, openDbs }) => {
       assert.strictEqual(l.kontext_summe.tokens >= 2000, true);
       // Lager ist nicht installiert: keine Nutzungszahl statt „0 Sitzungen“.
       assert.strictEqual(zeile(l, 'skills', 'recherche').sitzungen30, null);
+    }],
+    ['Dienst: Plugin-Agent zaehlt in der Kachel, sein Kontext nur einmal', async () => {
+      const { d, db, f } = dienst({ jetzt: () => Date.UTC(2026, 9, 20, 12) });
+      fs.mkdirSync(path.join(f.heim, 'cache', 'helfer', 'agents'), { recursive: true });
+      fs.writeFileSync(path.join(f.heim, 'cache', 'helfer', 'agents', 'pruef.md'), '---\nname: pruef\ndescription: Prueft\n---\nText');
+      fs.mkdirSync(path.join(f.heim, 'cache', 'helfer', 'skills', 'eins'), { recursive: true });
+      fs.writeFileSync(path.join(f.heim, 'cache', 'helfer', 'skills', 'eins', 'SKILL.md'), '---\nname: eins\ndescription: Erster\n---\nText');
+      fs.mkdirSync(path.join(f.heim, 'cache', 'helfer', 'commands'), { recursive: true });
+      fs.writeFileSync(path.join(f.heim, 'cache', 'helfer', 'commands', 'machen.md'), '---\ndescription: Macht\n---\nText');
+      db.prepare('INSERT INTO werkzeug_kontext (bereich, gemessen_am, json) VALUES (?,?,?)').run('Proj', new Date(Date.UTC(2026, 9, 20, 11)).toISOString(),
+        JSON.stringify({ kategorien: {}, deferred: false, mcp: {}, agents: { 'helfer:pruef': { quelle: 'Plugin', tokens: 500 } },
+          skills: { 'helfer:eins': { quelle: 'Plugin (helfer)', tokens: 40 }, 'helfer:machen': { quelle: 'Plugin (helfer)', tokens: 7 }, dataviz: { quelle: 'Built-in', tokens: 30 } } }));
+      const l = d.liste('Proj');
+      assert.strictEqual(zeile(l, 'plugins', 'helfer@markt').kontext.Proj.tokens, 547);
+      assert.strictEqual(zeile(l, 'agents', 'helfer:pruef').kontext.Proj.tokens, 500);
+      assert.strictEqual(l.kacheln.agents, l.arten.agents.filter((e) => e.wirksam.Proj).length);
+      assert.strictEqual(l.kacheln.skills, l.arten.skills.filter((e) => e.wirksam.Proj).length);
+      assert.strictEqual(l.kontext_summe.tokens, 547 + 30, 'Plugin-Teile nicht doppelt, Eingebautes zaehlt mit');
+      assert.ok(!l.vorschlag || l.vorschlag.art === 'plugins' || !l.vorschlag.name.includes(':'), 'ein Plugin-Teil ist kein Abschalt-Vorschlag');
     }],
     ['C8 Dienst: Plugin mit Hooks ist nie ein Vorschlag (Nutzung nicht messbar)', async () => {
       const { d, db, f } = dienst({ jetzt: () => Date.UTC(2026, 9, 20, 12) });

@@ -6,6 +6,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const verwirf = require('../verwirf');
 const { PassThrough } = require('node:stream');
 const { EventEmitter } = require('node:events');
 
@@ -592,8 +593,8 @@ module.exports = ({ dbmod, openDbs }) => {
       try {
         const url = 'http://127.0.0.1:' + s.server.address().port + '/api/hook';
         const koerper = JSON.stringify({ hook_event_name: 'Notification', session_id: '11111111-2222-4333-8444-555555555555' });
-        assert.strictEqual((await fetch(url, { method: 'POST', body: koerper })).status, 401);
-        assert.strictEqual((await fetch(url, { method: 'POST', body: koerper, headers: { 'x-c2invoice-geheimnis': 'falsch' } })).status, 401);
+        assert.strictEqual((await verwirf(fetch(url, { method: 'POST', body: koerper }))).status, 401);
+        assert.strictEqual((await verwirf(fetch(url, { method: 'POST', body: koerper, headers: { 'x-c2invoice-geheimnis': 'falsch' } }))).status, 401);
       } finally { await new Promise((ok) => { s.server.closeAllConnections(); s.server.close(ok); }); }
     } finally { if (alt === undefined) delete cfg.hook; else cfg.hook = alt; }
   }
@@ -610,17 +611,17 @@ module.exports = ({ dbmod, openDbs }) => {
     const post = (p, d2, kopf) => fetch(basis + p, { method: 'POST', headers: kopf, body: JSON.stringify(d2) });
     try {
       const start = { arbeitsbereich: 'Proj', prompt: 'x' };
-      assert.strictEqual((await post('/api/sitzung', start, {})).status, 403, 'ohne Herkunft (curl) gestartet');
-      assert.strictEqual((await post('/api/sitzung', start, { 'sec-fetch-site': 'cross-site' })).status, 403);
-      assert.strictEqual((await post('/api/sitzung', start, { origin: 'http://127.0.0.1:1' })).status, 403, 'fremde Herkunft gestartet');
+      assert.strictEqual((await verwirf(post('/api/sitzung', start, {}))).status, 403, 'ohne Herkunft (curl) gestartet');
+      assert.strictEqual((await verwirf(post('/api/sitzung', start, { 'sec-fetch-site': 'cross-site' }))).status, 403);
+      assert.strictEqual((await verwirf(post('/api/sitzung', start, { origin: 'http://127.0.0.1:1' }))).status, 403, 'fremde Herkunft gestartet');
       assert.strictEqual(a.aufrufe.length, 0, 'abgewiesener Start hat einen Prozess erzeugt');
       const r = await post('/api/sitzung', start, { 'sec-fetch-site': 'same-origin' });
       assert.strictEqual(r.status, 200);
       const { id } = await r.json();
-      assert.strictEqual((await post('/api/sitzung/' + id + '/eingabe', { text: 'y' }, {})).status, 403);
-      assert.strictEqual((await post('/api/sitzung/' + id + '/stopp', {}, {})).status, 403);
-      assert.strictEqual((await fetch(basis + '/api/sitzung/' + id)).status, 200, 'Lesen gesperrt');
-      assert.strictEqual((await fetch(basis + '/api/sitzungen?offen=1')).status, 200);
+      assert.strictEqual((await verwirf(post('/api/sitzung/' + id + '/eingabe', { text: 'y' }, {}))).status, 403);
+      assert.strictEqual((await verwirf(post('/api/sitzung/' + id + '/stopp', {}, {}))).status, 403);
+      assert.strictEqual((await verwirf(fetch(basis + '/api/sitzung/' + id))).status, 200, 'Lesen gesperrt');
+      assert.strictEqual((await verwirf(fetch(basis + '/api/sitzungen?offen=1'))).status, 200);
     } finally { await new Promise((ok) => { s.closeAllConnections(); s.close(ok); }); zu(); }
   }
 

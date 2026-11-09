@@ -187,7 +187,7 @@ function mengeUndPreis(p) {
 
 function position(p, nr, steuer) {
   const { menge, einheit, preis } = mengeUndPreis(p);
-  const name = p.bezeichnung || ('Entwicklungsleistung Vorgang ' + p.ticket);
+  const name = rechnung.positionsName(p);
   const zeitraum = p.von && p.bis && p.von <= p.bis
     ? `<ram:BillingSpecifiedPeriod>${datumElement('StartDateTime', p.von)}${datumElement('EndDateTime', p.bis)}</ram:BillingSpecifiedPeriod>`
     : '';

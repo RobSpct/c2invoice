@@ -357,6 +357,9 @@ EN["Ticket"] = "Job";
 EN["Arbeit ohne Ticket-Branch trägt keinen Vorgang und bleibt damit unabrechenbar. Im Feld"] = "Work on a branch without a job key carries no job and stays unbillable. In the";
 EN["lässt sich eine Sitzung von Hand buchen — ein Jira-Schlüssel oder ein frei gewählter Name. Leeren stellt die automatische Zuordnung wieder her."] = "field a session can be booked by hand — a Jira key or any name you choose. Clearing it restores automatic attribution.";
 EN["ohne Vorgang"] = "no job";
+EN["abgerechnet — Arbeitswert auf gestellten Rechnungen"] = "billed — billable value on issued invoices";
+EN["mehr berechnet als geleistet"] = "billed more than done";
+EN["ohne Vorgang — geleistet ohne Vorgang abzüglich berechneter Stunden"] = "no job — done without a job, minus billed hours";
 EN["Subagent"] = "subagent";
 EN["Subagents dieser Sitzung"] = "subagents of this session";
 EN["Letzter Abgleich "] = "Last sync ";
@@ -407,8 +410,8 @@ EN["Oben einen Zeitraum wählen, Vorgänge auswählen und die erste Rechnung ers
   "Choose a period above, select jobs and create the first invoice.";
 EN["Kein Kontakt passt zu Suche und Filter."] = "No contact matches the search and filter.";
 EN["Suchbegriff ändern oder Filter zurücksetzen."] = "Change the search term or reset the filter.";
-EN["Über das Formular oben den ersten Kunden oder Lead anlegen."] =
-  "Use the form above to add the first customer or lead.";
+EN["Kunden legst du direkt an, Interessenten als Lead mit Herkunft. Aus einem Lead wird ein Kunde, wenn er ein Angebot annimmt oder du ihn umwandelst."] =
+  "Add customers directly and prospects as a lead with its source. A lead becomes a customer when it accepts a quote or you convert it.";
 
 function uebersetze(de) {
   if (SPRACHE === 'de') return de;

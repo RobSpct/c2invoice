@@ -8,6 +8,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const vm = require('node:vm');
+const verwirf = require('../verwirf');
 const { PassThrough } = require('node:stream');
 const { EventEmitter } = require('node:events');
 
@@ -217,25 +218,25 @@ module.exports = ({ dbmod, openDbs }) => {
     try {
       const { id } = await laufend(x);
       for (const a of ['zusammenfassung', 'uebergabe', 'terminal']) {
-        assert.strictEqual((await fetch(basis + '/api/sitzung/' + id + '/' + a, { method: 'POST', body: '{}' })).status, 403, a + ' ohne Herkunft');
+        assert.strictEqual((await verwirf(fetch(basis + '/api/sitzung/' + id + '/' + a, { method: 'POST', body: '{}' }))).status, 403, a + ' ohne Herkunft');
       }
       const r = await fetch(basis + '/api/sitzung/' + id + '/zusammenfassung', { method: 'POST', body: '{}', headers: { 'sec-fetch-site': 'same-origin' } });
       assert.strictEqual(r.status, 200, await r.clone().text());
       assert.strictEqual((await r.json()).vorgang, 'ABC-1');
-      const t = await fetch(basis + '/api/sitzung/' + id + '/terminal', { method: 'POST', body: '{}', headers: { 'sec-fetch-site': 'same-origin' } });
+      const t = await verwirf(fetch(basis + '/api/sitzung/' + id + '/terminal', { method: 'POST', body: '{}', headers: { 'sec-fetch-site': 'same-origin' } }));
       assert.strictEqual(t.status, 409, 'Terminal fuer laufende Sitzung');
       // Programmfehler (TypeError) ist 500, nicht wie eine falsche Eingabe 400.
       x.setzeAntwort(null);
       const orig = console.error; console.error = () => {};
       try {
-        const p = await fetch(basis + '/api/sitzung/' + id + '/zusammenfassung', { method: 'POST', body: '{}', headers: { 'sec-fetch-site': 'same-origin' } });
+        const p = await verwirf(fetch(basis + '/api/sitzung/' + id + '/zusammenfassung', { method: 'POST', body: '{}', headers: { 'sec-fetch-site': 'same-origin' } }));
         assert.strictEqual(p.status, 503, 'leere Modellantwort');
         x.setzeAntwort('wirf');
-        const q = await fetch(basis + '/api/sitzung/' + id + '/zusammenfassung', { method: 'POST', body: '{}', headers: { 'sec-fetch-site': 'same-origin' } });
+        const q = await verwirf(fetch(basis + '/api/sitzung/' + id + '/zusammenfassung', { method: 'POST', body: '{}', headers: { 'sec-fetch-site': 'same-origin' } }));
         assert.strictEqual(q.status, 500, 'Programmfehler als Eingabefehler gemeldet');
       } finally { console.error = orig; }
       // Eingabefehler bleibt 400.
-      assert.strictEqual((await fetch(basis + '/api/sitzung', { method: 'POST', body: JSON.stringify({ arbeitsbereich: 'Proj', prompt: '' }), headers: { 'sec-fetch-site': 'same-origin' } })).status, 400, 'Eingabefehler nicht 400');
+      assert.strictEqual((await verwirf(fetch(basis + '/api/sitzung', { method: 'POST', body: JSON.stringify({ arbeitsbereich: 'Proj', prompt: '' }), headers: { 'sec-fetch-site': 'same-origin' } }))).status, 400, 'Eingabefehler nicht 400');
     } finally { await new Promise((ok) => { s.closeAllConnections(); s.close(ok); }); x.zu(); }
   }
 

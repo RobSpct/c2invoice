@@ -162,7 +162,8 @@ function herleitungMarge(db, id) {
     if (!rechnung.istTag(z[1]) || !rechnung.istTag(z[2]) || z[1] > z[2]) throw Object.assign(new Error('Zeitraum ungültig.'), { status: 400 });
     const o = { from: z[1], to: z[2] };
     // Dieselbe Rechnung wie die Kennzahlen in Finanzen und Cira (kennzahlenFakten).
-    const k = metrics.kennzahlen(metrics.byTicket(db, o).concat(metrics.ohneTicket(db, o)), rechnung.abrechnung(db), zeit.kennzahlenZusatz(db, o));
+    const zeilen = metrics.byTicket(db, o).concat(metrics.ohneTicket(db, o));
+    const k = metrics.kennzahlen(zeilen, rechnung.abrechnung(db), { ...zeit.kennzahlenZusatz(db, o), projektKonto: rechnung.projektKonten(db, zeilen, o) });
     return margeGraph('Marge ' + z[1] + ' bis ' + z[2] + ' · ' + (k.wert.marge_prozent == null ? 'keine Marge' : proz(k.wert.marge_prozent)), k.wert);
   }
   const row = vorgangZeile(db, id);

@@ -3,6 +3,7 @@
 // Laeuft ausschliesslich als eigener Prozess auf fertig geschriebenen Dateien:
 // keine Hooks, kein Eingriff in laufende Sessions, keine zusaetzlichen Tokens.
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const readline = require('node:readline');
 const pricing = require('./pricing');
@@ -39,6 +40,46 @@ const LOKAL_PROJEKT = '(lokal)';
 // Werkzeugbetrieb von c2invoice selbst, kein Kundenprojekt (metrics.isOverhead).
 const CIRA_ORDNER = path.join(__dirname, 'data', 'cira');
 const CIRA_PROJEKT = '(cira)';
+// Wegwerf-Ordner im System-Temp: Testlaeufe von `claude`, kein Projekt. Werkzeugbetrieb (metrics.isOverhead).
+const TEST_PROJEKT = '(test)';
+
+// Normalisierte Temp-Wurzeln. Eine Laufwerkswurzel (TEMP=C:\) gilt nicht: sie umfasste jedes Projekt.
+// win32: die Pfade stehen hier schon mit Backslash, auf jedem System.
+function tempWurzeln(roh) {
+  const aus = new Set();
+  for (const p of roh) {
+    const w = String(p || '').replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase();
+    if (w && w !== path.win32.parse(w).root) aus.add(w);
+  }
+  return [...aus];
+}
+// Windows nennt denselben Ordner je nach Start in Kurzform (WORKUS~1) oder Langform, beide stehen in den Logs.
+function langform(p) {
+  try { return fs.realpathSync.native(p); } catch { return p; }
+}
+const TEMP_WURZELN = tempWurzeln([os.tmpdir(), langform(os.tmpdir()), process.env.TEMP, process.env.TMP]);
+
+function istTemp(cwd) {
+  const norm = String(cwd || '').replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase();
+  // Das Muster haengt nicht an TEMP/TMP des Dienstes: nur dort stuende die Kurzform (WORKUS~1).
+  return /\\appdata\\local\\temp(\\|$)/.test(norm) || TEMP_WURZELN.some((w) => norm === w || norm.startsWith(w + '\\'));
+}
+
+// Umbenannte Projekte: alter Name -> neuer. Ungueltiges wuerde Sitzungen lautlos
+// falsch buchen, deshalb wird es geprueft und mit Warnung ignoriert.
+function pruefeAlias(roh) {
+  if (roh == null) return {};
+  if (typeof roh !== 'object' || Array.isArray(roh)) {
+    console.warn('Warnung: projektAlias in config.json ist kein Objekt und wird ignoriert.');
+    return {};
+  }
+  return Object.fromEntries(Object.entries(roh).filter(([alt, neu]) => {
+    const gueltig = typeof neu === 'string' && neu.trim() !== '';
+    if (!gueltig) console.warn('Warnung: projektAlias["' + alt + '"] in config.json ist kein Projektname und wird ignoriert.');
+    return gueltig;
+  }));
+}
+const PROJEKT_ALIAS = pruefeAlias(config.projektAlias);
 
 // Aus "C:\Users\Name\Dev\Beispiel - App\src\lib" wird "Beispiel - App".
 // Ohne diesen Schritt zaehlt jeder Unterordner als eigenes Projekt.
@@ -62,11 +103,18 @@ const PROJECT_ROOTS = (Array.isArray(config.projectRoots) && config.projectRoots
 ).map(loeseHeim).filter(Boolean);
 
 function projectOf(cwd) {
+  const p = ordnerProjekt(cwd);
+  return Object.hasOwn(PROJEKT_ALIAS, p) ? PROJEKT_ALIAS[p] : p;
+}
+
+function ordnerProjekt(cwd) {
   if (!cwd) return '(unbekannt)';
   const norm = cwd.replace(/\//g, '\\').replace(/\\+$/, '');
   if (norm.toLowerCase() === CIRA_ORDNER.replace(/\//g, '\\').toLowerCase()) return CIRA_PROJEKT;
   // „Merke dir“ (C9c): T2 arbeitet in einer Vault-Kopie im Temp-Ordner — Werkzeugbetrieb wie Cira.
   if (/\\c2i-merken-[\w-]+$/i.test(norm)) return CIRA_PROJEKT;
+  // Vor den Wurzeln: Temp liegt unter "~" und wuerde sonst zum Projekt "AppData".
+  if (istTemp(norm)) return TEST_PROJEKT;
   for (const root of PROJECT_ROOTS) {
     if (!root) continue;
     const r = root.replace(/\//g, '\\').replace(/\\+$/, '');
@@ -276,8 +324,9 @@ async function ingestFile(db, filePath, fromOffset, stmts, { nurAktivitaet = fal
     const branch = o.gitBranch || null;
     // Bei Worktrees steht der Ticket-Schluessel nicht im Branch (dort oft
     // detached HEAD), sondern im Pfad. Deshalb der Rueckgriff auf cwd.
+    // Testlaeufe tragen nie ein Ticket, auch wenn der Branch danach aussieht. Das UPSERT uebernimmt die NULL.
     const ausBranch = ticketOf(branch);
-    const ticket = ausBranch || ticketOf(o.cwd);
+    const ticket = project === TEST_PROJEKT ? null : ausBranch || ticketOf(o.cwd);
     const ticketQuelle = ausBranch ? null : (ticket ? 'cwd' : null);
     const day = dayOf(ts);
 
@@ -611,7 +660,8 @@ async function run({ db, verbose = false } = {}) {
 
 module.exports = {
   run, projectOf, ticketOf, extractUsage, listJsonlFiles, PROJECT_ROOTS,
-  lokalDir, jsonlDir, LOKAL_PROJEKT, CIRA_ORDNER, CIRA_PROJEKT, istEingabe, gleichePreiseAb, loeseHeim,
+  lokalDir, jsonlDir, LOKAL_PROJEKT, CIRA_ORDNER, CIRA_PROJEKT, TEST_PROJEKT, istTemp, tempWurzeln, TEMP_WURZELN, PROJEKT_ALIAS, pruefeAlias,
+  istEingabe, gleichePreiseAb, loeseHeim,
 };
 
 if (require.main === module) {

@@ -100,7 +100,7 @@ const ICON = {
   live: 'M1.5 8h3l1.5-4 3 8 1.5-4h3',
   zeit: 'M8 2.5a5.5 5.5 0 1 0 0 11a5.5 5.5 0 1 0 0-11M8 5v3.2l2.2 1.4',
   briefings: 'M3.5 2.5h7l2 2v9h-9zM5.5 7h5M5.5 9.5h5M5.5 12h3',
-  board: 'M2.5 3h3v10h-3zM6.5 3h3v6h-3zM10.5 3h3v8h-3z',
+  projekte: 'M2 4.5a1 1 0 0 1 1-1h3l1.5 1.5H13a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z',
   vorgaenge: 'M3 4h10M3 8h10M3 12h6M12 11l1.5 1.5L16 10',
   postfach: 'M1.5 3.5h13v9h-13zM1.5 3.5l6.5 5 6.5-5',
   strecke: 'M2.5 3.5h7a2 2 0 0 1 0 4h-7M4.5 1.5l-2 2 2 2M6.5 12.5h7a2 2 0 0 0 0-4h-2M11.5 14.5l2-2-2-2',
@@ -128,10 +128,10 @@ const SEITEN = [
   { k: 'live', l: 'Live', u: 'Laufende Claude-Sitzungen' },
   { k: 'zeit', l: 'Zeiterfassung', u: 'Timer, Nachträge, Kalender' },
   { k: 'briefings', l: 'Briefings', u: 'Berichte aus dem Vault · Cira fasst zusammen' },
-  { k: 'board', l: 'Board', gruppe: 'Arbeit', u: 'Aufgaben aus TODO.md · mit Zeit und Wert aus c2invoice' },
+  { k: 'projekte', l: 'Projekte', gruppe: 'Arbeit', u: 'Konto, Aufgaben und Rechnungen je Projekt' },
   { k: 'vorgaenge', l: 'Vorgänge', u: 'Budget, Status und Rechenweg je Vorgang' },
   { k: 'postfach', l: 'Postfach', block: 'C15', u: 'Mail, Slack und Telegram · landet am Kunden und am Vorgang' },
-  { k: 'flows', l: 'Flows', block: 'C11', u: 'Automatisierungen ohne Code · Auslöser, Bedingung, Aktion' },
+  { k: 'flows', l: 'Flows', u: 'Automatisierungen ohne Code · Auslöser, Bedingung, Aktion' },
   { k: 'gedaechtnis', l: 'Gedächtnis', u: 'Vault als Graph · Notizen, Links und ihr Bezug zum Ledger' },
   { k: 'werkzeuge', l: 'Werkzeuge', u: 'Skills, Agents, Commands, Plugins, Mods und MCPs je Arbeitsbereich' },
   { k: 'hub', l: 'Finanzen', gruppe: 'Auswertung', u: 'Umsatz, Marge, offene Posten' },
@@ -145,10 +145,14 @@ const SEITEN = [
 ];
 const EINSTELLUNGEN_SEITE = { k: 'einstellungen', l: 'Einstellungen', u: 'Stammdaten, Sätze, Hinweise' };
 const seiteVon = (k) => SEITEN.find((s) => s.k === k) || (k === EINSTELLUNGEN_SEITE.k ? EINSTELLUNGEN_SEITE : null);
+// Beleg-Editor (Route beleg): kein SEITEN-Eintrag, aber Titel und aktiver Bereich folgen der Belegart.
+const belegBereich = () => ((typeof ed !== 'undefined' && ed.b ? ed.b.art : /[?&]art=angebot/.test(location.hash) ? 'angebot' : 'rechnung') === 'angebot' ? 'angebote' : 'rechnungen');
+const kopfSeite = (k) => (k === 'beleg' ? { k, l: belegBereich() === 'angebote' ? 'Neues Angebot' : 'Neue Rechnung' } : seiteVon(k));
+const navAktiv = (k) => (k === 'beleg' ? belegBereich() : k);
 const seitenName = (s) => (s.k === 'cockpit' ? CIRA_NAME : uebersetze(s.l));
 // Der Zeitraum filtert nur hier (Handoff §4.1.3); sonst bleibt der Block
 // unsichtbar stehen, damit die Leiste nicht springt.
-const MIT_ZEITRAUM = ['hub', 'analyse', 'live', 'zeit', 'vorgaenge', 'angebote', 'rechnungen'];
+const MIT_ZEITRAUM = ['hub', 'analyse', 'live', 'zeit', 'vorgaenge', 'projekte', 'angebote', 'rechnungen'];
 
 // Bereiche aus spaeteren Bloecken: bis dahin ein ehrlicher Leerzustand statt
 // eines Mockups. Der Block meldet sich spaeter mit eigenem registriere() an.
@@ -271,17 +275,21 @@ async function ladeDienste() {
 // Belege und Kontakte fuer Suche, Hinweise und Hub. Selten geaendert.
 async function ladeBelege() {
   const nichts = (pfad) => (e) => { console.error(pfad + ':', e.message); return null; };
-  const [r, a, k] = await Promise.all([
+  const [r, a, k, l] = await Promise.all([
     hole('/api/rechnungen').catch(nichts('/api/rechnungen')),
     hole('/api/angebote').catch(nichts('/api/angebote')),
     hole('/api/kontakte').catch(nichts('/api/kontakte')),
+    hole('/api/leads').catch(nichts('/api/leads')),
   ]);
   // Ohne ersten Stand bleibt die Liste null: "nicht geladen" ist etwas anderes
   // als "keine Rechnungen". Ein spaeterer Fehler behaelt den alten Stand.
   state.rechnungen = r ? r.rechnungen : state.rechnungen || null;
   state.angebote = a ? a.angebote : state.angebote || null;
   state.kontakte = k ? k.kontakte : state.kontakte || null;
-  state.fehler.belege = !(r && a && k);
+  // Leads (C12) fuer Suche und Angebots-Editor; die Kontakte-Seite haelt ihren eigenen Stand und spiegelt ihn hierher.
+  state.leads = l && Array.isArray(l.leads) ? l.leads : state.leads || null;
+  state.fehler.leads = !l;
+  state.fehler.belege = !(r && a && k && l);
   if (!state.fehler.belege) state.belegeStand = Date.now();
   zeichneKopf();
   zeichneAnsicht();
@@ -298,17 +306,21 @@ function liveSitzungen() {
 // Laufende Sitzungen (eigene Prozesse und fremde mit Ereignis in 2 Min, C5).
 const offeneSitzungen = () => (state.zaehler && Number.isInteger(state.zaehler.sitzungen) ? state.zaehler.sitzungen : 0);
 // Ungelesene Briefings (C9a), gleiche Quelle /api/zaehler.
+// Offene Flow-Fehlerkarten (C11c), gleiche Quelle /api/zaehler.
+const flowsFehler = () => (state.zaehler && Number.isInteger(state.zaehler.flows_fehler) ? state.zaehler.flows_fehler : 0);
 const ungeleseneBriefings = () => (state.zaehler && Number.isInteger(state.zaehler.briefings) ? state.zaehler.briefings : 0);
 function zeigeSitzungenZaehler() {
   const z = document.getElementById('nav-sitzungen');
   if (z) { z.textContent = String(offeneSitzungen()); z.hidden = !offeneSitzungen(); }
   const b = document.getElementById('nav-briefings');
   if (b) { b.textContent = String(ungeleseneBriefings()); b.hidden = !ungeleseneBriefings(); }
+  const f = document.getElementById('nav-flows');
+  if (f) { f.textContent = String(flowsFehler()); f.hidden = !flowsFehler(); }
 }
 const LOGO = '<svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="var(--panel-2)"/><rect x="7" y="17" width="4" height="9" fill="var(--accent)"/><rect x="14" y="11" width="4" height="15" fill="var(--accent)"/><rect x="21" y="6" width="4" height="20" fill="var(--accent)"/></svg>';
 
 function zeichneLeiste() {
-  const r = route().name;
+  const r = navAktiv(route().name);
   const einst = uebersetze('Einstellungen');
   let html = '<div class="leiste-kopf">' + LOGO + '<span class="marke nur-breit">c2invoice</span>' +
     '<a class="zahnrad" href="#/einstellungen" title="' + esc(einst) + '" aria-label="' + esc(einst) + '"' + (r === 'einstellungen' ? ' aria-current="page"' : '') + '>' + ZAHNRAD + '</a>' +
@@ -322,6 +334,7 @@ function zeichneLeiste() {
     const extra = s.k === 'live' ? '<span class="zaehler ok nur-breit" id="nav-live"' + (liveSitzungen() ? '' : ' hidden') + '>' + liveSitzungen() + '</span>'
       : s.k === 'sitzungen' ? '<span class="zaehler laeuft nur-breit" id="nav-sitzungen"' + (offeneSitzungen() ? '' : ' hidden') + '>' + offeneSitzungen() + '</span>'
       : s.k === 'briefings' ? '<span class="zaehler nur-breit" id="nav-briefings"' + (ungeleseneBriefings() ? '' : ' hidden') + '>' + ungeleseneBriefings() + '</span>'
+      : s.k === 'flows' ? '<span class="zaehler fehler nur-breit" id="nav-flows" title="' + esc(uebersetze('offene Fehlerkarten unter „Braucht dich“')) + '"' + (flowsFehler() ? '' : ' hidden') + '>' + flowsFehler() + '</span>'
       : s.k === 'zeit' ? '<span class="zaehler laeuft nur-breit" id="nav-zeit"' + (state.live && state.live.timer ? '' : ' hidden') + '>' + esc(uebersetze('läuft')) + '</span>'
         : s.pro && !proAktiv() ? '<span class="pille pro">Pro</span>' : '';
     html += '<a href="#/' + s.k + '" title="' + esc(seitenName(s)) + '"' + (r === s.k ? ' aria-current="page"' : '') + '>' +
@@ -459,7 +472,7 @@ function zeichneKopf() {
   const el = document.getElementById('kopf');
   if (!el) return;
   const r = route().name;
-  const seite = seiteVon(r);
+  const seite = kopfSeite(r);
   const ingest = state.summary && state.summary.lastIngest;
   const vs = verbindungsStatus();
   const n = hinweise().length;
@@ -644,10 +657,14 @@ function suchErgebnisse(q) {
     if (!nur) {
       const bl = belege.filter((b) => !direkt.includes(b) && passt(b.nr, b.art, b.wer)).slice(0, 4).map(belegTreffer);
       if (bl.length) G.push(['Belege', bl]);
-      const ko = (state.kontakte || []).filter((k) => passt(k.firma, k.name, k.kundennummer)).slice(0, 3).map((k) => ({
-        icon: '◎', t: k.firma || k.name, sub: [uebersetze(k.status === 'lead' ? 'Lead' : 'Kunde'), k.kundennummer].filter(Boolean).join(' · '),
+      const person = (x) => [x.vorname, x.nachname].filter(Boolean).join(' ');
+      const ko = (state.kontakte || []).filter((k) => passt(k.firma, person(k), k.kundennummer)).slice(0, 3).map((k) => ({
+        icon: '◎', t: k.firma || person(k), sub: [uebersetze('Kunde'), k.kundennummer].filter(Boolean).join(' · '),
         meta: '', tu: () => geheZu('kontakte/' + k.id),
-      }));
+      })).concat((state.leads || []).filter((l) => passt(l.firma, person(l), l.lead_nr, l.email)).slice(0, 3).map((l) => ({
+        icon: '◎', t: l.firma || person(l) || l.email || l.lead_nr, sub: uebersetze('Lead') + ' · ' + l.lead_nr,
+        meta: uebersetze(l.status), tu: () => geheZu('kontakte/lead/' + l.id),
+      })));
       if (ko.length) G.push(['Kontakte', ko]);
       const ei = EINSTELLUNG_SUCHE.filter(([l, b]) => passt(uebersetze(l), uebersetze(b), l)).slice(0, 4).map(([l, b, id]) => ({
         icon: '⚙', t: uebersetze(l), sub: uebersetze(b), meta: uebersetze('Einstellung'), tu: () => geheZu('einstellungen/' + id),
@@ -968,13 +985,13 @@ async function ladeCira() {
 // (dort steht sie schon unter „Braucht dich“). Liegt der Tab im Hintergrund und
 // ist es eingeschaltet, zusaetzlich eine Desktop-Benachrichtigung — nie im
 // Nicht-stoeren-Fenster.
-const MELDE_ART = { flow_fehler: 'Flow-Fehler', sitzung_frage: 'Rückfrage', rechnung: 'Rechnungsentwurf', mahnung: 'Mahnung', mail: 'Mail', jira_kommentar: 'Jira-Kommentar', plan_schritt: 'Plan-Schritt', serie: 'Rechnungsserie', sitzung_wartet: 'Rückfrage im Terminal', vault_notiz: 'Vault-Notiz', monatsbericht: 'Monatsbericht' };
+const MELDE_ART = { flow_fehler: 'Flow-Fehler', mahnung_ausgeschoepft: 'Mahnung ausgeschöpft', sitzung_frage: 'Rückfrage', rechnung: 'Rechnungsentwurf', mahnung: 'Mahnung', mail: 'Mail', jira_kommentar: 'Jira-Kommentar', plan_schritt: 'Plan-Schritt', serie: 'Rechnungsserie', sitzung_wartet: 'Rückfrage im Terminal', vault_notiz: 'Vault-Notiz', monatsbericht: 'Monatsbericht' };
 function benachrichtige(f) {
   if (!f || f.status !== 'offen' || !f.titel) return;
   const art = uebersetze(MELDE_ART[f.art] || f.art);
   if (document.hidden && ciraZeiten.desktop === true && typeof Notification !== 'undefined' && Notification.permission === 'granted' && !nichtStoerenJetzt()) {
     try {
-      const n = new Notification(CIRA_NAME + ' · ' + art, { body: f.titel, tag: 'c2-freigabe-' + f.id });
+      const n = new Notification(CIRA_NAME + ' · ' + art, { body: fxServer(f.titel), tag: 'c2-freigabe-' + f.id });
       n.onclick = () => { window.focus(); geheZu(f.ziel || 'cockpit'); n.close(); };
     } catch (e) { console.error('Desktop-Benachrichtigung:', e.message); }
   }
@@ -994,7 +1011,7 @@ function benachrichtige(f) {
   el.className = 'melde-karte' + (f.art === 'flow_fehler' ? ' fehler' : '');
   el.innerHTML = '<div class="kopf"><span class="art">' + esc(art) + '</span><span class="mono zeit">' + esc(new Date().toLocaleTimeString(istDE() ? 'de-DE' : 'en-US', { hour: '2-digit', minute: '2-digit' })) + '</span>' +
     '<button type="button" class="zu" aria-label="' + esc(uebersetze('Meldung schließen')) + '">×</button></div>' +
-    '<span class="t">' + esc(f.titel) + '</span>' + (f.bezug ? '<span class="s mono">' + esc(f.bezug) + '</span>' : '') +
+    '<span class="t">' + esc(fxServer(f.titel)) + '</span>' + (f.bezug ? '<span class="s mono">' + esc(f.bezug) + '</span>' : '') +
     '<div class="knoepfe"><button type="button" class="ok" data-aktion="gehe" data-wert="' + esc(f.ziel || 'cockpit') + '">' + esc(uebersetze(f.knopf || 'In „Braucht dich“ ansehen')) + '</button></div>';
   el.querySelector('.zu').addEventListener('click', () => el.remove());
   // Erst nach der Klick-Delegation entfernen: die prueft wurzel.contains(el) und
@@ -1148,6 +1165,7 @@ document.addEventListener('keydown', (e) => {
 
 function geheZu(pfad) {
   const ziel = '#/' + String(pfad).replace(/^#?\/?/, '');
+  if (typeof belegBremse === 'function' && belegBremse(ziel)) return;   // Beleg-Editor fragt vor dem Wechsel
   if (location.hash === ziel) zeige(); else location.hash = ziel;
 }
 
@@ -1163,7 +1181,7 @@ function zeige() {
     // Die Farbe einer Szene (Marge, Ueberfaellig) gilt nur, solange sie offen ist.
     if (cira.zustand !== 'auto') { cira.zustand = 'auto'; ciraModus(); }
     // Das Cockpit fuellt den Bereich ohne Rand und ersetzt das Dock.
-    document.getElementById('inhalt').classList.toggle('vollbild', ['cockpit', 'sitzungen', 'gedaechtnis', 'briefings'].includes(r.name));
+    document.getElementById('inhalt').classList.toggle('vollbild', ['cockpit', 'sitzungen', 'gedaechtnis', 'briefings', 'flows', 'beleg'].includes(r.name));
     if (r.name !== 'cockpit') kiosk(false);
     if (r.name === 'cockpit' && cira.dockOffen) oeffneDock(false);
   }
@@ -1178,7 +1196,7 @@ function zeige() {
     window.scrollTo(0, 0);
   }
   // Titel vor dem Zeichnen: Seiten ohne Eintrag in SEITEN (Beleg-Editor) setzen ihren eigenen.
-  const s = seiteVon(r.name);
+  const s = kopfSeite(r.name);
   document.title = zTitel((s ? seitenName(s) : uebersetze('Finanzen')) + ' · c2invoice');
   zeichneAnsicht(neu);
   if (cira.dockOffen) {
@@ -1314,7 +1332,8 @@ function start() {
     // Esc schliesst das Dock nur, wenn kein Dialog darueber liegt.
     else if (e.key === 'Escape' && cira.dockOffen && !palette && !document.querySelector('.dialog-grund')) oeffneDock(false);
   });
-  window.addEventListener('hashchange', zeige);
+  // Der Beleg-Editor darf einen Wechsel abfangen und fragen (belegAbfang, editor.js).
+  window.addEventListener('hashchange', (e) => { if (typeof belegAbfang === 'function' && belegAbfang(e)) return; zeige(); });
   zeige();
   ladeSummary();
   ladeLive();

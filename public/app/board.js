@@ -7,6 +7,7 @@
    „abrechnen“ stellt im Cockpit die Frage nach dem Rechnungsentwurf. */
 
 Object.assign(EN, {
+  'Projekt öffnen': 'Open project',
   'Board': 'Board', 'Alle Quellen': 'All sources', 'Lokal': 'Local', 'Alle': 'All', 'Quelle': 'Source', 'Arbeitsbereich wählen': 'Choose workspace',
   'In Arbeit': 'In progress', 'Review': 'Review', 'Erledigt · nicht abgerechnet': 'Done · not billed',
   'gesamt': 'total', 'offen': 'open', 'Sitzung läuft': 'Session running', 'Status ändern': 'Change status',
@@ -40,14 +41,19 @@ Object.assign(EN, {
 
 const BD_SPALTEN = [['offen', 'Offen'], ['arbeit', 'In Arbeit'], ['review', 'Review'], ['erledigt', 'Erledigt · nicht abgerechnet']];
 const bdZustand = { daten: null, fehler: null, lauf: 0, laedt: false, detail: null, detailFehler: null, detailLauf: 0, zu: new Set() };
-const bdBereich = () => lies('board.bereich', 'alle');
+// Wurzel: der Container der Projekte-Seite. bdFest = erzwungener Arbeitsbereich (Aufgaben-Reiter eines Projekts), sonst gilt die Wahl der Chips.
+let bdFest = null;
+const bdWurzel = () => document.getElementById('bd-wurzel');
+const bdBereich = () => bdFest || lies('board.bereich', 'alle');
 const bdQuelle = () => lies('board.quelle', 'alle');
 // Scrum-Sicht (nur lesen): Sprint-Filter und Gruppierung als Zeilen; gefiltert und gezaehlt wird auf dem Server.
 const BD_SPRINT = [['alle', 'Alle Sprints'], ['aktiv', 'Aktiver Sprint'], ['backlog', 'Backlog']];
 const BD_GRUPPE = [['keine', 'Keine'], ['epic', 'Epic'], ['bearbeiter', 'Bearbeiter'], ['prio', 'Priorität'], ['bereich', 'Arbeitsbereich']];
 const bdSprint = () => { const w = lies('board.sprint', 'alle'); return BD_SPRINT.some(([k]) => k === w) ? w : 'alle'; };
-const bdGruppe = () => { const w = lies('board.gruppe', 'keine'); return BD_GRUPPE.some(([k]) => k === w) ? w : 'keine'; };
-const bdGewaehlt = () => liesJson('board.gewaehlt', null);
+const bdGruppen = () => BD_GRUPPE.filter(([k]) => !(bdFest && k === 'bereich'));
+const bdGruppe = () => { const w = lies('board.gruppe', 'keine'); return bdGruppen().some(([k]) => k === w) ? w : 'keine'; };
+// Bei festem Bereich zaehlt eine gewaehlte Karte eines anderen Bereichs nicht.
+const bdGewaehlt = () => { const g = liesJson('board.gewaehlt', null); return g && bdFest && g.bereich !== bdFest ? null : g; };
 
 async function bdLaden() {
   const lauf = ++bdZustand.lauf;
@@ -60,10 +66,10 @@ async function bdLaden() {
     if (lauf !== bdZustand.lauf) return;
     bdZustand.laedt = false;
     // Gewaehlter Bereich steht nicht mehr in config.json: zurueck auf alle.
-    if (e.message === 'HTTP 404' && bdBereich() !== 'alle') { merke('board.bereich', 'alle'); return bdLaden(); }
+    if (e.message === 'HTTP 404' && !bdFest && bdBereich() !== 'alle') { merke('board.bereich', 'alle'); return bdLaden(); }
     bdZustand.fehler = e.grund || e.message; console.error('Board laden:', e);
   }
-  if (route().name === 'board') bdZeichnen(document.getElementById('ansicht'));
+  bdZeichnen(bdWurzel());
 }
 
 async function bdDetailLaden() {
@@ -80,7 +86,7 @@ async function bdDetailLaden() {
     if (e.status === 404) { merke('board.gewaehlt', null); bdZustand.detail = null; toast(uebersetze('Aufgabe nicht mehr da') + (e.grund ? ': ' + e.grund : ''), 'err'); }
     else { bdZustand.detailFehler = e.grund || e.message; console.error('Board-Detail:', e); }
   }
-  if (route().name === 'board') bdZeichnen(document.getElementById('ansicht'));
+  bdZeichnen(bdWurzel());
 }
 
 const bdAlle = () => (bdZustand.daten ? Object.values(bdZustand.daten.spalten).flatMap((s) => s.karten) : []);
@@ -106,13 +112,13 @@ function bdKopf(d) {
   const dateien = sync ? sync.dateien.filter((x) => x.datei && !x.hinweis) : [];
   if (dateien.length) stand += '<span class="bd-sync" title="' + esc(dateien.map((x) => x.datei).join('\n')) + '">' + esc(dateien.map((x) => bdKuerzel(x.bereich)).join(', ')) + ' · TODO.md</span>';
   return '<div class="bd-kopf">' +
-    '<div class="bd-chips" role="group" aria-label="' + esc(uebersetze('Arbeitsbereich wählen')) + '">' +
+    (bdFest ? '' : '<div class="bd-chips" role="group" aria-label="' + esc(uebersetze('Arbeitsbereich wählen')) + '">' +
       chips.map(([w, l]) => '<button type="button" class="chip" data-aktion="bd-bereich" data-wert="' + esc(w) + '" aria-pressed="' + (w === bdBereich()) + '">' + esc(uebersetze(l)) + '</button>').join('') +
-    '</div>' +
+    '</div>') +
     segment('bd-quelle', [['alle', 'Alle Quellen'], ['jira', 'Jira'], ['lokal', 'Lokal']], bdQuelle(), 'Quelle') +
     segment('bd-sprint', BD_SPRINT, bdSprint(), 'Sprint') +
     '<label class="bd-statuswahl">' + esc(uebersetze('Gruppieren')) + ' <select id="bd-gruppe">' +
-      BD_GRUPPE.map(([w, l]) => '<option value="' + w + '"' + (w === bdGruppe() ? ' selected' : '') + '>' + esc(uebersetze(l)) + '</option>').join('') + '</select></label>' +
+      bdGruppen().map(([w, l]) => '<option value="' + w + '"' + (w === bdGruppe() ? ' selected' : '') + '>' + esc(uebersetze(l)) + '</option>').join('') + '</select></label>' +
     '<div class="bd-stand">' + stand + '</div>' +
   '</div>';
 }
@@ -120,8 +126,12 @@ function bdKopf(d) {
 // Karte = Flaeche mit eigenen Knoepfen (Titel waehlt, ▶ und abrechnen handeln),
 // keine Knoepfe in einem Knopf. Ziehen ist die Maus-Abkuerzung; derselbe Wechsel
 // geht per Tastatur und mit einem Zeiger ueber „Status ändern“ im Detail.
+const BD_VORGANG = /^[A-Za-z][A-Za-z0-9]{0,19}-\d{1,9}$/;
 function bdKarte(k) {
   const g = bdGewaehlt();
+  const bd = bdZustand.daten && bdZustand.daten.bereiche.find((x) => x.name === k.bereich);
+  // Querverweise: Marke -> Projekt des Arbeitsbereichs, ID -> Vorgang (nur Vorgangsform). Links ziehen nicht die Karte mit.
+  const verweis = (ziel, titel, inhalt) => ziel ? '<a class="bd-verweis" draggable="false" href="' + ziel + '" title="' + esc(uebersetze(titel)) + '">' + inhalt + '</a>' : inhalt;
   const an = g && g.schluessel === k.schluessel && g.bereich === k.bereich;
   const wichtig = /^(wichtig|high|highest|hoch)$/i.test(k.prio || '');
   const wert = esc(JSON.stringify({ schluessel: k.schluessel, bereich: k.bereich }));
@@ -129,8 +139,8 @@ function bdKarte(k) {
   const tat = k.spalte === 'offen' ? '<button type="button" class="bd-tat" data-aktion="bd-claude" data-wert="' + wert + '" aria-label="' + esc(uebersetze('▶ in Claude') + ': ' + name) + '">' + esc(uebersetze('▶ in Claude')) + '</button>'
     : k.spalte === 'erledigt' ? '<button type="button" class="bd-tat ok" data-aktion="bd-abrechnen" data-wert="' + wert + '" aria-label="' + esc(uebersetze('abrechnen') + ': ' + name) + '">' + esc(uebersetze('abrechnen')) + '</button>' : '';
   return '<div class="bd-karte' + (an ? ' an' : '') + (k.sitzung_laeuft ? ' laeuft' : '') + '" draggable="true" data-aktion="bd-karte" data-wert="' + wert + '">' +
-    '<span class="bd-zeile1"><span class="bd-marke"' + bdFarbe(k.bereich) + '>' + esc(bdKuerzel(k.bereich)) + '</span>' +
-      (k.id ? '<span class="bd-id">' + esc(k.id) + '</span>' : '<span class="bd-id ohne">' + esc(uebersetze('ohne ID')) + '</span>') + bdQuelleMarke(k.quelle) +
+    '<span class="bd-zeile1">' + verweis(bd && bd.projekt ? '#/projekte/p/' + encodeURIComponent(bd.projekt) : '', 'Projekt öffnen', '<span class="bd-marke"' + bdFarbe(k.bereich) + '>' + esc(bdKuerzel(k.bereich)) + '</span>') +
+      (k.id ? verweis(k.hat_daten && BD_VORGANG.test(k.schluessel) ? '#/vorgaenge/' + encodeURIComponent(k.schluessel) : '', 'Vorgang öffnen', '<span class="bd-id">' + esc(k.id) + '</span>') : '<span class="bd-id ohne">' + esc(uebersetze('ohne ID')) + '</span>') + bdQuelleMarke(k.quelle) +
       (k.prio ? '<span class="bd-prio' + (wichtig ? ' wichtig' : '') + '">' + esc(k.prio) + '</span>' : '') + '</span>' +
     '<button type="button" class="bd-titel" data-aktion="bd-karte" data-wert="' + wert + '" aria-pressed="' + !!an + '">' + esc(k.titel || '–') + '</button>' +
     '<span class="bd-zeile2"><span>' + esc(hrs(k.stunden)) + (k.wert_art === 'offen' ? ' <small>' + esc(uebersetze('h gesamt').replace(/^h /, '')) + '</small>' : '') + '</span><span class="bd-wert ' + k.wert_art + '">' + esc(eur(k.wert_eur)) + '</span>' +
@@ -270,7 +280,7 @@ function bdVerdrahten(w) {
     el.addEventListener('dragend', () => {
       el.classList.remove('gezogen');
       bdZustand.ziehtGerade = false;
-      if (bdZustand.nachZiehen) { bdZustand.nachZiehen = false; bdZeichnen(document.getElementById('ansicht')); }
+      if (bdZustand.nachZiehen) { bdZustand.nachZiehen = false; bdZeichnen(bdWurzel()); }
     });
   }
   for (const sp of w.querySelectorAll('.bd-spalte[data-spalte]')) {
@@ -358,7 +368,7 @@ async function bdKriterium(c) {
 
 // Erst zeichnen, dann laden: der Knopf steht sofort auf der Wahl und die
 // Spalten dimmen ab, statt bis zur Antwort wie nicht gedrueckt zu wirken.
-const bdWechsel = (schluessel, w) => { merke(schluessel, w); const p = bdLaden(); bdZeichnen(document.getElementById('ansicht')); return p; };
+const bdWechsel = (schluessel, w) => { merke(schluessel, w); const p = bdLaden(); bdZeichnen(bdWurzel()); return p; };
 aktion('bd-bereich', (w) => bdWechsel('board.bereich', w));
 aktion('bd-quelle', (w) => bdWechsel('board.quelle', w));
 aktion('bd-sprint', (w) => bdWechsel('board.sprint', w));
@@ -368,7 +378,7 @@ aktion('bd-karte', (w) => {
   bdZustand.detail = null;
   const k = bdAlle().find((x) => x.schluessel === g.schluessel && x.bereich === g.bereich);
   if (k) ciraKontext({ art: 'vorgang', id: k.schluessel, titel: k.titel });
-  bdZeichnen(document.getElementById('ansicht'));
+  bdZeichnen(bdWurzel());
   bdDetailLaden();
 });
 aktion('bd-status-setzen', async (w, el) => {
@@ -377,7 +387,7 @@ aktion('bd-status-setzen', async (w, el) => {
   sel.disabled = true; el.disabled = true;
   try { await bdStatus(sel.value); } finally { if (sel.isConnected) { sel.disabled = false; el.disabled = false; } }
 });
-aktion('bd-zu', () => { merke('board.gewaehlt', null); bdZustand.detail = null; bdZeichnen(document.getElementById('ansicht')); });
+aktion('bd-zu', () => { merke('board.gewaehlt', null); bdZustand.detail = null; bdZeichnen(bdWurzel()); });
 aktion('bd-uebergang', (w) => { const t = JSON.parse(w); schliesseDialog(); bdStatus(t.spalte, t.id, bdZustand.uebergangKarte); });
 
 // „▶ in Claude“: Startdialog der Sitzungen vorbefuellen, gestartet wird erst dort.
@@ -402,7 +412,7 @@ aktion('bd-abrechnen', (w) => {
   const k = bdKarteVon(w);
   if (!k) return;
   // Der Schluessel stammt aus einer Datei und geht ungesehen an Cira: nur Vorgangs-IDs.
-  if (!/^[A-Za-z][A-Za-z0-9]{0,19}-\d{1,9}$/.test(k.schluessel)) { toast(uebersetze('Diese Aufgabe hat keinen gültigen Vorgangsschlüssel.'), 'err'); return; }
+  if (!BD_VORGANG.test(k.schluessel)) { toast(uebersetze('Diese Aufgabe hat keinen gültigen Vorgangsschlüssel.'), 'err'); return; }
   ckAusstehend = 'Rechnung für ' + k.schluessel;
   location.hash = '#/cockpit';
 });
@@ -457,16 +467,26 @@ aktion('bd-ort', async () => {
 });
 
 // Jira meldet einen neuen Status (Abgleich oder eigene Aktion): nachladen.
-window.addEventListener('c2-jira', () => { if (route().name === 'board') { bdLaden(); if (bdGewaehlt()) bdDetailLaden(); } });
-document.addEventListener('visibilitychange', () => { if (!document.hidden && route().name === 'board') bdLaden(); });
+window.addEventListener('c2-jira', () => { if (bdWurzel()) { bdLaden(); if (bdGewaehlt()) bdDetailLaden(); } });
+document.addEventListener('visibilitychange', () => { if (!document.hidden && bdWurzel()) bdLaden(); });
 
-registriere('board', {
-  zeichne(w) {
-    // Frischer Aufruf der Seite: ein Ziehen ohne dragend (Quelle verschwand) haelt das Board nicht fest.
-    bdZustand.ziehtGerade = false; bdZustand.nachZiehen = false;
-    bdZeichnen(w);
-    // Die Shell zeichnet beim Start zweimal; ein laufender Abruf zeichnet selbst nach.
-    if (!bdZustand.laedt) bdLaden();
-    if (bdGewaehlt()) bdDetailLaden();
-  },
-});
+// Grundlage fuer Projekte-Reiter Board und Aufgaben: w = Container (#bd-wurzel), fest = Arbeitsbereich oder null.
+function bdStart(w, fest) {
+  if ((fest || null) !== bdFest) {
+    // Anderer Bereich: ein laufender Abruf des alten gilt nicht mehr (lauf++), Stand und Detail verfallen, es wird neu geladen.
+    bdFest = fest || null;
+    bdZustand.lauf++; bdZustand.laedt = false; bdZustand.daten = null; bdZustand.fehler = null;
+    bdZustand.detailLauf++; bdZustand.detail = null; bdZustand.detailFehler = null;
+  }
+  // Frischer Aufruf: ein Ziehen ohne dragend (Quelle verschwand) haelt das Board nicht fest.
+  bdZustand.ziehtGerade = false; bdZustand.nachZiehen = false;
+  bdZeichnen(w);
+  // Die Shell zeichnet beim Start zweimal; ein laufender Abruf zeichnet selbst nach.
+  if (!bdZustand.laedt) bdLaden();
+  if (bdGewaehlt()) bdDetailLaden();
+}
+// Neuzeichnen der Shell (Takt, Zeitraum) bei stehendem Board: nur nachladen, nie das DOM ersetzen (Ziehen!).
+function bdAuffrischen() { if (!bdZustand.laedt) bdLaden(); }
+
+// Altes Ziel #/board: das Board wohnt unter Projekte.
+registriere('board', { zeichne() { location.replace('#/projekte/board'); } });

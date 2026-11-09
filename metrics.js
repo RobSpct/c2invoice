@@ -519,9 +519,12 @@ function satzFuerTicket(db, ticket) {
 // deshalb wird der Typ geprueft und im Zweifel gewarnt.
 if (config.overheadProjekte != null && !Array.isArray(config.overheadProjekte)) {
   console.warn('Warnung: overheadProjekte in config.json ist keine Liste. ' +
-    'Die Trennung von Werkzeugbetrieb ist deshalb ausgeschaltet.');
+    'Die konfigurierten Werkzeuge werden deshalb nicht von der Arbeit getrennt.');
 }
-const OVERHEAD = new Set(Array.isArray(config.overheadProjekte) ? config.overheadProjekte : []);
+// Laeufe in Wegwerf-Ordnern. Muss zu ingest.TEST_PROJEKT passen. Steht immer im
+// Set, auch ohne Konfiguration: das Set ist dadurch nie leer.
+const TEST_PROJEKT = '(test)';
+const OVERHEAD = new Set([...(Array.isArray(config.overheadProjekte) ? config.overheadProjekte : []), TEST_PROJEKT]);
 
 // Lokale Modelle: eigene Hardware statt fremder Schnittstelle. Kosten in
 // Dollar gibt es dort nicht — abgerechnet wird eine Pauschale je Million
@@ -570,6 +573,7 @@ for (const [projekt, eintrag] of Object.entries(config.projektSaetze || {})) {
 // Cira-Laeufe (Stufe T2) im eigenen Ordner. Muss zu ingest.CIRA_PROJEKT passen.
 // Werkzeugbetrieb wie lokale Modelle, aber nicht in werkzeugeJeTicket: die
 // Kosten des Assistenten gehoeren keinem parallel laufenden Kundenvorgang.
+// Dasselbe gilt fuer TEST_PROJEKT, das dort eigens ausgeschlossen wird.
 const CIRA_PROJEKT = '(cira)';
 
 function isOverhead(project) {
@@ -587,7 +591,6 @@ const ZUORDNUNGSFENSTER_MS = 5 * 60 * 1000;
 // Ticket. Fuer die Abrechnung zaehlt die Ticket-Sicht: der Verbrauch eines
 // Werkzeugs waehrend der Arbeit an PROJ-125 gehoert auf die Rechnung von PROJ-125.
 function overheadZuordnung(db, opts = {}, nach = 'project') {
-  if (OVERHEAD.size === 0) return new Map();
   const platz = [...OVERHEAD].map(() => '?').join(',');
   const spalte = nach === 'ticket' ? 'ticket' : 'project';
 
@@ -649,8 +652,6 @@ function fensterMehrheit(quell, ziel, fensterMs) {
 // Werkzeugkosten und -tokens je Ticket. Grundlage der Abrechnung.
 function werkzeugeJeTicket(db, opts = {}) {
   const ergebnis = new Map();
-  if (OVERHEAD.size === 0) return ergebnis;
-
   const zuordnung = overheadZuordnung(db, opts, 'ticket');
   if (zuordnung.size === 0) return ergebnis;
 
@@ -663,8 +664,8 @@ function werkzeugeJeTicket(db, opts = {}) {
   const zeilen = db.prepare(
     `SELECT request_id, input_tokens, output_tokens, cache_w_5m, cache_w_1h,
             cache_read, cost_usd
-     FROM events WHERE ${w}project IN (${platz})`
-  ).all(...zeitlich.params, ...OVERHEAD);
+     FROM events WHERE ${w}project IN (${platz}) AND project <> ?`
+  ).all(...zeitlich.params, ...OVERHEAD, TEST_PROJEKT);
 
   for (const r of zeilen) {
     const ticket = zuordnung.get(r.request_id);
@@ -702,12 +703,11 @@ function lokalZuordnung(db, opts = {}, nach = 'ticket') {
   if (lokal.length === 0) return new Map();
 
   const platz = [...OVERHEAD].map(() => '?').join(',');
-  const ohneWerkzeug = OVERHEAD.size ? ` AND project NOT IN (${platz})` : '';
   const nurMitTicket = spalte === 'ticket' ? ' AND ticket IS NOT NULL' : '';
   const arbeit = db.prepare(
     `SELECT ts, ${spalte} AS ziel FROM events
-     WHERE ${w}source = 'claude'${ohneWerkzeug}${nurMitTicket} ORDER BY ts`
-  ).all(...zeitlich.params, ...(OVERHEAD.size ? [...OVERHEAD] : []))
+     WHERE ${w}source = 'claude' AND project NOT IN (${platz})${nurMitTicket} ORDER BY ts`
+  ).all(...zeitlich.params, ...OVERHEAD)
     .map((r) => ({ t: Date.parse(r.ts), p: r.ziel }))
     .sort((a, b) => a.t - b.t);
 
@@ -787,11 +787,6 @@ function lokalStundenJeGruppe(db, opts = {}, nach = 'ticket') {
 // Kosten und Tokens der Werkzeuge, aufgeschluesselt nach dem Projekt,
 // zu dem sie gehoeren, und nach dem Werkzeug selbst.
 function werkzeuge(db, opts = {}) {
-  if (OVERHEAD.size === 0) {
-    return { summe: { requests: 0, total_tokens: 0, cost_usd: 0, cost_eur: 0, ohne_zuordnung: 0,
-      fenster_minuten: ZUORDNUNGSFENSTER_MS / 60000, zuletzt: null, projekte: [] },
-      nach_werkzeug: [], nach_projekt: [], nach_modell: [] };
-  }
   // Ebenfalls nur zeitlich filtern: ein Projekt-/Ticketfilter wuerde die
   // Werkzeugzeilen aussortieren, die gar kein solches Merkmal tragen.
   const zeitlich = filterClause({ from: opts.from, to: opts.to, month: opts.month });
@@ -851,8 +846,10 @@ function werkzeuge(db, opts = {}) {
       fenster_minuten: ZUORDNUNGSFENSTER_MS / 60000,
       // Ohne Zeitfilter: ein leerer Zeitraum soll sagen koennen, seit wann ein
       // Dienst still ist (claude-mem 13.18 schrieb z. B. keine Logs mehr).
-      zuletzt: db.prepare(`SELECT max(ts) AS ts FROM events WHERE project IN (${platz})`).get(...OVERHEAD).ts || null,
-      projekte: [...OVERHEAD],
+      // Testlaeufe zaehlen hier nicht: sie verdeckten einen still gewordenen Dienst, und die
+      // Oberflaeche liest aus der leeren Liste, dass nichts eingerichtet ist.
+      zuletzt: db.prepare(`SELECT max(ts) AS ts FROM events WHERE project IN (${platz}) AND project <> ?`).get(...OVERHEAD, TEST_PROJEKT).ts || null,
+      projekte: [...OVERHEAD].filter((p) => p !== TEST_PROJEKT),
     },
     nach_werkzeug: alsListe(proWerkzeug, 'werkzeug'),
     nach_projekt: alsListe(proProjekt, 'projekt'),
@@ -1237,7 +1234,8 @@ function margeJeWoche(db, { bis, wochen = 12 } = {}, abrechnung = {}) {
   for (let i = wochen - 1; i >= 0; i--) {
     const montag = tag(ende, -7 * i);
     const o = { from: montag, to: tag(montag, 6) };
-    out.push({ montag, kennzahlen: kennzahlen(byTicket(db, o).concat(ohneTicket(db, o)), abrechnung, require('./zeit').kennzahlenZusatz(db, o)) });
+    const zeilen = byTicket(db, o).concat(ohneTicket(db, o));
+    out.push({ montag, kennzahlen: kennzahlen(zeilen, abrechnung, { ...require('./zeit').kennzahlenZusatz(db, o), projektKonto: require('./rechnung').projektKonten(db, zeilen, o.to) }) });
   }
   return out;
 }
@@ -1319,7 +1317,7 @@ function byProject(db, opts = {}) {
       agent_seconds: agent[r.project] || 0,
       ...mitManuell((seconds / 3600) * satzInfo.satz, man.get(r.project) || OHNE_MANUELL),
       stundensatz: satzInfo.satz,
-      stundensatz_standard: satzInfo.standard,
+      stundensatz_standard: satzInfo.basissatz,   // Basis des Rabatts: bei eigenem Satz dieser, nicht der Standardsatz
       rabatt_prozent: satzInfo.rabatt,
       satz_quelle: satzInfo.quelle,
       kunde: satzInfo.kunde,
@@ -1398,7 +1396,7 @@ function byTicket(db, opts = {}) {
       // Zeit x Stundensatz in Euro: Claude-Anteil, manueller Anteil, Summe.
       ...zeilenwert,
       stundensatz: satzInfo.satz,
-      stundensatz_standard: satzInfo.standard,
+      stundensatz_standard: satzInfo.basissatz,   // Basis des Rabatts: bei eigenem Satz dieser, nicht der Standardsatz
       rabatt_prozent: satzInfo.rabatt,
       satz_quelle: satzInfo.quelle,
       kunde: satzInfo.kunde,
@@ -1512,6 +1510,39 @@ function verlaufJeProjekt(db, opts = {}) {
   return out;
 }
 
+// Leistungseinheiten eines Projekts bis einschliesslich `bis` (Projektkonto, Block B):
+// Claude-Stunden ohne Vorgang je Tag (dieselben Abschnitte wie ohneTicket, damit die
+// Summe stimmt) und manuelle Projekt-Eintraege je Eintrag (gezaehlte Minuten, wie zeit.js
+// sie gespeichert hat). Sortiert nach Tag, Claude vor manuell, dann nach eintragId.
+function projektEinheiten(db, projekt, bis) {
+  const out = [];
+  if (!isOverhead(projekt)) {
+    const tage = new Map();
+    for (const a of alleAbschnitte(db)) {
+      if (a.project !== projekt || a.ticket || (bis && a.day > bis)) continue;
+      tage.set(a.day, (tage.get(a.day) || 0) + a.ms);
+    }
+    for (const [tag, ms] of tage) if (ms > 0) out.push({ tag, art: 'claude', stunden: ms / 3600000 });
+  }
+  for (const e of db.prepare(`SELECT id, tag, gezaehlt_min FROM zeit_eintrag
+    WHERE ziel_art = 'projekt' AND ziel_schluessel = ? AND abrechenbar = 1 AND (? IS NULL OR tag <= ?)`).all(projekt, bis || null, bis || null)) {
+    out.push({ tag: e.tag, art: 'manuell', stunden: e.gezaehlt_min / 60, eintragId: e.id });
+  }
+  const rang = (x) => (x.art === 'claude' ? 0 : 1);
+  return out.sort((a, b) => (a.tag < b.tag ? -1 : a.tag > b.tag ? 1 : rang(a) - rang(b) || (a.eintragId || 0) - (b.eintragId || 0)));
+}
+
+// Alle Projekte mit Arbeit ohne Vorgang (Claude-Abschnitte oder abrechenbare manuelle
+// Eintraege) aus allen Zeiten, ohne Werkzeugprojekte. Guenstig (Abschnitte sind im
+// Speicher): die Grundlage fuer offene Konten ausserhalb des gewaehlten Zeitraums.
+function projektNamen(db) {
+  const namen = new Set();
+  for (const a of alleAbschnitte(db)) if (!a.ticket && a.project && a.ms > 0) namen.add(a.project);
+  for (const r of db.prepare("SELECT DISTINCT ziel_schluessel AS s FROM zeit_eintrag WHERE ziel_art = 'projekt' AND abrechenbar = 1").all()) namen.add(r.s);
+  // "(unbekannt)" ist der Sammeleimer fuer nicht zuordenbare Sitzungen, kein Projekt.
+  return [...namen].filter((n) => !isOverhead(n) && n !== UNBEKANNT);
+}
+
 // Arbeit ohne Vorgangsnummer, gruppiert nach Projekt. Nicht jede Leistung
 // laeuft ueber ein Ticketsystem — ohne diese Sicht waere sie unabrechenbar.
 //
@@ -1592,7 +1623,7 @@ function ohneTicket(db, opts = {}) {
         zeitmodell: zeitmodellAus(zeit.modelle.get(r.project), karte.projekt(r.project) || karte.standard),
         ...zeilenwert,
         stundensatz: satzInfo.satz,
-        stundensatz_standard: satzInfo.standard,
+        stundensatz_standard: satzInfo.basissatz,   // Basis des Rabatts: bei eigenem Satz dieser, nicht der Standardsatz
         rabatt_prozent: satzInfo.rabatt,
         satz_quelle: satzInfo.quelle,
         kunde: satzInfo.kunde,
@@ -1736,6 +1767,14 @@ function mehrwert(ticketRow, rechnungsbetrag = 0) {
 // Eine gestellte Rechnung deckt bisher nur die Claude-Zeit eines Vorgangs ab;
 // manuelle Zeit bleibt offen, bis sie selbst auf einer Rechnung steht.
 // `zusatz` (zeit.kennzahlenZusatz): interne Zeit, die keiner Zeile gehoert.
+// Ueberhang je Projektkonto (Toleranz je gerundeter Zeitposition, R3): die einzige Stelle der Schwelle.
+// Nur Heute-Sicht (konten.bisHeute). Auch die Projektseite liest hier, nicht mit eigener Schwelle.
+function ueberhangListe(konten) {
+  return konten && konten.bisHeute
+    ? [...konten].filter(([, k]) => k.ueber_h > Math.max(0.005, 0.005 * (k.zeit_positionen || 0))).map(([projekt, k]) => ({ projekt, ueber_h: k.ueber_h }))
+    : [];
+}
+
 function kennzahlen(zeilen, abrechnung, zusatz = {}) {
   const summe = (k) => zeilen.reduce((a, r) => a + (Number(r[k]) || 0), 0);
   const internStunden = Number(zusatz.intern_stunden) || 0;
@@ -1756,25 +1795,72 @@ function kennzahlen(zeilen, abrechnung, zusatz = {}) {
   // Manuelle Zeit gilt je Eintrag als abgerechnet (zeit_eintrag.status), nicht
   // je Vorgang: ein Vorgang kann gestellte und offene Eintraege zugleich haben.
   const manuellAbg = (r) => Number(r.arbeitswert_manuell_abgerechnet) || 0;
-  const abgerechnetManuell = summe('arbeitswert_manuell_abgerechnet');
-  const offenAnteil = (r) => (Number(r.arbeitswert) || 0) - (istAbgerechnet(r) ? claudeWert(r) : 0) - manuellAbg(r);
+  // Projektkonto (Block B, zeitraum-bezogen: bis Zeitraumende gerechnet): eine ticketlose
+  // Projektzeile ist nicht mehr "ganz oder gar nicht". Offen laeuft ueber STUNDEN, nicht ueber
+  // Euro x Satz: offen = Arbeitswert x min(h_Zeile, offen_h) / h_Zeile (h_Zeile = Claude plus
+  // manuell, wie das Konto). Euro zum Taetigkeitssatz gegen Stunden x Projektsatz zu
+  // vergleichen wies sonst Abgerechnetes ohne jede Rechnung aus. Ohne berechnete Stunden
+  // bleibt offen = Arbeitswert, exakt. Der Projektsatz wirkt in dieser Formel nicht mehr.
+  // GRENZE: bei Mischsatz mit Teilrechnung ist der Wert ein Durchschnitt (z. B. 157,50
+  // statt exakt 120 oder 170); exakte Euro je Einheit sind nicht gebaut.
+  // Das Konto zaehlt auch die per Sperre verbrauchten manuellen Eintraege schon als
+  // berechnet: manuellAbg darf hier NICHT noch einmal abgezogen werden.
+  const konten = zusatz.projektKonto || null;
+  // Ohne Konto galte eine Projektzeile still als ganz offen: lieber abbrechen als eine falsche Zahl zeigen.
+  for (const r of zeilen) {
+    if (r.ticket == null && r.art === 'projekt' && !(konten && konten.get(r.gruppe))) throw new Error('kennzahlen: Projektkonto fehlt für ' + r.gruppe + '.');
+  }
+  const konto = (r) => (konten && r.ticket == null && r.art === 'projekt' && konten.get(r.gruppe)) || null;
+  const arb = (r) => Number(r.arbeitswert) || 0;
+  const stunden = (r) => (Number(r.active_hours) || 0) + (Number(r.manuell_hours) || 0);
+  const unberuehrt = (k) => !(k.berechnet_h >= 0.005);
+  const kontoOffen = (r, k) => {
+    const h = stunden(r);
+    return unberuehrt(k) || !(h > 0) || k.offen_h >= h ? arb(r) : Math.max(0, arb(r) * k.offen_h / h);
+  };
+  const offenAnteil = (r) => {
+    const k = konto(r);
+    return k ? kontoOffen(r, k) : arb(r) - (istAbgerechnet(r) ? claudeWert(r) : 0) - manuellAbg(r);
+  };
+  const ohneKonto = zeilen.filter((r) => !konto(r));
+  const abgerechnetManuell = ohneKonto.reduce((a, r) => a + manuellAbg(r), 0);
+  // Auf der Projektposition berechnet (Claude- und manuelle Zeit zusammen).
+  const abgerechnetProjekt = zeilen.filter(konto).reduce((a, r) => a + arb(r) - kontoOffen(r, konto(r)), 0);
+  // Mehr berechnet als geleistet (Spec Z. 51, R4/R9): nur, wenn das Konto bis heute gerechnet
+  // ist (konten.bisHeute) und ueber der Toleranz je gerundeter Zeitposition (R3); sonst
+  // waere jede Vergangenheitssicht ein falscher Ueberhang.
+  const ueberhang = ueberhangListe(konten);
+  const offenVorgang = zeilen.filter((r) => r.ticket != null).reduce((a, r) => a + offenAnteil(r), 0);
+  const ohneVorgang = zeilen.filter((r) => r.ticket == null).reduce((a, r) => a + offenAnteil(r), 0);
+  // Stunden zu offen_eur: Claude-Zeit nicht abgerechneter Zeilen plus offene manuelle Zeit;
+  // Projektzeilen mit Konto: Rest aus dem Konto, hoechstens die Stunden der Zeile.
+  const offenStunden = zeilen.reduce((a, r) => {
+    const k = konto(r);
+    if (k) return a + (unberuehrt(k) ? stunden(r) : Math.min(stunden(r), k.offen_h));
+    return a + (istAbgerechnet(r) ? 0 : Number(r.active_hours) || 0) + (Number(r.manuell_offen_hours) || 0);
+  }, 0);
   return {
     wert,
     abgerechnet_eur: abgerechnet,
     abgerechnet_manuell_eur: abgerechnetManuell,
-    offen_eur: wert.arbeitswert - abgerechnet - abgerechnetManuell,
+    // Berechnet auf einer Projektposition (Projektkonto), Claude- und manuelle Zeit zusammen.
+    abgerechnet_projekt_eur: abgerechnetProjekt,
+    // Alles Abgerechnete des Zeitraums: Vorgaenge, manuelle Zeit, Projektpositionen.
+    // Mit offen_eur zusammen der Arbeitswert (die Hub-Quote rechnet nichts selbst).
+    abgerechnet_gesamt_eur: abgerechnet + abgerechnetManuell + abgerechnetProjekt,
+    ueberhang,
+    offen_eur: offenVorgang + ohneVorgang,
     // Offen = noch etwas zu stellen; ganz gestellte manuelle Zeit zaehlt nicht mehr.
     offen_vorgaenge: zeilen.filter((r) => r.ticket != null && !istAbgerechnet(r) && offenAnteil(r) > 1e-9).length,
     abgerechnet_vorgaenge: zeilen.filter(istAbgerechnet).length,
     // "offen" aufgeteilt: Arbeitswert offener Vorgaenge und ticketloser Arbeit.
-    offen_vorgang_eur: zeilen.filter((r) => r.ticket != null).reduce((a, r) => a + offenAnteil(r), 0),
-    ohne_vorgang_eur: zeilen.filter((r) => r.ticket == null).reduce((a, r) => a + (Number(r.arbeitswert) || 0) - manuellAbg(r), 0),
+    offen_vorgang_eur: offenVorgang,
+    ohne_vorgang_eur: ohneVorgang,
     aktive_stunden: summe('active_hours'),
     agent_stunden: summe('agent_hours'),
     manuell_stunden: summe('manuell_hours'),
     manuell_offen_stunden: summe('manuell_offen_hours'),
-    // Stunden zu offen_eur: Claude-Zeit nicht abgerechneter Zeilen plus offene manuelle Zeit.
-    offen_stunden: zeilen.filter((r) => !istAbgerechnet(r)).reduce((a, r) => a + (Number(r.active_hours) || 0), 0) + summe('manuell_offen_hours'),
+    offen_stunden: offenStunden,
     parallel_min: summe('manuell_parallel_min'),
     kulanz_min: summe('manuell_kulanz_min'),
     intern_stunden: internStunden,
@@ -1851,8 +1937,7 @@ function block5h(db, { limit, jetzt = Date.now() } = {}) {
 // ohne lokale Modelle.
 function liveSitzungen(db, { jetzt = Date.now() } = {}) {
   const platz = [...OVERHEAD].map(() => '?').join(',');
-  return db.prepare(`SELECT COUNT(DISTINCT session_id) AS n FROM events WHERE ts >= ? AND COALESCE(source, '') <> 'lokal'` +
-    (OVERHEAD.size ? ` AND project NOT IN (${platz})` : '')).get(new Date(jetzt - 120000).toISOString(), ...OVERHEAD).n;
+  return db.prepare(`SELECT COUNT(DISTINCT session_id) AS n FROM events WHERE ts >= ? AND COALESCE(source, '') <> 'lokal' AND project NOT IN (${platz})`).get(new Date(jetzt - 120000).toISOString(), ...OVERHEAD).n;
 }
 
 // Was Cira (Stufe T2) im Kalendermonat von `jetzt` gekostet hat, in Euro, aus
@@ -1907,8 +1992,8 @@ function live(db, { minutes = 60 } = {}) {
   const since = new Date(Date.now() - minutes * 60 * 1000).toISOString();
   const today = new Date().toISOString().slice(0, 10);
   const platz = [...OVERHEAD].map(() => '?').join(',');
-  const nichtWerkzeug = OVERHEAD.size ? ` AND project NOT IN (${platz})` : '';
-  const werkzeugParams = OVERHEAD.size ? [...OVERHEAD] : [];
+  const nichtWerkzeug = ` AND project NOT IN (${platz})`;
+  const werkzeugParams = [...OVERHEAD];
 
   // ticket_quelle macht in der Ansicht den Unterschied zwischen "automatisch
   // erkannt" und "von Hand gebucht" sichtbar. Ohne sie sieht eine erkannte
@@ -2120,11 +2205,14 @@ module.exports = {
   OVERHEAD,
   usdToEur,
   isOverhead,
+  UNBEKANNT,
+  ueberhangListe,
   ciraKostenMonatEur,
   spracheZeichenMonat,
   sitzungsBezug,
   rechnungsSummen,
   CIRA_PROJEKT,
+  TEST_PROJEKT,
   activeSecondsFromTimestamps,
   activeSecondsByGroup,
   agentSecondsByGroup,
@@ -2144,6 +2232,8 @@ module.exports = {
   byPeriod,
   byProject,
   ohneTicket,
+  projektEinheiten,
+  projektNamen,
   byTicket,
   mehrwert,
   kennzahlen,

@@ -236,14 +236,21 @@ const GRUND = {
   commands: 'Claude Code kennt keinen Schalter für Commands',
   hook: 'Claude Code kennt keinen Schalter für einzelne Hooks',
   lager: 'Im Lager – erst installieren',
+  pluginTeil: 'Wird mit seinem Plugin geschaltet',
+  ohneDatei: 'Kommt von Claude Code, kein Schalter in c2invoice',
 };
+// Skills ohne Datei stehen nur in der Messung; die Quelle sagt, woher sie kommen.
+const MESS_HERKUNFT = { 'Built-in': 'eingebaut', 'claude.ai sync': 'claude.ai' };
+// ponytail: fest verdrahtet, weil keine Datei die eingebauten Agents nennt und
+// die `init`-Liste claude-code-guide auslaesst; bei neuer Claude-Code-Fassung abgleichen.
+const EINGEBAUTE_AGENTS = ['claude', 'claude-code-guide', 'Explore', 'general-purpose', 'Plan', 'statusline-setup'];
 const normPfad = (p) => path.resolve(p).replace(/\\/g, '/');
 // Eintraege eines Ordners; Verknuepfungen (Symlink, Junction) zaehlen nach
 // ihrem Ziel. Fehlt der Ordner, ist er leer; jeder andere Fehler wird gemeldet.
 function ordnerIn(dir, melde) {
   let eintraege;
   try { eintraege = fs.readdirSync(dir, { withFileTypes: true }); } catch (e) {
-    if (e.code !== 'ENOENT' && melde) melde({ datei: dir, grund: 'nicht lesbar (' + e.code + ')' });
+    if (e.code !== 'ENOENT' && e.code !== 'ENOTDIR' && melde) melde({ datei: dir, grund: 'nicht lesbar (' + e.code + ')' });
     return [];
   }
   return eintraege.map((e) => {
@@ -252,16 +259,23 @@ function ordnerIn(dir, melde) {
   });
 }
 
-// description aus dem Frontmatter einer Markdown-Datei (eine Zeile).
-function beschreibungAus(datei) {
+// Frontmatter einer Markdown-Datei als Text, leer ohne Datei oder Kopf.
+function kopfAus(datei) {
   let t;
   try { t = fs.readFileSync(datei, 'utf8'); } catch { return ''; }
   const fm = t.match(/^\uFEFF?---\r?\n([\s\S]*?)\r?\n---/);
-  const m = fm && fm[1].match(/^description:\s*(.+)$/m);
-  return m ? m[1].trim().replace(/^["']|["']$/g, '') : '';
+  return fm ? fm[1] : '';
 }
+const ohneQuotes = (s) => s.trim().replace(/^["']|["']$/g, '');
+// description aus dem Frontmatter (eine Zeile).
+function beschreibungAus(datei) {
+  // Eingerueckte Folgezeilen gehoeren dazu (YAML-Block `description: >`).
+  const m = kopfAus(datei).match(/^description:[ \t]*(.*(?:\r?\n[ \t]+.*)*)$/m);
+  return m ? ohneQuotes(m[1].replace(/^[|>][+-]?/, '').replace(/\s+/g, ' ')) : '';
+}
+const nameAus = (datei) => { const m = kopfAus(datei).match(/^name:[ \t]*(.+)$/m); return m ? ohneQuotes(m[1]) : null; };
 const skillsIn = (dir, melde) => ordnerIn(dir, melde).filter((e) => e.ordner && fs.existsSync(path.join(dir, e.name, 'SKILL.md')))
-  .map((e) => ({ name: e.name, beschreibung: beschreibungAus(path.join(dir, e.name, 'SKILL.md')) }));
+  .map((e) => ({ name: e.name, kopfName: nameAus(path.join(dir, e.name, 'SKILL.md')), beschreibung: beschreibungAus(path.join(dir, e.name, 'SKILL.md')) }));
 const mdIn = (dir, melde) => ordnerIn(dir, melde).filter((e) => e.datei && e.name.endsWith('.md'))
   .map((e) => ({ name: e.name.slice(0, -3), beschreibung: beschreibungAus(path.join(dir, e.name)) }));
 
@@ -366,6 +380,15 @@ function inventar({ heim, bereiche = [], lager = null, kontext = {} }) {
         erlaubt: ausProjekt ? ['an', 'aus'] : ['an', 'aus', 'erbt'], kaputt: B[b.name].lokal.kaputt });
     }
   }
+  const ohneDatei = new Map();
+  for (const k of Object.values(kontext)) {
+    for (const [name, v] of Object.entries((k && k.skills) || {})) if (MESS_HERKUNFT[v.quelle] && !index.has('skills|' + name)) ohneDatei.set(name, MESS_HERKUNFT[v.quelle]);
+  }
+  for (const [name, herkunft] of ohneDatei) {
+    const e = eintrag('skills', name, { herkunft, grund: GRUND.ohneDatei });
+    zelle(e, 'global', { wert: 'an', wirksam: true });
+    for (const b of mitPfad) zelle(e, b.name, { wert: 'erbt', wirksam: true });
+  }
   if (lager) {
     for (const s of skillsIn(lager, melde)) {
       if (index.has('skills|' + s.name)) continue;
@@ -384,7 +407,8 @@ function inventar({ heim, bereiche = [], lager = null, kontext = {} }) {
     };
     setze(mdIn(path.join(claudeDir, unter), melde), 'global', 'global');
     for (const b of mitPfad) setze(mdIn(path.join(b.pfad, '.claude', unter), melde), b.name, 'projekt');
-    for (const e of arten[art]) for (const b of mitPfad) if (e.herkunft === 'global' && e.zellen[b.name] === '—') zelle(e, b.name, { wert: 'erbt', wirksam: true });
+    if (art === 'agents' && fs.existsSync(claudeDir)) setze(EINGEBAUTE_AGENTS.map((name) => ({ name, beschreibung: '' })), 'global', 'eingebaut');
+    for (const e of arten[art]) for (const b of mitPfad) if (e.herkunft !== 'projekt' && e.zellen[b.name] === '—') zelle(e, b.name, { wert: 'erbt', wirksam: true });
   }
 
   // Plugins und Mods (Verzeichnis-Marktplatz).
@@ -394,13 +418,53 @@ function inventar({ heim, bereiche = [], lager = null, kontext = {} }) {
   for (const key of Object.keys(installiert)) {
     const markt = key.split('@')[1];
     const mod = maerkte[markt] && maerkte[markt].source && maerkte[markt].source.source === 'directory';
-    const ort = [].concat(installiert[key])[0] || {};
-    const manifest = ort.installPath ? lies(path.join(ort.installPath, '.claude-plugin', 'plugin.json')).daten : {};
+    // ponytail: Nutzer-Installation vor Projekt-Kopie; eine aeltere Kopie in einem
+    // einzelnen Projekt bleibt unsichtbar, Spalte je Installation falls das stoert.
+    const orte = [].concat(installiert[key]);
+    const ort = orte.find((o) => o && o.scope === 'user') || orte[0] || {};
+    const ip = typeof ort.installPath === 'string' && ort.installPath ? ort.installPath : null;
+    const manifest = ip ? lies(path.join(ip, '.claude-plugin', 'plugin.json')).daten : {};
     // Ein Plugin mit Hooks wirkt auch ohne Request (Anweisungen im Kontext,
     // Filter vor dem Modell); seine Nutzung ist im Ledger nicht vollstaendig.
-    const hooks = !!(ort.installPath && (fs.existsSync(path.join(ort.installPath, 'hooks', 'hooks.json')) || manifest.hooks));
+    const hooks = !!(ip && (fs.existsSync(path.join(ip, 'hooks', 'hooks.json')) || manifest.hooks));
     const e = eintrag(mod ? 'mods' : 'plugins', key, { beschreibung: manifest.description || '', schaltbar: true, plugin: key.split('@')[0], hooks });
     schaltbareZellen(e, pluginWert(key));
+    // Inhalt des Plugins: nur Anzeige, wirksam wie das Plugin selbst.
+    if (!ip || !fs.existsSync(ip)) { melde({ datei: key, grund: 'installPath fehlt' }); continue; }
+    // Pfade aus dem Manifest gelten relativ zum Plugin; was hinausfuehrt, wird nicht gelesen.
+    const manifestPfade = (feld) => [].concat(manifest[feld] || []).filter((x) => typeof x === 'string').flatMap((x) => {
+      const voll = path.resolve(ip, x);
+      const rel = path.relative(ip, voll);
+      // rel absolut: Windows-Pfad auf ein anderes Laufwerk ("D:foo"), selbst nicht absolut.
+      if (!path.isAbsolute(x) && !path.isAbsolute(rel) && rel !== '..' && !rel.startsWith('..' + path.sep)) return [voll];
+      melde({ datei: key + ': ' + x, grund: 'außerhalb des Plugins, verworfen' });
+      return [];
+    });
+    // Der Standardordner darf fehlen oder eine Datei sein (still). Ein Manifest-Pfad ist ein Ordner oder,
+    // mit `alsDatei`, eine einzelne .md; alles andere wird gemeldet.
+    const inhalt = (feld, inOrdner, alsDatei) => {
+      const standard = path.join(ip, feld);
+      const liste = inOrdner(standard, melde);
+      for (const p of new Set(manifestPfade(feld))) {
+        if (p === standard) continue;
+        let s = null;
+        try { s = fs.statSync(p); } catch { /* fehlt: unten gemeldet */ }
+        if (s && s.isDirectory()) liste.push(...inOrdner(p, melde));
+        else if (s && s.isFile() && alsDatei && p.endsWith('.md')) liste.push(alsDatei(p));
+        else melde({ datei: p, grund: s ? 'weder Ordner noch .md' : 'fehlt' });
+      }
+      return liste;
+    };
+    const mdDatei = (p) => ({ name: path.basename(p, '.md'), beschreibung: beschreibungAus(p) });
+    const teile = (art, liste) => {
+      for (const t of liste) {
+        const z = eintrag(art, (manifest.name || e.plugin) + ':' + (t.kopfName || t.name), { beschreibung: t.beschreibung, herkunft: 'plugin', grund: GRUND.pluginTeil, teilVon: key });
+        for (const s of spalten) if (e.zellen[s] !== '—') zelle(z, s, { wert: e.zellen[s], wirksam: e.wirksam[s] });
+      }
+    };
+    teile('agents', inhalt('agents', mdIn, mdDatei));
+    teile('commands', inhalt('commands', mdIn, mdDatei));
+    teile('skills', inhalt('skills', skillsIn));
   }
   // Hooks direkt in den Settings: nur Anzeige. Name = aufgerufenes Skript,
   // sonst das erste Wort ohne Zuweisung (`API_KEY=… tool` → tool, nie der Wert).
@@ -469,7 +533,7 @@ function inventar({ heim, bereiche = [], lager = null, kontext = {} }) {
           continue;
         }
         let tokens = null;
-        if (art === 'skills' && hat(k.skills, e.name)) tokens = k.skills[e.name].tokens;
+        if ((art === 'skills' || art === 'commands') && hat(k.skills, e.name)) tokens = k.skills[e.name].tokens;
         if (art === 'agents' && hat(k.agents, e.name)) tokens = k.agents[e.name].tokens;
         if (art === 'mcps') {
           const n = e.server || e.name;
@@ -554,7 +618,8 @@ function erzeuge({ db, bereiche, heim, lager = () => null, sicherung = () => nul
         if (e.wirksam[ws] !== true) continue;
         kacheln[art]++;
         const k = e.kontext[ws];
-        if (k && k.tokens) { summe += k.tokens; geschaetzt = geschaetzt || k.geschaetzt; }
+        // Gemessen steckt ein Plugin-Agent schon in der Summe seines Plugins.
+        if (k && k.tokens && !(e.teilVon && !k.geschaetzt)) { summe += k.tokens; geschaetzt = geschaetzt || k.geschaetzt; }
         if (e.schaltbar && !e.hooks && !e.gesperrt[ws] && k && !k.geschaetzt && s !== null) kandidaten.push({ art, name: e.name, ws, tokens: k.tokens || 0, sitzungen: s });
       }
     }

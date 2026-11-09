@@ -1,9 +1,7 @@
 'use strict';
-// Leads und Kunden.
-//
-// Beide liegen in einer Tabelle und unterscheiden sich nur im Status. Ein Lead
-// wird zum Kunden, sobald er ein Angebot annimmt — das ist ein Statuswechsel,
-// kein Umzug in eine zweite Tabelle.
+const { getMeta, setMeta } = require('./db');
+// Kunden. Leads sind seit C12 eigene Datensaetze (leads.js); jede Zeile hier
+// ist ein Kunde. Die Spalte status bleibt physisch und steht immer auf 'kunde'.
 //
 // Der Kontakt ist die Stammdatenquelle, NICHT der Inhalt eines Dokuments. Was
 // auf einem Angebot oder einer Rechnung steht, ist eine Abschrift, die beim
@@ -27,17 +25,17 @@ const FELDER = {
   // die Leitweg-ID, sonst das, was der Kunde als Referenz nennt.
   kaeuferReferenz:   { typ: 'text', max: 80, label: 'Käuferreferenz' },
   lieferantennummer: { typ: 'text', max: 60, label: 'Lieferantennummer' },
-  // Leer = automatisch (K-0001 aus der Kontakt-ID). Steht auf der Rechnung und
-  // fuellt in der E-Rechnung die Kaeuferreferenz, wenn der Kunde keine nennt.
-  kundennummer:      { typ: 'text', max: 30, label: 'Kundennummer' },
+  // Keine Kundennummer: die vergibt vergibKundennummer() beim Anlegen, danach
+  // ist sie unveraenderlich. Ein mitgeschicktes Feld verwirft pruefe() still.
   land:              { typ: 'land', label: 'Land' },
   notiz:        { typ: 'text',   max: 500, label: 'Notiz' },
-  status:       { typ: 'wahl',   werte: ['lead', 'kunde'], label: 'Status' },
+  // C11b: leer = keine Pause, sonst letzter Tag ohne Mahnung (JJJJ-MM-TT).
+  mahnpauseBis: { typ: 'tag', label: 'Mahnpause bis' },
 };
 
 // Spaltennamen weichen an zwei Stellen vom Feldnamen ab (SQL mag kein
 // Kamelhoeckerwort), deshalb eine ausdrueckliche Zuordnung statt Raterei.
-const SPALTE = { ustIdNr: 'ust_id_nr', kaeuferReferenz: 'kaeufer_referenz' };
+const SPALTE = { ustIdNr: 'ust_id_nr', kaeuferReferenz: 'kaeufer_referenz', mahnpauseBis: 'mahnpause_bis' };
 
 function spalteVon(feld) {
   return SPALTE[feld] || feld;
@@ -90,12 +88,11 @@ function pruefe(daten, { vollstaendig }) {
     }
     if (regel.typ === 'zeilen') {
       werte[feld] = JSON.stringify(zeilen(roh, regel, regel.label));
-    } else if (regel.typ === 'wahl') {
-      const s = String(roh);
-      if (!regel.werte.includes(s)) {
-        throw new Error(`${regel.label}: nur ${regel.werte.join(' oder ')}.`);
-      }
-      werte[feld] = s;
+    } else if (regel.typ === 'tag') {
+      // Leer loescht (NULL), sonst ein echter Kalendertag: '2026-02-30' faellt durch.
+      const s = text(roh, 10, regel.label);
+      if (s && !require('./rechnung').istTag(s)) throw new Error(`${regel.label}: Datum in der Form JJJJ-MM-TT erwartet.`);
+      werte[feld] = s || null;
     } else if (regel.typ === 'land') {
       // Zweistelliges Kuerzel nach ISO 3166 (DE, AT, CH ...). Leer ist erlaubt
       // und bedeutet Deutschland; ein ausgeschriebener Name dagegen nicht —
@@ -121,35 +118,21 @@ function pruefe(daten, { vollstaendig }) {
   return werte;
 }
 
-// Automatische Kundennummer aus der Kontakt-ID. Die ID wird nie neu vergeben
-// (AUTOINCREMENT), die Nummer also auch nicht.
-const AUTO_KUNDENNUMMER = /^K-\d+$/i;
-
-function autoKundennummer(id) {
-  return 'K-' + String(id).padStart(4, '0');
-}
-
-// Eine von Hand vergebene Nummer darf weder eine andere eigene doppeln noch im
-// automatischen Muster liegen — "K-0099" bekaeme sonst spaeter der 99. Kontakt.
-// Die eigene automatische Nummer zu bestaetigen ist erlaubt und speichert nichts.
-function pruefeKundennummer(db, nummer, eigeneId) {
-  if (!nummer) return '';
-  if (eigeneId && nummer.toUpperCase() === autoKundennummer(eigeneId)) return '';
-  if (AUTO_KUNDENNUMMER.test(nummer)) {
-    throw new Error('Kundennummer: das Muster K-0000 ist den automatischen Nummern vorbehalten.');
-  }
-  const doppelt = db.prepare(
-    'SELECT id FROM kontakte WHERE kundennummer = ? COLLATE NOCASE AND id <> ?'
-  ).get(nummer, eigeneId || 0);
-  if (doppelt) throw new Error('Kundennummer: ' + nummer + ' ist schon vergeben.');
-  return nummer;
+// Kundennummer beim Anlegen, fortlaufend aus dem Zaehler in meta (nicht aus der
+// ID, nicht aus MAX): eine geloeschte Nummer wird nie neu vergeben, und sie steht
+// unveraendert auf jeder Rechnung des Kunden. Nur innerhalb der Transaktion des
+// INSERT aufrufen, sonst bleibt bei einem Fehler eine Luecke im Zaehler.
+function vergibKundennummer(db) {
+  const n = Number(getMeta(db, 'kundennummer_zaehler') || 0) + 1;
+  if (!Number.isSafeInteger(n) || n > 999999999) throw new Error('Kundennummer-Zaehler ungueltig: ' + getMeta(db, 'kundennummer_zaehler'));
+  setMeta(db, 'kundennummer_zaehler', n);
+  return 'K-' + String(n).padStart(4, '0');
 }
 
 function ausZeile(row) {
   if (!row) return null;
   return {
     id: row.id,
-    status: row.status,
     firma: row.firma,
     vorname: row.vorname,
     nachname: row.nachname,
@@ -159,10 +142,10 @@ function ausZeile(row) {
     email: row.email,
     kaeuferReferenz: row.kaeufer_referenz || '',
     lieferantennummer: row.lieferantennummer || '',
-    kundennummer: row.kundennummer || autoKundennummer(row.id),
-    kundennummer_eigen: Boolean(row.kundennummer),
+    kundennummer: row.kundennummer || '',
     land: row.land || '',
     notiz: row.notiz,
+    mahnpauseBis: row.mahnpause_bis || '',
     erstellt_am: row.erstellt_am,
     geaendert_am: row.geaendert_am,
   };
@@ -265,14 +248,24 @@ function schreibeProjekte(db, kontaktId, projekte) {
 // Zuordnung und die uebrigen Kontaktangaben in EINE Transaktion legen kann:
 // sonst stuenden die Projekte schon fest, waehrend das Schreiben der restlichen
 // Felder scheitert — ein halber Datensatz, den niemand bemerkt.
+// SAVEPOINT statt BEGIN: verschachtelbar (Lead-Umwandlung in der Rechnung) und
+// ohne offene Transaktion gleichwertig; ein innerer Fehler rollt nur innen zurueck.
 function inTransaktion(db, fn) {
-  db.exec('BEGIN');
+  const offen = db.isTransaction;
+  db.exec('SAVEPOINT tx');
   try {
     const aus = fn();
-    db.exec('COMMIT');
+    db.exec('RELEASE tx');
     return aus;
   } catch (err) {
-    db.exec('ROLLBACK');
+    // Hat SQLite selbst zurueckgerollt (RAISE(ROLLBACK), SQLITE_FULL ...), ist der
+    // Savepoint weg; "no such savepoint" verdeckte sonst den echten Fehler.
+    try { db.exec('ROLLBACK TO tx'); db.exec('RELEASE tx'); } catch {
+      // Transaktion bereits beendet — oder ROLLBACK TO scheiterte aus anderem Grund.
+      // Aeusserste Ebene: nie eine offene Transaktion zuruecklassen, sonst haengt
+      // jedes spaetere Schreiben der geteilten Verbindung an ihr (R15).
+      if (!offen && db.isTransaction) try { db.exec('ROLLBACK'); } catch { /* Fehler unten bleibt der echte */ }
+    }
     throw err;
   }
 }
@@ -306,16 +299,18 @@ function speichere(db, daten = {}) {
 
   if (id === null) {
     const werte = pruefe(daten, { vollstaendig: true });
-    if ('kundennummer' in werte) werte.kundennummer = pruefeKundennummer(db, werte.kundennummer, null);
+    // kundennummer nie in werte: sie kommt allein aus vergibKundennummer() unten.
     const felder = Object.keys(werte);
     const spalten = felder.map(spalteVon);
     // Beides in einer Transaktion: eine abgewiesene Projektzuordnung darf keinen
     // Kontakt ohne seine Projekte hinterlassen.
+    // Die Kundennummer in derselben Transaktion: scheitert das Anlegen, bleibt
+    // auch der Zaehler stehen.
     const neu = inTransaktion(db, () => {
       const info = db.prepare(`
-        INSERT INTO kontakte (${spalten.concat('erstellt_am').join(', ')})
-        VALUES (${felder.map(() => '?').concat('?').join(', ')})
-      `).run(...felder.map((f) => werte[f]), jetzt);
+        INSERT INTO kontakte (${spalten.concat('kundennummer', 'erstellt_am', 'status').join(', ')})
+        VALUES (${felder.map(() => '?').concat('?', '?', "'kunde'").join(', ')})
+      `).run(...felder.map((f) => werte[f]), vergibKundennummer(db), jetzt);
       const angelegt = Number(info.lastInsertRowid);
       // Projekte sind keine Spalte in kontakte und laufen deshalb an pruefe()
       // vorbei — ausdruecklich behandelt statt stillschweigend verworfen.
@@ -339,7 +334,6 @@ function speichere(db, daten = {}) {
   // Erst pruefen, dann schreiben: sonst stuenden die Projekte schon in der
   // Datenbank, waehrend eine ungueltige Anschrift den Aufruf abbrechen laesst.
   const werte = nurProjekte ? null : pruefe(daten, { vollstaendig: false });
-  if (werte && 'kundennummer' in werte) werte.kundennummer = pruefeKundennummer(db, werte.kundennummer, id);
 
   // Beide Schreibvorgaenge zusammen: scheitert einer, gilt keiner. Sonst stuende
   // die neue Zuordnung fest, waehrend die Anschrift die alte bliebe.
@@ -369,32 +363,11 @@ function loesche(db, id) {
     db.prepare('DELETE FROM projekt_kontakt WHERE kontakt_id = ?').run(k.id);
     db.prepare('DELETE FROM ansprechpartner WHERE kontakt_id = ?').run(k.id);
     db.prepare('DELETE FROM kontakte WHERE id = ?').run(k.id);
+    // Bezug eines noch nicht umgewandelten Leads faellt weg; ein umgewandelter
+    // behaelt sein Ziel fuer die Auswertung (Oberflaeche: "Kunde geloescht").
+    db.prepare("UPDATE leads SET kunde_id = NULL WHERE kunde_id = ? AND status <> 'umgewandelt'").run(k.id);
   });
   return true;
-}
-
-// Wird beim Annehmen eines Angebots und beim Stellen einer Rechnung gerufen.
-// Laeuft absichtlich ins Leere, wenn kein oder ein geloeschter Kontakt
-// dranhaengt: eine Annahme darf nicht daran scheitern, dass jemand den Kontakt
-// zwischenzeitlich entfernt hat. Der WHERE-Teil macht den Aufruf wiederholbar.
-function macheKunde(db, kontaktId) {
-  if (!Number.isInteger(kontaktId) || kontaktId <= 0) return false;
-  const info = db.prepare(`
-    UPDATE kontakte SET status = 'kunde', geaendert_am = ?
-    WHERE id = ? AND status = 'lead'
-  `).run(new Date().toISOString(), kontaktId);
-  return info.changes > 0;
-}
-
-// Gegenstueck fuer "Rueckgaengig" nach einer Annahme: nur wer gerade dadurch
-// Kunde wurde, wird wieder Lead (der Aufrufer weiss das aus macheKunde()).
-function macheLead(db, kontaktId) {
-  if (!Number.isInteger(kontaktId) || kontaktId <= 0) return false;
-  const info = db.prepare(`
-    UPDATE kontakte SET status = 'lead', geaendert_am = ?
-    WHERE id = ? AND status = 'kunde'
-  `).run(new Date().toISOString(), kontaktId);
-  return info.changes > 0;
 }
 
 // Beim Erstellen eines Dokuments dagegen hart pruefen: eine mitgeschickte, aber
@@ -450,8 +423,8 @@ function loescheAnsprechpartner(db, id) {
 }
 
 module.exports = {
-  FELDER, liste, lade, speichere, loesche, macheKunde, macheLead, pruefeId, ohneErsatzzeichen,
+  FELDER, liste, lade, speichere, loesche, pruefeId, ohneErsatzzeichen,
   projekteVon, kontaktJeProjekt, setzeProjekte,
   ansprechpartnerVon, speichereAnsprechpartner, loescheAnsprechpartner,
-  inTransaktion,
+  inTransaktion, text, zeilen,
 };

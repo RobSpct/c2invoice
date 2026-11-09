@@ -28,6 +28,7 @@ const rechnung = require('./rechnung');
 const erechnung = require('./erechnung');
 const angebot = require('./angebot');
 const kontakte = require('./kontakte');
+const leads = require('./leads');
 const zeit = require('./zeit');
 const kalender = require('./kalender');
 const cira = require('./cira');
@@ -46,6 +47,9 @@ const vault = require('./vault');
 const gedaechtnis = require('./gedaechtnis');
 const briefings = require('./briefings');
 const merken = require('./merken');
+const mail = require('./mail');
+const mahnung = require('./mahnung');
+const flows = require('./flows'); // C11c
 const crypto = require('node:crypto');
 
 const db = dbmod.open();
@@ -74,6 +78,12 @@ const ciraDienst = cira.erzeuge({ db, bucheVorgang, skillOrte: (b) => skillOrte(
 // C10: Pfade, Port und Name der Schluessel-Variablen nur aus der Datei (config.sprache), Stimme aus Einstellungen -> Cira.
 const spracheDienst = sprache.erzeuge({ db, sprachCfg: () => config.sprache, einstellungen: () => ciraEinstellungen(),
   cacheOrdner: path.join(__dirname, 'data', 'tts-cache') });
+// C11a: Versand per SMTP. Zugang nur aus der Datei (config.mail), PDF-Druck ueber diesen Server.
+const mailDienst = mail.erzeuge({ db, mailCfg: () => config.mail, port: config.port });
+// C11b: Mahnschreiben; Versand ueber mailDienst, Druck ueber /mahnung/<id>.
+const mahnDienst = mahnung.erzeugeDienst({ db, mailDienst, mahnCfg: () => config.mahnwesen, mailCfg: () => config.mail, port: config.port });
+// C11c: die Flow-Aktionen nutzen dieselben Instanzen wie der Mahn-Dialog (Sperren gegen doppelten Versand liegen im Speicher dieser Instanzen).
+const flowDienst = flows.erzeugeDienst({ db, aktionen: flows.erzeugeAktionen({ mahnDienst, mailDienst }), mail: mailDienst, cfg: () => config });
 // Im 30-s-Takt: Index nachziehen, Monatsbericht pruefen. Wirft nie.
 // Derselbe Fehler steht einmal im Protokoll, nicht alle 30 s; in der Oberflaeche zeigt /api/vault ihn.
 const vaultFehler = { index: null, monatsbericht: null };
@@ -100,19 +110,17 @@ function stelleRechnung(dbx, daten) {
   // erstellt, und ein zweiter Versuch zoege eine zweite Nummer.
   let erechnungFehlt = [];
   try {
-    // Wer eine Rechnung bekommt, ist kein Lead mehr.
-    kontakte.macheKunde(dbx, kid);
     // Gleich sagen, was der E-Rechnung fehlt: eine gestellte Rechnung
     // laesst sich nicht mehr ergaenzen, nur stornieren.
     erechnungFehlt = erechnung.pruefe(inv);
   } catch (err) {
     console.error('Nach dem Erstellen von', inv.nr, err);
   }
-  return { nr: inv.nr, brutto_eur: inv.brutto_eur, erechnung_fehlt: erechnungFehlt };
+  return { nr: inv.nr, brutto_eur: inv.brutto_eur, erechnung_fehlt: erechnungFehlt, hinweise: inv.hinweise };
 }
 // Freigabe "rechnung": die Nutzlast hat Cira gebaut (cira.rechnungsEntwurf);
 // erwartetBrutto ist Pflicht, sonst stellte ein Klick etwas anderes als gezeigt.
-const RECHNUNG_NUTZLAST = ['from', 'to', 'tickets', 'projekte', 'eintraege', 'empfaenger', 'kontaktId', 'erwartetBrutto'];
+const RECHNUNG_NUTZLAST = ['from', 'to', 'tickets', 'projekte', 'eintraege', 'empfaenger', 'kontaktId', 'erwartetBrutto', 'erwartetStunden'];
 freigaben.registriere('rechnung', (dbx, n, { freigabe } = {}) => {
   if (!n || typeof n !== 'object' || typeof n.erwartetBrutto !== 'number') throw new Error('Rechnungsentwurf ohne erwarteten Betrag. Entwurf neu anfordern.');
   try {
@@ -448,15 +456,23 @@ function bucheVorgang(db, { session_id, vorgang }) {
 
   const bekannt = db.prepare('SELECT 1 FROM events WHERE session_id = ? LIMIT 1').get(sid);
   if (!bekannt) throw new Error('Unbekannte Sitzung.');
+  // Testlaeufe tragen keine Vorgaenge; ohne diese Pruefung meldete die Buchung Erfolg ohne Wirkung.
+  if (roh && !db.prepare('SELECT 1 FROM events WHERE session_id = ? AND project <> ? LIMIT 1').get(sid, metrics.TEST_PROJEKT)) {
+    throw new Error('Testlauf: diese Sitzung lief nur in einem Wegwerf-Ordner und trägt keinen Vorgang.');
+  }
+  rechnung.pruefeSitzungGestellt(db, sid, roh ? roh.toUpperCase() : null);
 
   if (roh) {
     const ticket = roh.toUpperCase();
-    db.prepare(
-      'INSERT INTO overrides (session_id, ticket, note, created_at) VALUES (?,?,?,?) ' +
-      'ON CONFLICT(session_id) DO UPDATE SET ticket = excluded.ticket, ' +
-      'note = excluded.note, created_at = excluded.created_at'
-    ).run(sid, ticket, 'manuell via UI', new Date().toISOString());
-    backfill.run({ db });
+    // Stunden, die schon auf einer Projektrechnung stehen, verlassen das Konto nicht (409, nichts bleibt stehen).
+    rechnung.bucheOhneDoppelung(db, sid, () => {
+      db.prepare(
+        'INSERT INTO overrides (session_id, ticket, note, created_at) VALUES (?,?,?,?) ' +
+        'ON CONFLICT(session_id) DO UPDATE SET ticket = excluded.ticket, ' +
+        'note = excluded.note, created_at = excluded.created_at'
+      ).run(sid, ticket, 'manuell via UI', new Date().toISOString());
+      backfill.run({ db });
+    });
     return { session_id: sid, ticket };
   }
 
@@ -473,17 +489,17 @@ function bucheVorgang(db, { session_id, vorgang }) {
     ).run(sid);
   }
   const branches = db.prepare(
-    'SELECT DISTINCT branch FROM events WHERE session_id = ? AND branch IS NOT NULL'
-  ).all(sid);
+    'SELECT DISTINCT branch FROM events WHERE session_id = ? AND branch IS NOT NULL AND project <> ?'
+  ).all(sid, metrics.TEST_PROJEKT);
   for (const { branch } of branches) {
     const ticket = ingest.ticketOf(branch);
     if (!ticket) continue;
     db.prepare(
-      'UPDATE events SET ticket = ?, ticket_quelle = NULL WHERE session_id = ? AND branch = ? AND ticket IS NULL'
-    ).run(ticket, sid, branch);
+      'UPDATE events SET ticket = ?, ticket_quelle = NULL WHERE session_id = ? AND branch = ? AND ticket IS NULL AND project <> ?'
+    ).run(ticket, sid, branch, metrics.TEST_PROJEKT);
     db.prepare(
-      'UPDATE activity SET ticket = ?, ticket_quelle = NULL WHERE session_id = ? AND ticket IS NULL'
-    ).run(ticket, sid);
+      'UPDATE activity SET ticket = ?, ticket_quelle = NULL WHERE session_id = ? AND ticket IS NULL AND project <> ?'
+    ).run(ticket, sid, metrics.TEST_PROJEKT);
   }
   backfill.run({ db });
   const jetzt = db.prepare('SELECT ticket FROM events WHERE session_id = ? LIMIT 1').get(sid);
@@ -535,7 +551,27 @@ const EINSTELLUNGEN = {
   // 5-h-Block in der Cira-Karte (metrics.block5h). Anthropic nennt kein Limit
   // in Tokens; der Nutzer setzt es aus Erfahrung. 0 blendet die Anzeige aus.
   limit5hTokens: { min: 1000, max: 1e12, aus: 0, ganz: true, label: 'Token-Limit je 5-h-Fenster' },
+  // C11b Mahnwesen: Fristen in ganzen Tagen, Gebuehr nur auf der 2. Mahnung.
+  erinnerungNachTagen: { min: 1, max: 90, ganz: true, pfad: 'mahnwesen.erinnerungNachTagen', standard: 7, label: 'Tage nach Fälligkeit bis zur Zahlungserinnerung' },
+  mahnung1NachTagen: { min: 1, max: 90, ganz: true, pfad: 'mahnwesen.mahnung1NachTagen', standard: 14, label: 'Tage nach der Erinnerung bis zur 1. Mahnung' },
+  mahnung2NachTagen: { min: 1, max: 90, ganz: true, pfad: 'mahnwesen.mahnung2NachTagen', standard: 14, label: 'Tage nach der 1. Mahnung bis zur 2. Mahnung' },
+  neueFristTage: { min: 1, max: 90, ganz: true, pfad: 'mahnwesen.neueFristTage', standard: 7, label: 'neue Zahlungsfrist je Schreiben in Tagen' },
+  gebuehrStufe2Eur: { min: 0, max: 40, pfad: 'mahnwesen.gebuehrStufe2Eur', standard: 0, label: 'Mahngebühr auf der 2. Mahnung in Euro' },
+  // C11c (E4): einmal nachfassen, so viele Tage vor Ablauf; muss unter der Gueltigkeit neuer Angebote liegen (Querpruefung unten).
+  nachfassenTageVorAblauf: { min: 1, max: 60, ganz: true, pfad: 'angebot.nachfassenTageVorAblauf', standard: 3, label: 'Nachfassen bei Angeboten: Tage vor Ablauf' },
+  // C11c-Nachtrag: Versandzeit des Tages-Scans fuer alle Flows (flows.js versandZeit). Wochenende als 0/1: EINSTELLUNGEN kennt nur Zahlen.
+  flowsAbStunde: { min: 0, max: 23, ganz: true, pfad: 'flows.abStunde', standard: 9, label: 'Automatische Schreiben ab (Uhr)' },
+  flowsWochenende: { min: 0, max: 1, ganz: true, pfad: 'flows.wochenende', standard: 0, label: 'Automatische Schreiben auch am Wochenende' },
 };
+
+// Gueltigkeit neuer Angebote (1-365, sonst 30) und Nachfass-Abstand: der Abstand muss kleiner sein, sonst waere ein neues Angebot sofort ein Kandidat.
+const angebotGueltigAktuell = () => { const n = config.rechnung && config.rechnung.angebotGueltigTage; return Number.isInteger(n) && n >= 1 && n <= 365 ? n : 30; };
+const nachfassenAktuell = () => { const n = config.angebot && config.angebot.nachfassenTageVorAblauf; return Number.isInteger(n) && n >= 1 && n <= 60 ? n : 3; };
+const QUER_TEXT = 'Nachfassen muss weniger Tage vor Ablauf liegen als die Gültigkeit neuer Angebote (Gültigkeit: ';
+
+// Neue Versandzeit gilt sofort: liegt sie schon hinter uns und lief der Scan heute noch nicht, startet takt() binnen einer Minute.
+// Die Oberflaeche warnt dann (scan_sofort aus flows.js, dieselbe Pruefung wie beim Scharfschalten).
+const einstellungSofort = (geaendert) => ('flowsAbStunde' in geaendert || 'flowsWochenende' in geaendert ? { scan_sofort: flowDienst.scanSofort() } : {});
 
 // Die einzige Einstellung mit festen Auswahlwerten statt einer Zahl. Sie
 // entscheidet, welche Zeit abgerechnet wird (siehe metrics.js).
@@ -571,6 +607,9 @@ function setzeEinstellungen(daten) {
     }
     // Auf zwei Nachkommastellen, sonst stehen Fliesskomma-Reste in der Datei.
     geaendert[feld] = Math.round(n * 100) / 100;
+  }
+  if (geaendert.nachfassenTageVorAblauf !== undefined && geaendert.nachfassenTageVorAblauf >= angebotGueltigAktuell()) {
+    throw new Error(QUER_TEXT + angebotGueltigAktuell() + ' Tage).');
   }
   // Erst alles pruefen, dann uebernehmen: sonst stuende ein gueltiges Feld schon
   // im Speicher, waehrend ein spaeteres die Eingabe abweist.
@@ -617,6 +656,7 @@ const STAMMDATEN = {
   kleinunternehmer: { typ: 'schalter', label: 'Kleinunternehmer nach Par. 19 UStG', wurzel: true },
   ustSatz: { typ: 'zahl', min: 0, max: 30, label: 'Umsatzsteuersatz in Prozent', wurzel: true },
   zahlungszielTage: { typ: 'zahl', min: 0, max: 120, label: 'Zahlungsziel in Tagen', wurzel: true },
+  angebotGueltigTage: { typ: 'zahl', min: 1, max: 365, ganz: true, label: 'Gültigkeit neuer Angebote in Tagen', wurzel: true },
 };
 
 // Grobpruefung, keine Pruefsummenrechnung: Laenge und Zeichenvorrat. Ein
@@ -668,7 +708,10 @@ function setzeStammdaten(daten) {
       if (n < regel.min || n > regel.max) {
         throw new Error(`${regel.label}: muss zwischen ${regel.min} und ${regel.max} liegen.`);
       }
+      // Tage sind ganze Tage: 10,5 waere sonst still 10,5 und das Angebot gaelte bis zu einer Tageshaelfte.
+      if (regel.ganz && !Number.isInteger(n)) throw new Error(regel.label + ': ganze Zahl erwartet.');
       wert = Math.round(n * 100) / 100;
+      if (feld === 'angebotGueltigTage' && wert <= nachfassenAktuell()) throw new Error(QUER_TEXT + wert + ' Tage, Nachfassen: ' + nachfassenAktuell() + ').');
     } else if (regel.typ === 'zeilen') {
       // Aus dem Textfeld kommt ein Block, gespeichert wird eine Zeilenliste —
       // die Rechnung setzt daraus die Adresszeilen.
@@ -808,6 +851,7 @@ const SCHREIBBAR = [...new Set([
   'cira',              // Einstellungen -> Cira (CIRA_FELDER), feldgenau
   'hook',              // Geheimnis fuer integration/claude-hook.mjs, beim ersten Start erzeugt (C5)
   'vault',             // Einstellungen -> Vault: nur gruppen und quellen (VAULT_FELDER), briefingsOrdner nur in der Datei
+  'mail',              // Einstellungen -> E-Mail & Versand: nur MAIL_FELDER, smtp/absender/transport nur in der Datei
   ...Object.entries(EINSTELLUNGEN).map(([feld, r]) => (r.pfad ? r.pfad.split('.')[0] : feld)),
 ])];
 
@@ -826,6 +870,7 @@ function schreibeConfig() {
   }
   gruppen.set('cira', (gruppen.get('cira') || []).concat(Object.keys(CIRA_FELDER)));
   gruppen.set('vault', VAULT_FELDER);
+  gruppen.set('mail', MAIL_FELDER);
   for (const k of SCHREIBBAR) {
     if (config[k] === undefined) continue;
     if (gruppen.has(k)) {
@@ -1040,6 +1085,83 @@ function setzeVault(daten) {
   return vaultAnzeige();
 }
 
+// Einstellungen -> E-Mail & Versand (C11a). Nur Empfaenger, Grenze und Vorlagen;
+// das Konto (smtp, absender, transport) bleibt der Datei vorbehalten (Zugang).
+const MAIL_FELDER = ['umleitenAn', 'tagesgrenze', 'benachrichtigungAn', 'vorlagen'];
+const MAIL_VORLAGEN = ['rechnung', 'angebot', 'erinnerung', 'mahnung1', 'mahnung2', 'nachfassen'];
+const mailFehler = (text) => Object.assign(new Error(text), { status: 400 });
+function mailEinstellungen() {
+  const m = config.mail || {};
+  const s = m.smtp || {}, a = m.absender || {};
+  const status = mailDienst.status();
+  return {
+    werte: { umleitenAn: m.umleitenAn || '', tagesgrenze: status.grenze, benachrichtigungAn: m.benachrichtigungAn || '', vorlagen: m.vorlagen || {} },
+    standard: mail.STANDARD_VORLAGEN, platzhalter: mail.PLATZHALTER_JE, status,
+    // Nur zur Anzeige; Passwort und Name der Variable bleiben draussen.
+    konto: { host: s.host || '', benutzer: s.benutzer || '', absender: { name: a.name || '', adresse: a.adresse || '' } },
+  };
+}
+function mailAdresse(w, label) {
+  if (typeof w !== 'string') throw mailFehler(label + ': Text erwartet.');
+  const s = w.trim();
+  // Nur ASCII: die Adresse geht in RCPT TO, SMTPUTF8 nutzen wir nicht.
+  if (s && (s.length > 254 || !mail.EMAIL_RE.test(s) || !/^[\x21-\x7e]+$/.test(s))) throw mailFehler(label + ': keine gueltige E-Mail-Adresse (leer = aus).');
+  return s;
+}
+function mailVorlage(art, v) {
+  const wo = 'Vorlage ' + art;
+  if (v === null) return null;   // Standard wiederherstellen
+  if (!v || typeof v !== 'object' || typeof v.betreff !== 'string' || typeof v.text !== 'string') throw mailFehler(wo + ': Betreff und Text erwartet.');
+  if (!v.betreff.trim() || v.betreff.length > 200) throw mailFehler(wo + ': Betreff 1 bis 200 Zeichen.');
+  mail.pruefeKopf(v.betreff, wo + ', Betreff');
+  if (!v.text.trim() || v.text.length > 4000) throw mailFehler(wo + ': Text 1 bis 4000 Zeichen.');
+  // fuelle() setzt Unbekanntes leer: wer {{betrag}} tippt, soll es hier erfahren, nicht beim Kunden.
+  // Je Art (M3): {{frist}} gibt es nur in Mahnschreiben.
+  const erlaubt = mail.PLATZHALTER_JE[art];
+  const fremd = [...new Set([...(v.betreff + '\n' + v.text).matchAll(/\{\{([^}]*)\}\}/g)].map((t) => t[1].trim()))]
+    .filter((n) => !erlaubt.includes(n));
+  if (fremd.length) {
+    throw mailFehler(wo + ': unbekannte Platzhalter ' + fremd.map((n) => '{{' + n + '}}').join(', ') + ' (erlaubt: ' + erlaubt.join(', ') + ').');
+  }
+  return { betreff: v.betreff, text: v.text };
+}
+function setzeMail(daten) {
+  for (const k of Object.keys(daten)) {
+    if (!MAIL_FELDER.includes(k)) throw mailFehler(/^(smtp|absender|transport)$|pass/i.test(k) ? k + ': nur in config.json aenderbar.' : 'Unbekanntes Feld: ' + k);
+  }
+  // Erst alles pruefen, dann uebernehmen (wie setzeStammdaten).
+  const neu = {};
+  if (Object.hasOwn(daten, 'umleitenAn')) neu.umleitenAn = mailAdresse(daten.umleitenAn, 'Testmodus-Adresse');
+  if (Object.hasOwn(daten, 'benachrichtigungAn')) neu.benachrichtigungAn = mailAdresse(daten.benachrichtigungAn, 'Benachrichtigung an');
+  if (Object.hasOwn(daten, 'tagesgrenze')) {
+    const n = alsZahl(daten.tagesgrenze);
+    if (!Number.isInteger(n) || n < 1 || n > 500) throw mailFehler('Tagesgrenze: ganze Zahl von 1 bis 500 Mails.');
+    neu.tagesgrenze = n;
+  }
+  if (Object.hasOwn(daten, 'vorlagen')) {
+    const v = daten.vorlagen, bisher = (config.mail || {}).vorlagen;
+    if (!v || typeof v !== 'object' || Array.isArray(v)) throw mailFehler('Vorlagen: Objekt erwartet.');
+    neu.vorlagen = { ...(bisher && typeof bisher === 'object' ? bisher : {}) };
+    for (const [art, inhalt] of Object.entries(v)) {
+      if (!MAIL_VORLAGEN.includes(art)) throw mailFehler('Vorlage unbekannt: ' + art);
+      const g = mailVorlage(art, inhalt);
+      if (g) neu.vorlagen[art] = g; else delete neu.vorlagen[art];
+    }
+  }
+  if (!Object.keys(neu).length) throw mailFehler('Kein bekanntes Feld uebergeben.');
+  if (!config.mail || typeof config.mail !== 'object') config.mail = {};
+  const alt = { ...config.mail };
+  Object.assign(config.mail, neu);
+  try {
+    schreibeConfig();
+  } catch (err) {
+    for (const k of Object.keys(config.mail)) delete config.mail[k];
+    Object.assign(config.mail, alt);
+    throw err;
+  }
+  return mailEinstellungen();
+}
+
 // Claude-Code-Konfiguration (Skills, spaeter Agenten/Plugins in C8). Ohne
 // Claude Code fehlt der Ordner: dann gibt es schlicht keine Skills.
 const claudeOrdner = () => process.env.CLAUDE_CONFIG_DIR || path.join(require('node:os').homedir(), '.claude');
@@ -1079,6 +1201,90 @@ function arbeitsbereichAnzeige(a) {
     name: a.name, kuerzel: gilt('kuerzel').toUpperCase(), farbe: gilt('farbe').toLowerCase(), art: ARBEITSBEREICH_ARTEN.includes(a.art) ? a.art : 'neutral',
     projekt: a.projekt || null, jiraProjekt: a.jiraProjekt || null, tag: gilt('tag') || null, pfad: a.pfad || null, todo: a.todo || null,
     erreichbar: !!ziel && fs.existsSync(ziel),
+  };
+}
+
+// Projektseite (Block P), nur lesend. Eine Wertzeile je Vorgang wie in /api/summary: Wert des
+// Zeitraums ohne Rechnungsbetrag. Eine Stelle, damit Uebersicht und Projektseite nicht auseinanderlaufen.
+const vorgangsZeile = (t) => ({ ...t, wert: metrics.mehrwert(t, 0) });
+
+// Wirksamer Satz, Eintrag und Standard in der Form von /api/saetze (Eintrag null ohne eigene Zeile).
+const projektSaetzeVon = (name) => ({
+  standard: config.stundensatz,
+  eintrag: config.projektSaetze && Object.hasOwn(config.projektSaetze, name) ? config.projektSaetze[name] : null,
+  wirksam: metrics.satzFuerProjekt(name),
+});
+
+const arbeitsbereichVon = (name, liste) => {
+  const a = liste.find((x) => x.projekt === name);
+  return a ? { name: a.name, kuerzel: a.kuerzel, farbe: a.farbe, jiraProjekt: a.jiraProjekt } : null;
+};
+
+// GET /api/projekte: Laufzeit, kein Zeitraum. Alle Projekte mit Arbeit (auch ohne Vorgang, auch Werkzeug),
+// ohne den Sammeleimer. Konto nur fuer echte Projekte; ein gemeinsames `je` liest die Rechnungen einmal.
+function projekteAntwort(db) {
+  const namen = new Set(metrics.projektNamen(db));
+  for (const r of metrics.byProject(db, {})) if (r.project) namen.add(r.project);
+  namen.delete(metrics.UNBEKANNT);
+  // Konten in der Anzeige-Form von /api/summary (projektKontenAnzeige mit Ueberhang aus metrics).
+  const zeilen = [...namen].filter((name) => !metrics.isOverhead(name)).map((gruppe) => ({ ticket: null, art: 'projekt', gruppe }));
+  const konten = rechnung.projektKonten(db, zeilen, {});
+  const anzeige = rechnung.projektKontenAnzeige(konten, metrics.ueberhangListe(konten));
+  const kontakte_ = kontakte.kontaktJeProjekt(db);
+  const bereiche = arbeitsbereiche().map(arbeitsbereichAnzeige);
+  const liste = [...namen].map((name) => {
+    const overhead = metrics.isOverhead(name);
+    return {
+      name, overhead,
+      konto: overhead ? null : anzeige[name],
+      kontakt: Object.hasOwn(kontakte_, name) ? kontakte_[name] : null,
+      satz: metrics.satzFuerProjekt(name),
+      arbeitsbereich: arbeitsbereichVon(name, bereiche),
+    };
+  });
+  return { status: 200, body: liste };
+}
+
+// GET /api/projekt?name&from&to: alles fuer die Projektseite. Zahlen kommen aus metrics/rechnung,
+// hier wird nichts gerechnet. Rueckgabe wie eRechnungAntwort: { status, body }.
+function projektAntwort(db, name, o = {}) {
+  if (!name) return { status: 400, body: { error: 'Parameter name fehlt' } };
+  const bekannt = db.prepare(`SELECT 1 FROM events WHERE project = @n UNION SELECT 1 FROM activity WHERE project = @n
+    UNION SELECT 1 FROM zeit_eintrag WHERE ziel_art = 'projekt' AND ziel_schluessel = @n
+    UNION SELECT 1 FROM projekt_kontakt WHERE projekt = @n LIMIT 1`).get({ n: name });
+  if (!bekannt && !(config.projektSaetze && Object.hasOwn(config.projektSaetze, name))) {
+    return { status: 404, body: { error: 'Projekt nicht gefunden.' } };
+  }
+  const { from, to } = o;
+  const f = { from, to, project: name };
+  const zeilen = metrics.byTicket(db, f);
+  const ohneVorgang = metrics.ohneTicket(db, f);
+  const overhead = metrics.isOverhead(name);
+  // Konto bis `to` wie in /api/summary (projektKonten + projektKontenAnzeige): Klartext samt Hinweis R14.
+  // konto_bis_heute: nur dann traegt das Konto einen Ueberhang (ueber_h, R4); sonst ist die 0 keine Aussage.
+  let konto = null, kontoBisHeute = false;
+  if (!overhead) {
+    const konten = rechnung.projektKonten(db, [{ ticket: null, art: 'projekt', gruppe: name }], { to });
+    konto = rechnung.projektKontenAnzeige(konten, metrics.ueberhangListe(konten))[name];
+    kontoBisHeute = konten.bisHeute;
+  }
+  const kj = kontakte.kontaktJeProjekt(db);
+  const abr = rechnung.abrechnung(db);
+  return {
+    status: 200,
+    body: {
+      name, overhead, konto, konto_bis_heute: kontoBisHeute,
+      kontakt: Object.hasOwn(kj, name) ? kj[name] : null,
+      saetze: projektSaetzeVon(name),
+      arbeitsbereich: arbeitsbereichVon(name, arbeitsbereiche().map(arbeitsbereichAnzeige)),
+      zeitraum: { from: from || null, to: to || null, projekt: metrics.byProject(db, f)[0] || null, ohne_vorgang: ohneVorgang },
+      vorgaenge: [...zeilen].sort((a, b) => b.arbeitswert - a.arbeitswert).map(vorgangsZeile),
+      abrechnung: Object.fromEntries(zeilen.filter((t) => abr[t.ticket]).map((t) => [t.ticket, abr[t.ticket]])),
+      einheiten: overhead ? [] : metrics.projektEinheiten(db, name, to).filter((e) => !from || e.tag >= from),
+      zeit_eintraege: zeit.liste(db, { ziel_art: 'projekt', ziel_schluessel: name, from, to }),
+      rechnungen: rechnung.rechnungenJeProjekt(db, name),
+      verlauf: metrics.verlaufJeProjekt(db, f)[name] || [],
+    },
   };
 }
 
@@ -1431,6 +1637,8 @@ function handle(req, res) {
     if (briefingDienst.routen(req, res, p, u, { sendJson, leseKoerper })) return;
     if (p === '/api/vault' && req.method === 'POST') return antworte(req, res, setzeVault);
     if (p === '/api/vault') return sendJson(res, vaultAnzeige());
+    if (p === '/api/mail/einstellungen' && req.method === 'POST') return antworte(req, res, setzeMail);
+    if (p === '/api/mail/einstellungen') return sendJson(res, mailEinstellungen());
     if (p === '/api/hook' && req.method === 'POST') {
       // Vor dem Lesen des Koerpers: ohne Geheimnis entsteht nichts.
       if (!hookErlaubt(req)) { req.resume(); return sendJson(res, { error: 'Nicht berechtigt' }, 401); }
@@ -1450,6 +1658,9 @@ function handle(req, res) {
     }
     if (modelle.routen(req, res, p, { sendJson, leseKoerper, cfg: config })) return;
     if (spracheDienst.routen(req, res, p, u, { sendJson, leseKoerper })) return;
+    if (mahnDienst.routen(req, res, p, u, { sendJson, leseKoerper })) return;
+    if (flowDienst.routen(req, res, p, u, { sendJson, leseKoerper })) return;
+    if (mailDienst.routen(req, res, p, u, { sendJson, leseKoerper })) return;
     if (p === '/api/cira/einstellungen') {
       return sendJson(res, {
         cira: ciraEinstellungen(), felder: CIRA_FELDER_ANZEIGE,
@@ -1465,11 +1676,15 @@ function handle(req, res) {
       const abrechnung = rechnung.abrechnung(db);
       const modelle = metrics.byModel(db, o);
       const wochen = metrics.byPeriod(db, o, 'woche');
+      const konten = rechnung.projektKonten(db, tickets.concat(ohneTicket), o);
+      const kz = metrics.kennzahlen(tickets.concat(ohneTicket), abrechnung, { ...zeit.kennzahlenZusatz(db, o), projektKonto: konten });
       return sendJson(res, {
         summary: metrics.summary(db, o),
         // Hub: Arbeitswert, Marge, abgerechnet/offen des Zeitraums — gerechnet
         // mit derselben mehrwert()-Formel wie je Vorgang.
-        kennzahlen: metrics.kennzahlen(tickets.concat(ohneTicket), abrechnung, zeit.kennzahlenZusatz(db, o)),
+        kennzahlen: kz,
+        // Projektkonto je ticketlosem Projekt (Auswahl im Beleg-Editor): geleistet, berechnet, offen.
+        projekt_konto: rechnung.projektKontenAnzeige(konten, kz.ueberhang, rechnung.projektKontenRest(db, konten, o)),
         models: modelle,
         // Was der Cache gegenueber normaler Eingabe gespart hat (Listenpreis, USD).
         cache_ersparnis_usd: metrics.cacheErsparnis(modelle),
@@ -1490,7 +1705,7 @@ function handle(req, res) {
         // Je Vorgang der Wert des Zeitraums, ohne Rechnungsbetrag — wie die
         // Hub-Kennzahlen: eine Rechnung kann Zeit ausserhalb des Zeitraums
         // enthalten. Das Detail rechnet mit dem gestellten Betrag.
-        tickets: tickets.map((t) => ({ ...t, wert: metrics.mehrwert(t, 0) })),
+        tickets: tickets.map(vorgangsZeile),
         // Alle Budgets, nicht nur die Vorgaenge im Zeitraum: die Glocke meldet
         // auch einen Vorgang, an dem diesen Monat niemand gearbeitet hat.
         budgets: metrics.budgets(db),
@@ -1562,7 +1777,7 @@ function handle(req, res) {
 
     // Shell v2: Badges der Navigation aus einer Quelle (BACKEND §1). Weitere
     // Felder kommen je Block dazu (freigaben C2, sitzungen C5 …).
-    if (p === '/api/zaehler') return sendJson(res, { live: metrics.liveSitzungen(db), freigaben: freigaben.offenAnzahl(db), sitzungen: sitzungDienst.anzahlOffen(), briefings: briefingDienst.ungelesen() });
+    if (p === '/api/zaehler') return sendJson(res, { live: metrics.liveSitzungen(db), freigaben: freigaben.offenAnzahl(db), sitzungen: sitzungDienst.anzahlOffen(), briefings: briefingDienst.ungelesen(), flows_fehler: flows.fehlerAnzahl(db) });
     if (p === '/api/dienste') {
       return dienste().then((d) => sendJson(res, { dienste: d }), (err) => {
         console.error('Dienst-Status:', err);
@@ -1591,8 +1806,9 @@ function handle(req, res) {
     // Nur die Hub-Kennzahlen eines Zeitraums (Monatsziel), ohne die ganze Auswertung.
     if (p === '/api/kennzahlen') {
       const o = opts(u);
+      const zeilen = metrics.byTicket(db, o).concat(metrics.ohneTicket(db, o));
       return sendJson(res, metrics.kennzahlen(
-        metrics.byTicket(db, o).concat(metrics.ohneTicket(db, o)), rechnung.abrechnung(db), zeit.kennzahlenZusatz(db, o)));
+        zeilen, rechnung.abrechnung(db), { ...zeit.kennzahlenZusatz(db, o), projektKonto: rechnung.projektKonten(db, zeilen, o) }));
     }
 
     // Kundenbericht: ein Ticket je Zeile, Semikolon als Trenner fuer Excel (DE).
@@ -1654,6 +1870,13 @@ function handle(req, res) {
       });
     }
 
+    // Projektseite (Block P): Liste (Laufzeit) und Detail (Zeitraum). Nur lesen.
+    if (p === '/api/projekte') { const a = projekteAntwort(db); return sendJson(res, a.body, a.status); }
+    if (p === '/api/projekt') {
+      const a = projektAntwort(db, u.searchParams.get('name'), { from: u.searchParams.get('from') || undefined, to: u.searchParams.get('to') || undefined });
+      return sendJson(res, a.body, a.status);
+    }
+
     if (p === '/api/refresh' && req.method === 'POST') {
       refreshData();
       return sendJson(res, { ok: true, lastIngest });
@@ -1684,7 +1907,7 @@ function handle(req, res) {
         try {
           return sendJson(res, { ok: true, ...bucheVorgang(db, daten) });
         } catch (err) {
-          return sendJson(res, { error: err.message }, 400);
+          return sendJson(res, { error: err.message }, err.status || 400);
         }
       });
     }
@@ -1773,7 +1996,7 @@ function handle(req, res) {
         try {
           const geaendert = setzeEinstellungen(daten);
           zeitNachrechnen();
-          return sendJson(res, { ok: true, geaendert });
+          return sendJson(res, { ok: true, geaendert, ...einstellungSofort(geaendert) });
         } catch (err) {
           return sendJson(res, { error: err.message }, 400);
         }
@@ -1940,7 +2163,7 @@ function handle(req, res) {
         try {
           const ang = angebot.setzeStatus(db, String(daten.nr || ''), String(daten.status || ''), daten.stand);
           return sendJson(res, { ok: true, nr: ang.nr, status: ang.status, gueltig_bis: ang.gueltig_bis,
-            angenommen_am: ang.angenommen_am, abgelehnt_am: ang.abgelehnt_am, kunde_geworden: ang.kunde_geworden });
+            angenommen_am: ang.angenommen_am, abgelehnt_am: ang.abgelehnt_am, kunde_geworden: ang.kunde_geworden, umwandlung: ang.umwandlung });
         } catch (err) {
           return sendJson(res, { error: err.message }, 400);
         }
@@ -2031,6 +2254,60 @@ function handle(req, res) {
           return sendJson(res, { ok: true });
         } catch (err) {
           return sendJson(res, { error: err.message }, 400);
+        }
+      });
+    }
+
+    // --- Leads (C12) ----------------------------------------------------------
+    // Schreiben nur per POST und damit hinter der Geraetekopplung.
+    if (p === '/api/leads' && req.method === 'GET') {
+      return sendJson(res, { ...leads.liste(db), quellen: leads.QUELLEN, gruende: leads.VERLOREN_GRUENDE });
+    }
+
+    if (p === '/api/lead-dubletten' && req.method === 'GET') {
+      try {
+        return sendJson(res, leads.dublettenKandidaten(db, {
+          email: u.searchParams.get('email') || '', firma: u.searchParams.get('firma') || '',
+        }));
+      } catch (err) {
+        return sendJson(res, { error: err.message }, 400);
+      }
+    }
+
+    if (p === '/api/lead' && req.method === 'POST') {
+      return leseKoerper(req, (fehler, daten) => {
+        if (fehler) return sendJson(res, { error: fehler }, 400);
+        try {
+          const d = daten || {};
+          if (d.id === undefined || d.id === null || d.id === '') return sendJson(res, { ok: true, ...leads.anlegen(db, d) });
+          return sendJson(res, { ok: true, lead: leads.aendern(db, d) });
+        } catch (err) {
+          return sendJson(res, { error: err.message }, err.status || 400);
+        }
+      });
+    }
+
+    if (p === '/api/lead-umwandeln' && req.method === 'POST') {
+      return leseKoerper(req, (fehler, daten) => {
+        if (fehler) return sendJson(res, { error: fehler }, 400);
+        try {
+          const d = daten || {};
+          const umwandlung = leads.umwandeln(db, { id: d.id, art: d.art, kunde_id: d.kunde_id });
+          return sendJson(res, { ok: true, umwandlung, lead: leads.lade(db, umwandlung.lead_id) });
+        } catch (err) {
+          return sendJson(res, { error: err.message }, err.status || 400);
+        }
+      });
+    }
+
+    if (p === '/api/lead-verloren' && req.method === 'POST') {
+      return leseKoerper(req, (fehler, daten) => {
+        if (fehler) return sendJson(res, { error: fehler }, 400);
+        try {
+          const d = daten || {};
+          return sendJson(res, { ok: true, lead: leads.verloren(db, { id: d.id, grund: d.grund }) });
+        } catch (err) {
+          return sendJson(res, { error: err.message }, err.status || 400);
         }
       });
     }
@@ -2230,6 +2507,16 @@ function handle(req, res) {
       return sendText(res, rechnung.renderHtml(inv), 200, 'text/html; charset=utf-8');
     }
 
+    // Druckansicht der Mahnung (Abschrift), Quelle des Mahnung-PDFs.
+    if (p.startsWith('/mahnung/')) {
+      const id = p.slice('/mahnung/'.length);
+      if (!/^\d{1,9}$/.test(id)) return sendText(res, 'Nicht gefunden', 404);
+      const m = mahnDienst.zeile(Number(id));
+      const inv = m && rechnung.lade(db, m.rechnung_nr);
+      if (!inv) return sendText(res, 'Nicht gefunden', 404);
+      return sendText(res, mahnung.renderHtml(m, inv), 200, 'text/html; charset=utf-8');
+    }
+
     if (p.startsWith('/angebot/')) {
       const nr = p.slice('/angebot/'.length);
       if (!/^AN-\d{4}-\d{4}$/.test(nr)) return sendText(res, 'Nicht gefunden', 404);
@@ -2354,6 +2641,15 @@ async function main() {
   // laedt) darf die Sitzungen der laufenden nicht als beendet markieren.
   try { sitzungDienst.aufraeumen(); } catch (e) { console.error('Sitzungen aufraeumen:', e); }
   try { ablaufDienst.aufraeumen(); } catch (e) { console.error('Ablaeufe aufraeumen:', e); }
+  // C11c: Mahnstatus heilen (P7, auch "im Versand abgebrochen" -> unklar), dann abgebrochene Flow-Laeufe melden, Vorlagen einmal anlegen,
+  // Bus anschliessen, Takt starten. Die Karte entsteht sofort, die Benachrichtigungsmail laeuft im Hintergrund und haelt den Start nicht auf.
+  try { mahnDienst.heile(); } catch (e) { console.error('Mahnstatus heilen:', e); }
+  let abgebrochen = [];
+  try { abgebrochen = flowDienst.aufraeumen(); } catch (e) { console.error('Flows aufraeumen:', e); }
+  for (const l of abgebrochen) flowDienst.meldeFehler(l.id, l).catch((e) => console.error('Flow-Fehlerkarte ' + l.id + ':', e));
+  try { flowDienst.vorlagenAnlegen(); } catch (e) { console.error('Flow-Vorlagen:', e); }
+  flows.verbinde(flowDienst);
+  flows.planeTakt(flowDienst);
   if (!geraeteSchutz) console.warn('WARNUNG: Geraeteschutz ist aus (C2I_GERAETESCHUTZ=aus) — jeder lokale Prozess kann schreiben.');
   // Geheimnis fuer den Hook fremder Sitzungen (C5): einmal erzeugen, steht
   // nur in config.json und geht in keine Antwort.
@@ -2402,15 +2698,16 @@ if (require.main === module) main();
 
 module.exports = {
   server, refreshData,
-  setzeEinstellungen, EINSTELLUNGEN, SCHREIBBAR,
+  setzeEinstellungen, EINSTELLUNGEN, SCHREIBBAR, einstellungSofort,
   setzeArbeitsbereich, ARBEITSBEREICH_FELDER,
   setzeCira, CIRA_FELDER, ciraEinstellungen,
   setzeVault, vaultAnzeige, VAULT_FELDER,
+  setzeMail, mailEinstellungen, MAIL_FELDER,
   diensteCacheLeeren: () => { dienstStand = { zeit: 0, laeuft: null, wert: null }; },
   starteModellProxy,
   setzeStammdaten, STAMMDATEN,
   vorlagenListe, setzeVorlage, loescheVorlage,
-  bucheVorgang, eRechnungAntwort, vormerkeVorgang, hookErlaubt,
+  bucheVorgang, eRechnungAntwort, projektAntwort, projekteAntwort, vormerkeVorgang, hookErlaubt,
   // Tests: Schutz einschalten und einen Dienst mit eigener DB einsetzen.
   setzeGeraeteSchutz: (an) => { geraeteSchutz = !!an; }, setzeGeraeteDienst: (d) => { geraeteDienst = d; },
   setzeSatz, setzeZeitmodell, csvExport,

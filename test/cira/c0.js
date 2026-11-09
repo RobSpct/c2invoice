@@ -6,6 +6,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const verwirf = require('../verwirf');
 
 const CFG = path.join(__dirname, '..', '..', 'config.json');
 const ausDatei = () => JSON.parse(fs.readFileSync(CFG, 'utf8'));
@@ -127,7 +128,7 @@ module.exports = ({ configGeschuetzt }) => {
         assert.strictEqual(fs.readFileSync(CFG, 'utf8'), vorher, 'Lesen hat config.json veraendert');
         // Schreiben ueber die Route: Pfad abgewiesen mit 400.
         bereicheSetzen([{ name: 'Da', kuerzel: 'DA', farbe: '#f97316', art: 'projekt', pfad: os.tmpdir() }]);
-        const post = (b) => fetch(url('/api/arbeitsbereich'), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) });
+        const post = (b) => verwirf(fetch(url('/api/arbeitsbereich'), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) }));
         let a = await post({ name: 'Da', pfad: 'C:\\' });
         assert.strictEqual(a.status, 400, 'Pfad ueber die Route: ' + a.status);
         a = await post({ name: 'Da', farbe: '#e0b355' });

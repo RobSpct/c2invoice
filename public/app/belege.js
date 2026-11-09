@@ -39,9 +39,6 @@ Object.assign(EN, {
   'ausgeglichen': 'settled', '+ Zahlung erfassen': '+ Record payment', 'Zahlung entfernen': 'Remove payment',
   'gestellt': 'issued', 'Zahlung über': 'Payment of', 'Storno': 'Credit note', 'Positionen laden …': 'Loading items …',
   'Rechnung nicht geladen': 'Invoice not loaded', 'pauschal': 'flat',
-  'Mahnen, Versand und Kontoauszug': 'Reminders, sending and bank statement',
-  'Zahlungserinnerung und Mahnung, Versand per E-Mail, Zahlungen aus dem Kontoauszug zuordnen — mit der Pro-Version.':
-    'Payment reminders and dunning, sending by e-mail, matching payments from the bank statement — with Pro.',
   'Kanban-Ansicht': 'Kanban view', 'Belege als Spalten nach Stand, Karten ziehen — mit der Pro-Version.': 'Documents as columns by state, drag cards — with Pro.',
   'Noch keine Rechnung gestellt': 'No invoice issued yet', 'Keine Rechnung passt zu Filter oder Suche': 'No invoice matches filter or search',
   'Noch kein Angebot': 'No quote yet', 'Kein Angebot passt zu Filter oder Suche': 'No quote matches filter or search',
@@ -76,7 +73,7 @@ Object.assign(EN, {
   'Anzeige nicht aktualisiert': 'View not refreshed',
   'Keine Antwort vom Server — die Zahlung ist vielleicht gebucht. Bitte die Zeile prüfen, bevor du erneut buchst.':
     'No answer from the server — the payment may have been booked. Check the row before booking again.',
-  'Fällig / Überfällig': 'Due / overdue', 'noch nicht fällig': 'not due yet', 'erinnern oder mahnen': 'remind or dun',
+  'Fällig / Überfällig': 'Due / overdue', 'noch nicht fällig': 'not due yet', 'mit Mahnstufe': 'with dunning level',
   'Rest steht aus': 'balance outstanding', 'hierher ziehen bucht den Rest': 'drop here to book the balance',
   'Nichts offen.': 'Nothing open.', 'Nichts überfällig.': 'Nothing overdue.', 'Keine Teilzahlungen.': 'No partial payments.', 'Noch nichts bezahlt.': 'Nothing paid yet.',
   'offen {b}': 'open {b}', 'heute fällig': 'due today', 'fällig {d} · in {n} T.': 'due {d} · in {n} d', 'überfällig seit {n} T.': 'overdue {n} d',
@@ -92,7 +89,8 @@ Object.assign(EN, {
   'gültig bis {d} · noch {n} T.': 'valid until {d} · {n} d left', 'angenommen {d}': 'accepted {d}', 'abgelehnt {d}': 'declined {d}', 'abgelaufen {d}': 'expired {d}',
   'Karten ziehen: Offen ↔ Angenommen ↔ Abgelehnt. Klick öffnet das Dokument.': 'Drag cards: Open ↔ Accepted ↔ Declined. Click opens the document.',
   '{nr} wieder offen': '{nr} open again', '{nr} wieder offen · gültig bis {d}': '{nr} open again · valid until {d}',
-  '{nr} angenommen': '{nr} accepted', '{nr} abgelehnt': '{nr} declined', '{f} ist jetzt Kunde': '{f} is now a customer',
+  '{nr} angenommen': '{nr} accepted', '{nr} abgelehnt': '{nr} declined', 'Kunde {k} angelegt': 'Customer {k} created', 'Lead mit Kunde {f} zusammengeführt': 'Lead merged with customer {f}',
+  '{nr} zurückgesetzt · Kunde {k} bleibt bestehen': '{nr} reset · customer {k} stays',
   'Abgerechnet entsteht über „In Rechnung“ – so bekommt die Rechnung ihre Nummer.': '“Invoiced” comes from “Invoice” – that is how the invoice gets its number.',
   'In Rechnung': 'Invoice',
 });
@@ -351,7 +349,7 @@ function bezahltZelle(r) {
 const rTreffer = (r, q) => !q || (r.nr + ' ' + (r.empfaenger || '') + ' ' + (r.leistung_von || '') + ' ' + (r.storno_von || '')).toLowerCase().includes(q);
 
 // Spalte wie im Mockup (colOf): faellig/ueberfaellig vor teilbezahlt; storniert erscheint nicht.
-const R_SPALTEN = [['off', 'Offen', 'noch nicht fällig', 'Nichts offen.'], ['ue', 'Fällig / Überfällig', 'erinnern oder mahnen', 'Nichts überfällig.'],
+const R_SPALTEN = [['off', 'Offen', 'noch nicht fällig', 'Nichts offen.'], ['ue', 'Fällig / Überfällig', 'mit Mahnstufe', 'Nichts überfällig.'],
   ['teil', 'Teilbezahlt', 'Rest steht aus', 'Keine Teilzahlungen.'], ['bez', 'Bezahlt', 'hierher ziehen bucht den Rest', 'Noch nichts bezahlt.']];
 function rSpalte(r) {
   const st = r.status_abgeleitet;
@@ -381,7 +379,9 @@ function rechnungKarte(r) {
     '<span class="kb-band"><span class="' + (rest ? 'teil' : 'voll') + '" style="width:' + (anteil * 100).toFixed(1) + '%"></span></span>' +
     '<div class="kb-zeile"><span class="mono ' + (rest ? 'teil' : 'ok') + '">' + esc(rest ? fuelle('offen {b}', { b: nf2.format(r.rest_eur) }) : uebersetze('ausgeglichen')) + '</span></div>' +
     '<div class="kb-zeile"><span class="ell ' + ton + '">' + esc(fl) + '</span></div>' +
-    (rest ? '<div class="kb-knoepfe"><button type="button" class="mini-aktion zahlung" data-aktion="r-zahlung" data-wert="' + esc(r.nr) + '">' + esc(uebersetze('Zahlung')) + '</button></div>' : '') +
+    (mahnText(r.nr) ? '<div class="kb-zeile"><span class="ell faint">' + esc(mahnText(r.nr)) + '</span></div>' : '') +
+    (rest ? '<div class="kb-knoepfe"><button type="button" class="mini-aktion zahlung" data-aktion="r-zahlung" data-wert="' + esc(r.nr) + '">' + esc(uebersetze('Zahlung')) + '</button>' +
+    (mahnbar(r.nr) ? '<button type="button" class="mini-aktion akzent" data-aktion="r-mahnen" data-wert="' + esc(r.nr) + '">' + esc(uebersetze('Mahnen')) + '</button>' : '') + '</div>' : '') +
   '</div>';
 }
 
@@ -433,6 +433,9 @@ function rechnungZeile(r) {
   const eintraege = [menueLink('/rechnung/' + encodeURIComponent(r.nr), 'Dokument ansehen', true),
     ...(r.hat_pdf ? [menueLink('/rechnung-pdf/' + encodeURIComponent(r.nr), 'PDF laden', true), menueKnopf('r-pdf', r.nr, 'PDF neu erzeugen')] : [menueKnopf('r-pdf', r.nr, 'PDF erzeugen')]),
     menueKnopf('r-xml', r.nr, 'XRechnung laden')];
+  // Eine stornierte Rechnung geht nicht mehr raus (R12); ihre Gutschrift schon.
+  if (r.status !== 'storniert') eintraege.push(menueKnopf('b-mail', 'rechnung:' + r.nr, 'E-Mail …'));
+  if (mahnbar(r.nr)) eintraege.push(menueKnopf('r-mahnen', r.nr, 'Mahnen …'));
   if (r.status === 'erstellt') eintraege.push(menueKnopf('r-storno-frage', r.nr, 'Stornieren …', true));
   return '<div class="b-eintrag' + (auf ? ' auf' : '') + (weg ? ' weg' : '') + '">' +
     // Zeile per Maus, Pfeil-Knopf per Tastatur und Screenreader (K1, Lighthouse aria-allowed-attr).
@@ -443,7 +446,7 @@ function rechnungZeile(r) {
       '<span class="mono rechts strich">' + nf2.format(r.brutto_eur) + '</span>' +
       '<span class="b-faellig' + (f.ton ? ' ' + f.ton : '') + '"><span class="mono">' + esc(f.t) + '</span><span class="s">' + esc(f.s) + '</span></span>' +
       bezahltZelle(r) +
-      '<span>' + pille(r.status_abgeleitet) + '</span>' +
+      '<span class="b-versand">' + pille(r.status_abgeleitet) + versandMarke(r.nr) + mahnMarke(r.nr) + '</span>' +
       '<span class="b-aktion">' + (r.rest_eur > 0 ? '<button type="button" class="mini-aktion zahlung" data-aktion="r-zahlung" data-wert="' + esc(r.nr) + '">' + esc(uebersetze('Zahlung')) + '</button>' : '') +
         menue(r.nr, eintraege) + '</span>' +
     '</div>' +
@@ -456,6 +459,9 @@ function rechnungZeile(r) {
 function ladeDetail(nr) {
   const e = bz.auf[nr] || (bz.auf[nr] = { d: null, fehler: null, lauf: 0 });
   const lauf = ++e.lauf;
+  // Versandverlauf nebenher; fehlt er, steht der Verlauf ohne Mails da.
+  hole('/api/mail/verlauf?bezug=' + encodeURIComponent(nr)).then((m) => { if (lauf === e.lauf && bz.auf[nr] === e) { e.mail = m.verlauf; if (e.d && route().name === 'rechnungen') zeichneAnsicht(); } },
+    (err) => console.error('/api/mail/verlauf:', err.message));
   hole('/api/rechnung/' + encodeURIComponent(nr)).then((d) => {
     if (lauf !== e.lauf || bz.auf[nr] !== e) return;
     e.d = d; e.fehler = null;
@@ -492,6 +498,13 @@ function rechnungDetail(r) {
   const verlauf = [{ tag: ortsTag(d.erstellt_am), t: uebersetze('gestellt') + ' · ' + eur(d.brutto_eur), c: 'var(--text-dim)' }]
     .concat((d.zahlungen || []).map((z) => ({ tag: z.datum, t: uebersetze('Zahlung über') + ' ' + eur(z.betrag_eur), c: 'var(--ok)' })))
     .concat(storno ? [{ tag: ortsTag(storno.erstellt_am), t: uebersetze('storniert durch') + ' ' + storno.nr, c: 'var(--text-faint)' }] : [])
+    // Unklare Zustellung (R6) ist kein Fehlschlag: vielleicht ist die Mail beim Kunden.
+    .concat((e.mail || []).map((m) => {
+      const unklar = m.status !== 'ok' && /^Zustellung unklar:/.test(m.fehler || '');
+      return { tag: ortsTag(m.zeit), c: unklar ? 'var(--warn)' : m.status !== 'ok' ? 'var(--bad)' : m.test ? 'var(--text-faint)' : 'var(--accent)',
+        t: unklar ? uebersetze('Zustellung unklar — unter Gesendet prüfen') : m.status !== 'ok' ? uebersetze('Versand fehlgeschlagen')
+          : uebersetze(m.test ? 'Test an' : 'gesendet an') + ' ' + (m.test ? m.an_original : m.an) };
+    }))
     .sort((a, b) => (a.tag < b.tag ? -1 : a.tag > b.tag ? 1 : 0));
   return '<div class="b-detail">' +
     '<div class="b-spalte"><span class="label">' + esc(uebersetze('Positionen')) + '</span>' + pos +
@@ -512,6 +525,8 @@ function zeichneRechnungen(w) {
   const L = state.rechnungen;
   const warte = belegeWarte(L, 'Belege laden …');
   if (warte) { w.innerHTML = warte; return; }
+  ladeVersandMarken();
+  ladeMahnStand();
   const K = state.summary && state.summary.belege_kennzahlen;
   const mitRest = L.filter((r) => r.rest_eur > 0).length;
   // Karten mit Filter sind Knoepfe (Klick filtert die Tabelle), die anderen nur Anzeige.
@@ -572,7 +587,6 @@ function zeichneRechnungen(w) {
     '</div>' +
     (bz.ansicht.rechnungen !== 'kanban' ? tabelle : proAktiv() ? rechnungBoard(L, q) : kanbanSperre()) +
     '</div>' +
-    (proAktiv() ? '' : '<div class="karte eingelassen sperre-huelle">' + sperre('Mahnen, Versand und Kontoauszug', 'Zahlungserinnerung und Mahnung, Versand per E-Mail, Zahlungen aus dem Kontoauszug zuordnen — mit der Pro-Version.') + '</div>') +
   '</div>';
   if (fokus) { const k = w.querySelector('.b-nr .pfeil[data-wert="' + CSS.escape(fokus) + '"]'); if (k) k.focus(); }
   verdrahteSuche(w, 'r-suche', (v) => { bz.rq = v; }, suche);
@@ -615,6 +629,7 @@ aktion('r-pdf', (nr, el) => mitLauf(el, async () => {
   toast(uebersetze('PDF erzeugt') + ': ' + nr, 'ok', { text: uebersetze('Öffnen'), tu: () => window.open('/rechnung-pdf/' + encodeURIComponent(nr), '_blank', 'noopener') });
   await belegeNeu();
 }));
+aktion('b-mail', (wert) => { const [art, nr] = String(wert).split(':'); menueZu(); bz.menu = null; oeffneVersand(art, nr); });
 aktion('r-xml', (nr, el) => mitLauf(el, async () => {
   menueZu();
   let r;
@@ -737,7 +752,7 @@ function gueltigText(a) {
 // Menue einer Zeile bzw. Karte — auch der Weg ohne Ziehen im Board.
 function angebotMenue(a) {
   const st = a.status_abgeleitet;
-  const eintraege = [menueLink('/angebot/' + encodeURIComponent(a.nr), 'Ansehen', true)];
+  const eintraege = [menueLink('/angebot/' + encodeURIComponent(a.nr), 'Ansehen', true), menueKnopf('b-mail', 'angebot:' + a.nr, 'E-Mail …')];
   // Abgelaufen ist abgeleitet, nicht gesetzt: eine spaete Zusage laesst sich trotzdem erfassen (R17).
   if (st === 'offen' || st === 'abgelaufen') eintraege.push(menueKnopf('a-status', a.nr + ':angenommen', 'Annehmen'), menueKnopf('a-status', a.nr + ':abgelehnt', 'Ablehnen'));
   if (st === 'angenommen') eintraege.push(menueKnopf('a-status', a.nr + ':offen', 'Wieder öffnen'), menueKnopf('a-status', a.nr + ':abgelehnt', 'Ablehnen'));
@@ -750,22 +765,20 @@ function angebotMenue(a) {
 const angebotFragen = (a) =>
   (frageIst('rechnung', a.nr) ? frageZeile(fuelle('Erzeugt eine Rechnung über {b} mit der nächsten Nummer. Das Angebot bleibt, wie es ist.', { b: eur(a.brutto_eur) }), 'a-rechnung', a.nr, 'Rechnung erstellen') : '') +
   (frageIst('loeschen', a.nr) ? frageZeile(uebersetze('Das Angebot wird gelöscht. Angebote sind kein Steuerdokument; die Nummer bleibt frei.'), 'a-loeschen', a.nr, 'Löschen', true) : '');
-const kontaktVon = (a) => a.kontakt_id && (state.kontakte || []).find((k) => k.id === a.kontakt_id);
 
 function angebotZeile(a) {
-  const kontakt = kontaktVon(a);
   const g = gueltigText(a);
   const st = a.status_abgeleitet;
   const eintraege = angebotMenue(a);
   return '<div class="b-eintrag">' +
     '<div class="b-zeile ohne-klick">' +
       '<span class="b-nr"><span class="mono">' + esc(a.nr) + '</span></span>' +
-      '<span class="b-wer"><span class="t ell">' + esc(a.empfaenger || '—') + (kontakt && kontakt.status === 'lead' ? ' ' + pille('lead') : '') + '</span></span>' +
+      '<span class="b-wer"><span class="t ell">' + esc(a.empfaenger || '—') + (a.lead_id && !a.kontakt_id ? ' ' + pille('lead') : '') + '</span></span>' +
       '<span class="mono dim">' + esc(datum(ortsTag(a.erstellt_am))) + '</span>' +
       '<span class="b-faellig"><span class="mono">' + (g.link ? '<a href="#/rechnungen" class="akzent">' + esc(g.t) + '</a>' : esc(g.t)) + '</span>' +
         '<span class="s' + (g.warn ? ' warn' : '') + '">' + esc(g.s) + '</span></span>' +
       '<span class="mono rechts">' + nf2.format(a.brutto_eur) + '</span>' +
-      '<span>' + pille(st) + '</span>' +
+      '<span class="b-versand">' + pille(st) + versandMarke(a.nr) + '</span>' +
       '<span class="b-aktion">' + (st === 'angenommen' ? '<button type="button" class="mini-aktion akzent" data-aktion="a-rechnung-frage" data-wert="' + esc(a.nr) + '">' + esc(uebersetze('In Rechnung →')) + '</button>' : '') +
         menue(a.nr, eintraege) + '</span>' +
     '</div>' + angebotFragen(a) +
@@ -779,7 +792,6 @@ const A_ZIEL = { off: 'offen', ang: 'angenommen', abl: 'abgelehnt' };
 
 function angebotKarte(a) {
   const sp = A_SPALTE[a.status_abgeleitet];
-  const kontakt = kontaktVon(a);
   const tagD = (iso) => datumKurz(ortsTag(iso));
   let gl, ton = '';
   if (sp === 'off') {
@@ -801,7 +813,7 @@ function angebotKarte(a) {
   const href = '/angebot/' + encodeURIComponent(a.nr);
   return '<div class="kb-karte" draggable="' + (sp !== 'abg') + '" data-nr="' + esc(a.nr) + '" data-aktion="kb-oeffnen" data-wert="' + href + '">' +
     karteKopf(a.nr, href, a.brutto_eur) +
-    '<div class="kb-z1"><span class="kb-firma ell">' + esc(a.empfaenger || '—') + '</span>' + (kontakt && kontakt.status === 'lead' ? pille('lead') : '') + '</div>' +
+    '<div class="kb-z1"><span class="kb-firma ell">' + esc(a.empfaenger || '—') + '</span>' + (a.lead_id && !a.kontakt_id ? pille('lead') : '') + '</div>' +
     '<div class="kb-zeile"><span class="ell ' + ton + '">' + esc(gl) + '</span><span class="kb-menue">' + menue(a.nr, angebotMenue(a)) + '</span></div>' +
     (sp === 'ang' ? '<button type="button" class="kb-rechnung" data-aktion="a-rechnung-frage" data-wert="' + esc(a.nr) + '">' + esc(uebersetze('In Rechnung →')) + '</button>' : '') +
     angebotFragen(a) +
@@ -833,6 +845,7 @@ function zeichneAngebote(w) {
   const L = state.angebote;
   const warte = belegeWarte(L, 'Belege laden …');
   if (warte) { w.innerHTML = warte; return; }
+  ladeVersandMarken();
   const kunden = [...new Set(L.map((a) => a.empfaenger).filter(Boolean))].sort((x, y) => x.localeCompare(y, 'de'));
   if (bz.akunde && !kunden.includes(bz.akunde)) bz.akunde = '';
   const q = bz.aq.trim().toLowerCase();
@@ -864,8 +877,8 @@ function zeichneAngebote(w) {
 
 aktion('a-filter', (f) => { if (!A_PASST[f]) return; bz.af = f; merke('angebote.filter', f); zeichneAnsicht(); });
 // Statuswechsel aus Menue und Board. Rueckgaengig schickt den vorigen Stand mit
-// (Gueltigkeit, Zeitpunkte) und, wenn die Annahme den Lead erst zum Kunden
-// gemacht hat, auch das — der Server stellt beides in einem Schritt her.
+// (Gueltigkeit, Zeitpunkte). Eine Umwandlung Lead -> Kunde bleibt dabei stehen
+// (C12 Festlegung 2): die Kundennummer ist vergeben.
 function angebotStatus(nr, status, el) {
   const a = (state.angebote || []).find((x) => x.nr === nr);
   if (!a || !['offen', 'angenommen', 'abgelehnt'].includes(status)) return;
@@ -879,12 +892,19 @@ function angebotStatus(nr, status, el) {
     catch (e) { toast(uebersetze('Status nicht geändert') + ': ' + e.message, 'err'); zeichneAnsicht(); return; }
     let text = status === 'angenommen' ? fuelle('{nr} angenommen', { nr }) : status === 'abgelehnt' ? fuelle('{nr} abgelehnt', { nr })
       : a.status_abgeleitet === 'abgelaufen' ? fuelle('{nr} wieder offen · gültig bis {d}', { nr, d: datum(ortsTag(r.gueltig_bis)) }) : fuelle('{nr} wieder offen', { nr });
-    if (r.kunde_geworden) { const k = kontaktVon(a); text += ' · ' + fuelle('{f} ist jetzt Kunde', { f: (k && k.firma) || a.empfaenger }); }
+    const u = r.umwandlung;
+    if (u && u.art === 'neu') text += ' · ' + fuelle('Kunde {k} angelegt', { k: u.kundennummer });
+    else if (u) {
+      const k = (state.kontakte || []).find((x) => x.id === u.kontakt_id);
+      text += ' · ' + fuelle('Lead mit Kunde {f} zusammengeführt', { f: (k && (k.firma || [k.vorname, k.nachname].filter(Boolean).join(' '))) || u.kundennummer });
+    }
     toast(text, 'ok', {
       text: uebersetze('Rückgängig'),
       tu: async () => {
-        try { await sende('/api/angebot-status', { nr, status: vorher, stand: { ...stand, lead: !!r.kunde_geworden } }); }
-        catch (e) { toast(uebersetze('Status nicht geändert') + ': ' + e.message, 'err'); }
+        try {
+          await sende('/api/angebot-status', { nr, status: vorher, stand });
+          if (u) toast(fuelle('{nr} zurückgesetzt · Kunde {k} bleibt bestehen', { nr, k: u.kundennummer }), 'ok');
+        } catch (e) { toast(uebersetze('Status nicht geändert') + ': ' + e.message, 'err'); }
         await belegeNeu();
       },
     });

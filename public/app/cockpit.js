@@ -30,7 +30,7 @@ Object.assign(EN, {
   'Orb-Stil': 'Orb style', 'Bühne im Cockpit · Partikel oder ruhige Fläche': 'Cockpit stage · particles or calm surface', 'Partikel': 'Particles', 'Ruhige Fläche': 'Calm surface',
   'Fehler': 'Error', 'wartet': 'waiting', 'läuft': 'running',
   'Rechnung': 'Invoice', 'Mahnung': 'Reminder', 'Mail': 'Mail', 'Jira-Kommentar': 'Jira comment', 'Rückfrage': 'Question',
-  'Plan-Schritt': 'Plan step', 'Flow-Fehler': 'Flow error', 'Rechnungsserie': 'Invoice series',
+  'Plan-Schritt': 'Plan step', 'Flow-Fehler': 'Flow error', 'Mahnung ausgeschöpft': 'Dunning exhausted', 'Wiederholt im Lauf {n}': 'Retried as run {n}', 'Rechnungsserie': 'Invoice series',
   // C4: Herleitung, Rechnungsentwurf, Skills, Benachrichtigung
   'Wie entstanden?': 'How was this derived?', 'Herleitung': 'Derivation', '↻ Nochmal': '↻ Replay', 'Herleitung schließen': 'Close derivation',
   'Fertig · alles nachvollziehbar': 'Done · fully traceable', 'Rechenweg aus c2invoice · kein Modell': 'Calculation from c2invoice · no model',
@@ -675,7 +675,7 @@ function zeichneHeute() {
   const sp = (v, l, f, genau) => '<div title="' + esc(uebersetze(l) + ': ' + genau(v)) + '"><span class="v mono">' + esc(f(v)) + '</span><span class="l">' + esc(uebersetze(l)) + '</span></div>';
   el.innerHTML = sp(k.aktive_stunden + k.manuell_stunden, 'Stunden', hrs, hrs) + sp(k.wert.arbeitswert, 'Arbeitswert', ganz, eur) + sp(k.wert.api_gegenwert, 'API-Gegenwert', ganz, eur);
 }
-const ART = { vault_notiz: 'Vault-Notiz', monatsbericht: 'Monatsbericht', mahnung: 'Mahnung', rechnung: 'Rechnung', mail: 'Mail', jira_kommentar: 'Jira-Kommentar', sitzung_frage: 'Rückfrage', plan_schritt: 'Plan-Schritt', flow_fehler: 'Flow-Fehler', serie: 'Rechnungsserie', ablauf: 'Skill-Ablauf' };
+const ART = { vault_notiz: 'Vault-Notiz', monatsbericht: 'Monatsbericht', mahnung: 'Mahnung', rechnung: 'Rechnung', mail: 'Mail', jira_kommentar: 'Jira-Kommentar', sitzung_frage: 'Rückfrage', plan_schritt: 'Plan-Schritt', flow_fehler: 'Flow-Fehler', mahnung_ausgeschoepft: 'Mahnung ausgeschöpft', serie: 'Rechnungsserie', ablauf: 'Skill-Ablauf' };
 function zeichneFreigaben() {
   const el = document.getElementById('ck-freigaben');
   const n = document.getElementById('ck-anzahl');
@@ -694,13 +694,26 @@ function zeichneFreigaben() {
     return '<div class="ck-karte' + (fehler ? ' fehler' : '') + '">' +
       '<div class="ck-kkopf"><span class="punkt" aria-hidden="true"></span><span class="art mono">' + esc(uebersetze(ART[f.art] || f.art)) + '</span>' +
         (f.bezug ? '<span class="bezug mono">' + esc(f.bezug) + '</span>' : '') + '<span class="wann mono">' + esc(vor(f.erstellt)) + '</span></div>' +
-      '<span class="t">' + esc(f.titel) + '</span>' + (f.text ? '<span class="s">' + esc(String(f.text).slice(0, 240)) + '</span>' : '') + ckVorschau(f) +
-      '<div class="knoepfe">' + (f.ausfuehrbar ? '<button type="button" class="ok" data-aktion="ck-freigabe" data-wert="' + f.id + ':ok">' + esc(uebersetze('Freigeben')) + '</button>' : '') +
-        '<button type="button" data-aktion="ck-freigabe" data-wert="' + f.id + ':ablehnen">' + esc(uebersetze('Ablehnen')) + '</button>' +
+      '<span class="t">' + esc(fxServer(f.titel)) + '</span>' + (f.text ? '<span class="s">' + esc(fxServer(String(f.text)).slice(0, f.art === 'flow_fehler' ? 420 : 240)) + '</span>' : '') + ckVorschau(f) +
+      '<div class="knoepfe">' + ckKnoepfe(f) +
         // Ein Entwurf zeigt vor dem Freigeben, woraus er besteht.
         (f.art === 'rechnung' ? '<button type="button" class="her" data-aktion="ck-herleitung" data-wert="rechnung|F' + f.id + '">' + esc(uebersetze('Wie entstanden?')) + '</button>' : '') + '</div>' +
       (f.ausfuehrbar ? '' : '<span class="s faint">' + esc(uebersetze('noch keine Aktion · nur Ablehnen')) + '</span>') + '</div>';
   }).join('');
+}
+// Knoepfe einer Karte. Flow-Fehler (C11c): mit Nutzlast heisst "ok" wiederholen, ohne (Mail ging raus, Versand nicht bereit) nur quittieren;
+// "Ablehnen" heisst dort "Ignorieren". Mahnung ausgeschoepft ist ein reiner Hinweis: nur "Erledigt".
+function ckKnoepfe(f) {
+  const knopf = (wahl, text, ok) => '<button type="button"' + (ok ? ' class="ok"' : '') + ' data-aktion="ck-freigabe" data-wert="' + f.id + ':' + wahl + '">' + esc(uebersetze(text)) + '</button>';
+  if (f.art === 'mahnung_ausgeschoepft') return knopf('ok', 'Erledigt', true);
+  if (f.art === 'flow_fehler') {
+    // Nutzlast: Lauf (immer) und Wiederholen-Ziel; kein_retry heisst nur ansehen. Aeltere Karten ohne Nutzlast tragen den Lauf im Bezug.
+    const n = f.nutzlast, lid = n && Number.isInteger(n.lauf_id), wdh = lid && !n.kein_retry;
+    const b = /^lauf:(\d+)$/.exec(f.bezug || ''), lauf = lid ? n.lauf_id : b && b[1];
+    return (wdh ? knopf('ok', fuelle('Ab Schritt {n} wiederholen', { n: n.ab_schritt }), true) : knopf('ok', 'Erledigt', true)) +
+      (lauf ? '<button type="button" data-aktion="gehe" data-wert="flows/lauf/' + lauf + '">' + esc(uebersetze('Lauf ansehen')) + '</button>' : '') + knopf('ablehnen', 'Ignorieren');
+  }
+  return (f.ausfuehrbar ? knopf('ok', 'Freigeben', true) : '') + knopf('ablehnen', 'Ablehnen');
 }
 // Vault-Entwuerfe (C9): ganzer Text bzw. Aenderung aufklappbar; fehlt der Projekt-Tag, waehlt man ihn hier.
 function ckVorschau(f) {
@@ -730,7 +743,9 @@ aktion('ck-freigabe', async (wert, el) => {
       const r = await sende('/api/freigaben/' + encodeURIComponent(id) + '/entscheide', { wahl, ...(tag && tag.value && wahl === 'ok' ? { hinweis: 'tag:' + tag.value } : {}) });
       const nr = r && r.freigabe && r.freigabe.ergebnis && r.freigabe.ergebnis.nr;
       const mem = r && r.freigabe && r.freigabe.ergebnis && r.freigabe.ergebnis.memory;
-      if (nr) toast(fuelle('Rechnung {nr} gestellt', { nr }), 'ok', { text: uebersetze('Zu den Rechnungen'), tu: () => geheZu('rechnungen') });
+      const wdh = r && r.freigabe && r.freigabe.ergebnis && r.freigabe.ergebnis.lauf_id;
+      if (wdh) toast(fuelle('Wiederholt im Lauf {n}', { n: wdh }), 'ok', { text: uebersetze('Lauf ansehen'), tu: () => geheZu('flows/lauf/' + wdh) });
+      else if (nr) toast(fuelle('Rechnung {nr} gestellt', { nr }), 'ok', { text: uebersetze('Zu den Rechnungen'), tu: () => geheZu('rechnungen') });
       else if (mem && !/^Zeile unter/.test(mem)) toast(uebersetze('Notiz gespeichert') + ' · ' + mem, 'err');
       else toast(uebersetze(wahl === 'ok' ? 'Freigegeben' : 'Abgelehnt'), 'ok');
     } catch (e) { toast(e.message, 'err'); }

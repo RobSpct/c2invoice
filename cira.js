@@ -113,11 +113,12 @@ function pruefeZahlen(text, fakten, frage, { codeFrei = false } = {}) {
 // (eur|usd|h|proz|n) fuer die Buehne, die im Browser formatiert.
 function kennzahlenFakten(db, z) {
   const o = zeitraumOpts(z);
-  const k = metrics.kennzahlen(metrics.byTicket(db, o).concat(metrics.ohneTicket(db, o)), rechnung.abrechnung(db), zeit.kennzahlenZusatz(db, o));
+  const zeilen = metrics.byTicket(db, o).concat(metrics.ohneTicket(db, o));
+  const k = metrics.kennzahlen(zeilen, rechnung.abrechnung(db), { ...zeit.kennzahlenZusatz(db, o), projektKonto: rechnung.projektKonten(db, zeilen, o) });
   const f = [
     { k: 'Arbeitswert', v: k.wert.arbeitswert, t: eur(k.wert.arbeitswert), e: 'eur', u: 'eigene Zeit zum Stundensatz' },
     { k: 'Stunden', v: k.aktive_stunden + k.manuell_stunden, t: std(k.aktive_stunden + k.manuell_stunden), e: 'h', u: 'Claude-Arbeit und manuell' },
-    { k: 'Abgerechnet', v: k.abgerechnet_eur + k.abgerechnet_manuell_eur, t: eur(k.abgerechnet_eur + k.abgerechnet_manuell_eur), e: 'eur', u: 'auf gestellten Rechnungen' },
+    { k: 'Abgerechnet', v: k.abgerechnet_gesamt_eur, t: eur(k.abgerechnet_gesamt_eur), e: 'eur', u: 'Arbeitswert auf gestellten Rechnungen' },
     { k: 'Noch nicht abgerechnet', v: k.offen_eur, t: eur(k.offen_eur), e: 'eur', u: 'Arbeitswert noch ohne Rechnung' },
   ];
   if (k.wert.marge_prozent != null) f.push({ k: 'Marge — nach Sachkosten und eigener Zeit', v: k.wert.marge_prozent, t: proz(k.wert.marge_prozent), e: 'proz', ton: k.wert.marge_prozent < 0 ? 'rot' : 'gruen' });
@@ -221,7 +222,7 @@ function rechnungsZiel(db, roh) {
 // offenen abrechenbaren Zeiteintraege desselben Ziels. Der Leistungszeitraum
 // umspannt alles davon. Gerechnet wird hier nichts; die Summen kommen aus
 // rechnung.vorschau.
-function rechnungsEntwurf(db, roh) {
+function rechnungsEntwurf(db, roh, { quelle = 'cira' } = {}) {
   const ziel = rechnungsZiel(db, roh);
   if (ziel.fehlt) return { antwort: ziel.fehlt, quelle: QUELLE_DATEN, sprung: ziel.sprung || [] };
   const fehlt = rechnung.fehlendeStammdaten();
@@ -249,18 +250,20 @@ function rechnungsEntwurf(db, roh) {
   const daten = { ...od.daten, empfaenger, kontaktId: k.id };
   const v = rechnung.vorschau(db, daten);
   if (!(v.brutto_eur > 0)) return { antwort: sauber(ziel.bezug) + ' hat nichts Offenes zum Abrechnen.' + nichts, quelle: QUELLE_DATEN, sprung: [] };
+  // Was der Server am Beleg anzumerken hat (Begrenzung, Stunden in berechneten Tagen), steht im Entwurf.
+  const hinweise = v.hinweise.length ? ' ' + v.hinweise.map(sauber).join(' ') : '';
   // Gestellt wird nur, was zu sehen war: aendert sich der Betrag bis zur Freigabe, bricht sie ab (409).
   const f = freigaben.ersetze(db, {
-    art: 'rechnung', bezug: ziel.bezug, quelle: 'cira',
+    art: 'rechnung', bezug: ziel.bezug, quelle,
     // anlegen() nimmt hoechstens 200 Zeichen Titel; eine lange Liste darf den Entwurf nicht verhindern.
     titel: ('Rechnungsentwurf ' + ziel.bezug + ' an ' + sauber(empfaenger.name)).slice(0, 200),
     text: v.positionen.length + (v.positionen.length === 1 ? ' Position' : ' Positionen') + ' · netto ' + eur(v.netto_eur) + ' · brutto ' + eur(v.brutto_eur) +
-      ' · Leistungszeitraum ' + daten.from + ' bis ' + daten.to + '.' + nichts + ' Freigeben stellt die Rechnung mit fortlaufender Nummer, danach geht nur noch Storno.',
-    nutzlast: { ...daten, erwartetBrutto: v.brutto_eur },
+      ' · Leistungszeitraum ' + daten.from + ' bis ' + daten.to + '.' + nichts + hinweise + ' Freigeben stellt die Rechnung mit fortlaufender Nummer, danach geht nur noch Storno.',
+    nutzlast: { ...daten, erwartetBrutto: v.brutto_eur, erwartetStunden: v.stunden_summe },
   });
   const fakten = [{ k: 'Netto', v: v.netto_eur, t: eur(v.netto_eur) }, { k: 'Brutto', v: v.brutto_eur, t: eur(v.brutto_eur) }, { k: 'Positionen', v: v.positionen.length, t: String(v.positionen.length) }];
   return {
-    antwort: 'Entwurf für ' + sauber(ziel.bezug) + ' an ' + sauber(empfaenger.name) + ': ' + satzFakten(fakten) + '.' + nichts +
+    antwort: 'Entwurf für ' + sauber(ziel.bezug) + ' an ' + sauber(empfaenger.name) + ': ' + satzFakten(fakten) + '.' + nichts + hinweise +
       ' Gestellt ist noch nichts — „Freigeben“ unter „Braucht dich“ stellt sie, im Beleg-Editor kannst du sie vorher anpassen.',
     fakten, quelle: 'Rechnungsvorschau · ' + QUELLE_DATEN, freigabe_id: f.id,
     sprung: ziel.art === 'vorgang' && vorgaenge.length === 1 ? [{ l: 'Vorgang öffnen', ziel: '#/vorgaenge/' + encodeURIComponent(vorgaenge[0].ticket) }] : [{ l: 'Zu den Rechnungen', ziel: '#/rechnungen' }],
@@ -928,4 +931,4 @@ function erzeuge({ db, bucheVorgang, spawnFn, fetchFn = fetch, claudeExe, jetzt 
   return { frage, verlauf, vorschlaege, routen, zusammenfassen, ausText, t2Lauf, speichere };
 }
 
-module.exports = { erzeuge, pruefeZahlen, zeitraumAus, t0, T0, STANDARD, waehleRolle, modellFuer, ROLLEN, ueberfaelligFakten, faktenFuerKontext };
+module.exports = { erzeuge, rechnungsEntwurf, pruefeZahlen, zeitraumAus, t0, T0, STANDARD, waehleRolle, modellFuer, ROLLEN, ueberfaelligFakten, faktenFuerKontext };

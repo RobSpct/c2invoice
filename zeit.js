@@ -478,25 +478,26 @@ function ueberlappungVon(db, id) {
 // `seitStunden` endeten, werden mit den neuen Sitzungsdaten nachgerechnet
 // (Infinity = alle offenen, z. B. nach einer Einstellungsaenderung).
 // Abgerechnete bleiben, wie sie auf der Rechnung stehen. Gibt die Zahl der
-// geaenderten Eintraege zurueck.
-function nachrechnen(db, { seitStunden = 48, jetzt = Date.now() } = {}) {
+// geaenderten Eintraege zurueck. `projekt` (optional): nur die Eintraege mit
+// Ziel dieses Projekts, damit ein fremder kaputter Eintrag sie nicht aufhaelt.
+function nachrechnen(db, { seitStunden = 48, jetzt = Date.now(), projekt = null } = {}) {
   const seit = Number.isFinite(seitStunden) ? new Date(jetzt - seitStunden * 3600e3).toISOString() : '';
-  const offen = db.prepare("SELECT * FROM zeit_eintrag WHERE status = 'offen' AND ende >= ? ORDER BY start").all(seit);
+  const offen = db.prepare("SELECT * FROM zeit_eintrag WHERE status = 'offen' AND ende >= ? AND (? IS NULL OR (ziel_art = 'projekt' AND ziel_schluessel = ?)) ORDER BY start").all(seit, projekt, projekt);
   if (!offen.length) return 0;
   const fenster = fensterJeTag(db, offen);
   const cache = cacheFuer(db);
   let n = 0;
-  let kaputt = 0;
+  const kaputt = [];
   // Ein kaputter Eintrag haelt die uebrigen nicht auf; am Ende faellt er auf.
   for (const e of offen) {
     try {
       if (aktualisiere(db, e, rechne(db, e, e.id, fenster(e), cache))) n += 1;
     } catch (err) {
-      kaputt += 1;
+      kaputt.push(e.id);
       console.error('Zeiteintrag #' + e.id + ' nicht nachgerechnet:', err.message);
     }
   }
-  if (kaputt) throw new Error(kaputt + ' Eintrag/Einträge nicht nachgerechnet (' + n + ' aktualisiert).');
+  if (kaputt.length) throw new Error(kaputt.length + ' Eintrag/Einträge nicht nachgerechnet (' + n + ' aktualisiert): #' + kaputt.join(', #') + '.');
   return n;
 }
 
@@ -851,9 +852,10 @@ function ziele(db, q = '') {
   for (const p of Object.keys(config.projektSaetze || {})) projektNamen.add(p);
   const projekte = [...projektNamen].filter((p) => passt(p)).sort((a, b) => a.localeCompare(b)).slice(0, 50)
     .map((p) => ({ schluessel: p, satz: metrics.satzFuerProjekt(p).satz, rundung: rundungFuer(db, 'projekt', p) }));
-  const kunden = db.prepare('SELECT id, firma, status FROM kontakte ORDER BY firma COLLATE NOCASE').all()
+  // Seit C12 ist jeder Kontakt Kunde (Leads sind kein Buchungsziel).
+  const kunden = db.prepare('SELECT id, firma FROM kontakte ORDER BY firma COLLATE NOCASE').all()
     .filter((k) => passt(k.firma)).slice(0, 50)
-    .map((k) => ({ schluessel: String(k.id), name: k.firma, status: k.status, satz: config.stundensatz, rundung: rundungFuer(db, 'kunde', String(k.id)) }));
+    .map((k) => ({ schluessel: String(k.id), name: k.firma, satz: config.stundensatz, rundung: rundungFuer(db, 'kunde', String(k.id)) }));
   const intern = INTERN.filter((i) => passt(i))
     .map((i) => ({ schluessel: i, satz: null, selbstkosten: Number(config.selbstkostenStunde) || 0 }));
   return { vorgaenge: v, projekte, kunden, intern };

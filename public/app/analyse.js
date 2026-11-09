@@ -38,6 +38,7 @@ Object.assign(EN, {
   'aktive Stunden je Tag, letzte 12 Wochen': 'active hours per day, last 12 weeks', 'weniger': 'less', 'mehr': 'more',
   'Top-Vorgänge': 'Top jobs', 'nach Gegenwert — Arbeitswert + API-Gegenwert': 'by equivalent — billable value + API equivalent',
   'Bandbreite = API-Gegenwert in USD · ohne Werkzeugbetrieb': 'Band width = API equivalent in USD · without tool usage',
+  'ohne Vorgang — geleistet ohne Vorgang abzüglich berechneter Stunden': 'no job — done without a job, minus billed hours',
   'ohne Vorgang': 'no job', 'Projekt': 'Project', 'Agent h': 'Agent h', 'API USD': 'API USD', 'Arbeitswert': 'Billable value', 'Anteil': 'Share',
   'Werkzeug': 'Tool', 'Werkzeugbetrieb gedämpft — nicht abrechenbar': 'Tool usage dimmed — not billable',
   'Anteil am API-Gegenwert · Requests und Tokens': 'Share of API equivalent · requests and tokens', 'Modell': 'Model', 'Requests': 'Requests', 'Tokens': 'Tokens',
@@ -286,7 +287,7 @@ function projekteInhalt(S) {
     '<td class="z akzent">' + nf2.format(x.cost_usd) + '</td><td class="z">' + rest + '</td><td></td></tr>';
   return kopf + '<div class="tabelle-huelle"><table class="tabelle ana-projekte"><thead><tr>' +
     ['Projekt', 'Kunde', 'Verlauf', 'Requests', 'Tokens', 'Aktiv h', 'Agent h', 'API USD', 'Arbeitswert', 'Anteil'].map((h, i) => '<th scope="col"' + (i > 2 ? ' class="z"' : '') + '>' + esc(uebersetze(h)) + '</th>').join('') +
-    '</tr></thead><tbody>' + P.map((p) => '<tr' + (p.overhead ? ' class="gedaempft"' : '') + '><td class="ana-name" title="' + esc(p.project) + '">' + esc(p.project) +
+    '</tr></thead><tbody>' + P.map((p) => '<tr' + (p.overhead ? ' class="gedaempft"' : '') + '><td class="ana-name" title="' + esc(p.project) + '">' + (p.overhead ? esc(p.project) : '<a href="#/projekte/p/' + encodeURIComponent(p.project) + '">' + esc(p.project) + '</a>') +
         (p.overhead ? ' <span class="pille">' + esc(uebersetze('Werkzeug')) + '</span>' : '') + '</td>' +
       '<td class="dim ell">' + esc(p.overhead ? '–' : kunde(p.project)) + '</td>' +
       '<td>' + (modell ? '<span class="faint" title="' + esc(uebersetze('Verlauf nur ohne Modellfilter')) + '">–</span>' : projektSpark(verlauf[p.project], tage)) + '</td>' +
@@ -374,7 +375,7 @@ function statusBereich(S) {
   const zeilen = [
     ['noch nicht abgerechnet', K.offen_vorgaenge, K.offen_vorgang_eur, 'var(--text-faint)', nach(false)],
     ['abgerechnet', K.abgerechnet_vorgaenge, K.abgerechnet_eur, 'var(--ok)', nach(true)],
-    ['ohne Vorgang', null, K.ohne_vorgang_eur, 'var(--line-hover)', []],
+    ['ohne Vorgang — geleistet ohne Vorgang abzüglich berechneter Stunden', null, K.ohne_vorgang_eur, 'var(--line-hover)', []],
   ];
   for (const z of zeilen) z[2] = Number(z[2]) || 0;
   const ges = zeilen.reduce((a, z) => a + z[2], 0);
