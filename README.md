@@ -24,11 +24,21 @@ session logs → active working time → hourly value → margin → invoice PDF
 
 ## What it looks like
 
-The sidebar has four groups. **Assistant**: Cira, Sessions, Live and Time
-tracking. **Work**: Board, Jobs and Tools. **Analysis**: Finances and Usage.
-**Billing**: Quotes, Invoices and Contacts. One period selector applies to
-every page, with an optional comparison to the previous period; **Ctrl+K / ⌘K**
-searches jobs, documents, contacts and settings.
+The sidebar has four groups. **Assistant**: Cira, Sessions, Live, Time
+tracking and Briefings. **Work**: Projects (with the Board), Jobs, Flows,
+Memory and Tools. **Analysis**: Finances and Usage. **Billing**: Quotes,
+Invoices and Contacts. One period selector applies to every page, with an
+optional comparison to the previous period; **Ctrl+K / ⌘K** searches jobs,
+documents, contacts and settings.
+
+You don't have to take all of it. On first start c2invoice asks which **view**
+you want: **Basic** (usage and analysis only: what does my AI work cost?),
+**Advanced** (adds time tracking, quotes, invoices and contacts), **Full**
+(adds flows and Cira) or **Modular** (you pick). Change it any time under
+Settings → Modules. A module you switch off is hidden and silent, and its data
+stays:
+
+![Settings, Modules: the four views Basic, Advanced, Full and Modular, each with the pages it shows](docs/modules.png)
 
 **Cira** is the assistant built into c2invoice. Ask in plain words or pick a
 suggestion, such as *Wie lief der Monat?* (how did the month go?), *Was ist
@@ -54,7 +64,7 @@ terminal show up too, read-only:
 
 ![Sessions: a running session on job WS-15 in plan mode, Claude asking for ExitPlanMode with Allow and Deny, the plan in terminal view, and on the right the billing of this session, the loaded plugins and actions for the result](docs/sessions.png)
 
-The **Board** collects tasks from a `TODO.md` per workspace and, if you use it,
+The **Board** (Projects → Board) collects tasks from a `TODO.md` per workspace and, if you use it,
 from Jira, as one Kanban with time and value from c2invoice on every card. Drag
 a card to change its status, start it in Claude with ▶, or turn a local task
 into a Jira issue; the time already booked moves along. Filters for sprint and
@@ -95,11 +105,49 @@ calendar; where both overlap, you decide what gets billed:
 
 ![Time tracking: timer, today's working time against the daily target with lanes for appointments, manual time and Claude, and the week with entries, Claude sessions and appointments](docs/zeit.png)
 
+**Projects** is the account per project: hours worked, hours billed and hours
+still open (work without a job, up to today), invoices, active hours, API cost
+and value of work in the period. Open hours can be billed in parts, and the
+account remembers what went on which invoice:
+
+![Projects: per project the customer, hours worked, billed and open, invoices, active hours, API cost, value of work and a trend line, plus tool projects](docs/projects.png)
+
 Getting paid — payments are recorded per invoice, partial payments included.
 Status follows from the payments (*open*, *partly paid*, *paid*), and an
-invoice past its due date that is not fully paid shows as overdue:
+invoice past its due date that is not fully paid shows as overdue. Expand an
+invoice to see its lines, payments and history, including every e-mail sent:
 
-![Invoices: open total, overdue, paid in the period, average time to pay, and the invoice list with a partly paid invoice](docs/invoices.png)
+![Invoices: open total, overdue, paid in the period, average time to pay, and the invoice list with one invoice expanded to lines, payments and history](docs/invoices.png)
+
+**Send by e-mail** — invoices and quotes go out from c2invoice over your own
+SMTP account, with the PDF (and for invoices the XRechnung) attached. In test
+mode every message goes to your own test address instead of the customer, and
+the dialog says so:
+
+![E-mail dialog for a quote: test mode banner, recipient, subject, message and the PDF attachment](docs/send.png)
+
+**Dunning** — a payment reminder, a first and a second dunning letter, each at
+a set number of days after the previous one and each with a new deadline.
+*Dun …* in the invoice menu shows the letter with the open amount; send it,
+or only create it for the post:
+
+![Payment reminder dialog: test mode banner, recipient, subject, letter text, open amount and the new deadline](docs/dunning.png)
+
+**Flows** *(preview)* run the routine for you once a day: an overdue invoice
+gets the reminder that is due, a quote about to expire gets one follow-up, and
+a job marked done in Jira gets an invoice draft for you to release. Every run
+is listed with its steps; a failed step can be retried from there. In 3.2 you
+switch the three bundled flows on and off and try them with a test run that
+sends nothing; building your own flows comes with the flow editor:
+
+![Flows: the three bundled flows marked as preview, the runs of "Overdue invoice to reminder" and a run with its trigger and the step that sent the reminder to the test address](docs/flows.png)
+
+**Contacts** keeps leads, customers and open quotes in one list. A lead becomes
+a customer when you send it a quote it accepts; every customer has a number,
+contact persons, documents, projects with rate and time model, jobs, and
+revenue paid and open:
+
+![Contacts: customers and leads in one list, and a customer record with revenue paid, open items, average time to pay, open quotes and the master data](docs/contacts.png)
 
 The document editor builds quotes and invoices from jobs in a period, manual
 time, saved line templates, flat fees or free lines — with a live preview
@@ -423,6 +471,47 @@ rather than invented API prices.
 - **Manual time** from Time tracking: *Bill open entries →* opens the editor
   with the customer's open entries; they are locked once the invoice exists
   (see [Manual time](#manual-time))
+- **Leads** are records of their own until a quote to them is accepted; then
+  they become a customer with the next customer number
+- **E-mail, dunning and flows**: see the next section
+
+## E-mail, dunning and flows
+
+**Sending** uses your own SMTP account, set under `mail` in `config.json`
+(host, port, user, sender) with the password in an environment variable
+(`mail.smtp.passwortEnvVar`, default `C2I_SMTP_PASSWORT`), never in the file.
+Tested with Google and an app password; Microsoft accounts (Outlook, Hotmail)
+need OAuth and do not work yet. Every message is stored as `.eml` next to the
+database and listed in the document's history.
+
+**Test mode first:** set `mail.umleitenAn` to your own address and every
+message goes there instead of to the customer, with the real recipient in the
+subject. A test send never counts as a dunning level. Remove the address when
+you are ready to send for real. `mail.tagesgrenze` (default 100) caps the
+number of messages per day, so a mistake cannot get your mail account blocked.
+
+**Dunning** follows three levels: a payment reminder 7 days after the due date,
+a first dunning letter 14 days later, a second one 14 days after that; each sets
+a new deadline of 7 days. A fee is possible on the second letter only (default
+0 €). After the second letter c2invoice writes nothing more by itself and puts
+"dunning levels exhausted" under *Needs you*. A dunning pause on a customer
+(until a date you set) holds everything back. All days and the fee are under Settings → Dunning.
+
+**Flows** *(preview in 3.2)* scan once a day, from 9:00 on weekdays (Settings →
+Flows; weekends are a switch), and catch up on the next working day if the
+server was off. Three flows come with c2invoice, all **paused** until you
+switch them on:
+
+| Flow | What it does |
+|---|---|
+| Overdue invoice → reminder | sends the dunning level that is due, only for invoices sent from c2invoice (older invoices stay manual) |
+| Quote expires → follow-up | once, 3 days before the quote expires (Settings → Follow-up), only for quotes sent from c2invoice |
+| Job done → invoice draft | with Jira: a job moved to done gets an invoice draft under *Needs you*; nothing is issued without you |
+
+*Test run* shows what a flow would send right now and sends nothing; *Run now*
+sends after asking. A failed run opens a card under *Needs you* and can be
+retried from the failed step. Your own flows, with a visual editor, come in a
+later version.
 
 ### E-invoice (XRechnung)
 
@@ -616,8 +705,8 @@ without a console window. Both are optional; `npm start` is enough.
 
 ## Roadmap
 
-- Flows: automations with trigger, condition and action, dunning, sending
-  documents, recurring invoices
+- Flow editor: build your own flows from trigger, condition and action, or
+  describe them to Cira; recurring invoices
 - Acceptance links for quotes, a shared mailbox per customer and job
 - A quarterly tax package for your accountant
 - Linear and Trello sync adapters
