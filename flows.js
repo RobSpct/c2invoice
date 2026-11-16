@@ -67,6 +67,16 @@ function erzeugeDienst({ db, jetzt = () => new Date().toISOString(), aktionen = 
     return { ...f, knoten: JSON.parse(f.knoten_json) };
   };
 
+  // Probelauf eines Scan-Flows: ausdruecklich sagen, dass nichts rausging und wann es rausgeht (sonst sucht man die Mail im Postfach).
+  const probeHinweis = (flow) => {
+    let art = null;
+    try { art = JSON.parse(flow.ausloeser_json).art; } catch { /* kein Scan-Flow */ }
+    if (art !== 'rechnung_ueberfaellig' && art !== 'angebot_laeuft_ab') return '';
+    // Pausiert sendet der Scan nichts: dann nichts versprechen (silent-failure-Review 09.11.).
+    if (!flow.aktiv) return ' · Probelauf, nichts gesendet. Der Flow ist pausiert: gesendet wird erst nach dem Scharfschalten';
+    const z = versandZeit();
+    return ' · Probelauf, nichts gesendet. Gesendet wird beim Scan (' + (z.wochenende ? 'täglich' : 'werktags') + ' ab ' + z.ab_stunde + ' Uhr) oder mit „Jetzt ausführen“';
+  };
   // Laeuft ab `knoten` mit `eingang`, `nr` = Nummer des letzten schon geschriebenen Schritts.
   async function gehe(laufId, flow, test, knotenId, eingang, nr) {
     let status = 'ok', fehler = null, fehlerSchritt = null, testAktion = false, ohneWiederholen = false;
@@ -92,7 +102,7 @@ function erzeugeDienst({ db, jetzt = () => new Date().toISOString(), aktionen = 
             if (!a) throw new Error('Unbekannte Aktion: ' + p.aktion);
             const ctx = { db, eingang, parameter: p, lauf: { id: laufId, wurzel_id: flow.wurzel, nr }, test };
             const meldung = await a.pruefe(ctx);
-            if (test) { testAktion = true; schluss('skip', meldung, eingang); knotenId = k.outs && k.outs[port]; continue; }
+            if (test) { testAktion = true; schluss('skip', meldung + probeHinweis(flow), eingang); knotenId = k.outs && k.outs[port]; continue; }
             const r = (await a.fuehreAus(ctx)) || {};
             ausgang = r.ausgang === undefined ? eingang : r.ausgang;
             if (r.status === 'skip' || r.status === 'warn') { schluss(r.status, r.meldung, ausgang); status = r.status; break; }
@@ -177,9 +187,9 @@ function erzeugeDienst({ db, jetzt = () => new Date().toISOString(), aktionen = 
   };
   // Alle Kandidaten beider Scan-Arten (Regeln in mahnung.js/angebot.js); im Testmodus zaehlt auch ein Testversand.
   // `beiFehler`: scheitert eine Art, laeuft die andere (M4, Scan); ohne ihn wirft es (Kandidaten-Route, Probelauf).
+  const vorAblauf = (c) => { const t = c.angebot && c.angebot.nachfassenTageVorAblauf; return Number.isInteger(t) && t >= 1 && t <= 60 ? t : 3; };
   const sammle = (tag, st, c, beiFehler = (e) => { throw e; }) => {
-    const t = c.angebot && c.angebot.nachfassenTageVorAblauf;
-    const vor = Number.isInteger(t) && t >= 1 && t <= 60 ? t : 3;
+    const vor = vorAblauf(c);
     const o = { testmodus: !!st.umgeleitet };
     const je = (f) => { try { return f(); } catch (e) { beiFehler(e); return []; } };
     const mit = (art, praefix) => (k) => ({ art, bezug: praefix + k.nr, betreff: beleg(praefix + k.nr), ...k });
@@ -194,10 +204,16 @@ function erzeugeDienst({ db, jetzt = () => new Date().toISOString(), aktionen = 
   const aktiveArten = () => new Set(db.prepare('SELECT ausloeser_json FROM flow WHERE aktiv = 1').all()
     .map((f) => { try { return JSON.parse(f.ausloeser_json).art; } catch { return null; } }));
   const flowArt = (id) => { try { return JSON.parse(lade(id).ausloeser_json).art; } catch { return null; } };
-  // Probelauf f1 ohne Kandidat: Gruende aus mahnung.js, dazu Rechnungen, die auf eine offene Fehlerkarte warten (C1).
-  const gruendeOhneKandidat = () => {
+  // Probelauf ohne Kandidat: Gruende aus mahnung.js (f1) bzw. angebot.js (f2), dazu Belege, die auf eine Fehlerkarte warten (C1, R17).
+  // Ein Kandidat aus dem Modul, der in sammle() fehlt, wartet auf eine Karte: dieselbe Filterregel, nicht nachgebaut.
+  const gruendeOhneKandidat = (art) => {
     if (!mail) return [];
     const tag = heute(), c = cfg() || {}, o = { testmodus: !!mail.status().umgeleitet };
+    if (art === 'angebot_laeuft_ab') {
+      const oa = { ...o, tageVorAblauf: vorAblauf(c) };
+      const gesperrt = angebot.kandidaten(db, tag, oa).map((k) => ({ nr: k.nr, grund: 'gesperrt durch eine Fehlerkarte (Nachfassen nur einmal)' }));
+      return [...angebot.ausgeschlossen(db, tag, oa), ...gesperrt];
+    }
     const wartet = mahnung.kandidaten(db, tag, o, c.mahnwesen).map((k) => ({ nr: k.nr, grund: 'wartet auf die offene Fehlerkarte (erst prüfen, dann bestätigen)' }));
     return [...mahnung.ausgeschlossen(db, tag, o, c.mahnwesen), ...wartet];
   };
@@ -373,7 +389,7 @@ function erzeugeDienst({ db, jetzt = () => new Date().toISOString(), aktionen = 
     const n = jetzt();
     const lid = Number(db.prepare("INSERT INTO flow_lauf (flow_id, start, ende, status, betreff, test) VALUES (?, ?, ?, 'skip', ?, 1)").run(id, n, n, lade(id).titel).lastInsertRowid);
     db.prepare('UPDATE flow_lauf SET wurzel_id = id WHERE id = ?').run(lid);
-    const aus = art === 'rechnung_ueberfaellig' ? gruendeOhneKandidat() : [];
+    const aus = art === 'rechnung_ueberfaellig' || art === 'angebot_laeuft_ab' ? gruendeOhneKandidat(art) : [];
     const meldung = aus.length ? 'Kein Kandidat: ' + aus.map((x) => x.nr + ' ' + x.grund).join('; ') : 'Kein Kandidat';
     db.prepare("INSERT INTO flow_schritt (lauf_id, nr, node_id, typ, titel, status, meldung, ausgang_json) VALUES (?, 1, 't', 'trigger', 'Auslöser', 'skip', ?, ?)")
       .run(lid, meldung, aus.length ? JSON.stringify({ ausgeschlossen: aus }) : null);
@@ -488,6 +504,12 @@ const grenzeErreicht = (mailDienst) => {
   if (st.heute >= st.grenze) throw mitLauf('Tagesgrenze erreicht (' + st.grenze + ' Mails), morgen wieder', 'warn');
 };
 
+// Testmodus: die Mail geht an die Umleitung, nicht an den Kunden. Meldungen nennen beide, sonst sucht man sie im falschen Postfach.
+const testZiel = (mailDienst) => { const s = mailDienst.status(); return s.umgeleitet ? s.umleiten_an : null; };
+// Nach dem Versand zaehlt die Zeile im Versandprotokoll, nicht die Config von jetzt (die Testadresse kann sich waehrend SMTP aendern).
+const versandAn = (db, id) => { const z = id ? db.prepare('SELECT an FROM versand WHERE id = ?').get(id) : null; return (z && z.an) || 'unbekannt'; };
+const anText = (mailDienst, an) => { const t = testZiel(mailDienst); return t ? 'an die Testadresse ' + t + ' (statt an ' + an.join(', ') + ')' : 'an ' + an.join(', '); };
+
 function mahnungSenden({ mahnDienst, mailDienst }) {
   // Vorschau ist die Pruefung: dieselbe Antwort wie im Dialog "Mahnen", mit den Sperren (bezahlt, storniert, Mahnpause, unklar).
   function vorschau({ eingang }) {
@@ -500,7 +522,7 @@ function mahnungSenden({ mahnDienst, mailDienst }) {
     return v;
   }
   return {
-    pruefe: (ctx) => { const v = vorschau(ctx); return v.titel + ' an ' + v.an.join(', ') + ' über ' + rechnung.eur(v.gesamt_eur); },
+    pruefe: (ctx) => { const v = vorschau(ctx); return v.titel + ' ' + anText(mailDienst, v.an) + ' über ' + rechnung.eur(v.gesamt_eur); },
     async fuehreAus(ctx) {
       const v = vorschau(ctx);
       grenzeErreicht(mailDienst);
@@ -514,7 +536,7 @@ function mahnungSenden({ mahnDienst, mailDienst }) {
       if (r.warnung) throw Object.assign(new Error(r.warnung), { kein_retry: true });
       if (r.versand.status !== 'ok') throw new Error(r.versand.fehler || 'Versand fehlgeschlagen');
       return { ausgang: { mahnung_id: m.id, stufe: v.stufe },
-        meldung: r.versand.test ? 'Test: ' + v.titel + ' ging an die Testadresse statt an ' + v.an.join(', ') + ', zählt nicht als Stufe' : v.titel + ' gesendet an ' + v.an.join(', ') };
+        meldung: r.versand.test ? 'Test: ' + v.titel + ' ging an die Testadresse ' + versandAn(ctx.db, r.versand.id) + ' statt an ' + v.an.join(', ') + ', zählt nicht als Stufe' : v.titel + ' gesendet an ' + v.an.join(', ') };
     },
   };
 }
@@ -540,7 +562,7 @@ function angebotNachfassen({ mailDienst }) {
     return { an, nr };
   }
   return {
-    pruefe: (ctx) => { const { an, nr } = pruefen(ctx); return 'Nachfassen zu ' + nr + ' an ' + an.join(', '); },
+    pruefe: (ctx) => { const { an, nr } = pruefen(ctx); return 'Nachfassen zu ' + nr + ' ' + anText(mailDienst, an); },
     async fuehreAus(ctx) {
       const { an, nr } = pruefen(ctx);
       grenzeErreicht(mailDienst);
@@ -551,7 +573,7 @@ function angebotNachfassen({ mailDienst }) {
       // P5: wurzel_id, nicht die Id dieses Laufs. Eine Wiederholung ist eine neue Zeile; mit ihrer eigenen Id griffe die Sperre nicht.
       try { r = await mailDienst.sende({ an, betreff: n.betreff, text: n.text, anhaenge: [{ name: pdf.name, typ: pdf.typ, daten: pdf.daten }] }, { art: 'nachfassen', bezug: nr, lauf_id: ctx.lauf.wurzel_id, nr: ctx.lauf.nr }); } catch (e) { throw uebersetze(e); }
       if (r.status !== 'ok') throw new Error(r.fehler || 'Versand fehlgeschlagen');
-      return { ausgang: { nr, versand_id: r.id }, meldung: r.test ? 'Test: Nachfassen ging an die Testadresse statt an ' + an.join(', ') : 'Nachfassen gesendet an ' + an.join(', ') };
+      return { ausgang: { nr, versand_id: r.id }, meldung: r.test ? 'Test: Nachfassen ging an die Testadresse ' + versandAn(ctx.db, r.id) + ' statt an ' + an.join(', ') : 'Nachfassen gesendet an ' + an.join(', ') };
     },
   };
 }

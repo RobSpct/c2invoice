@@ -474,8 +474,10 @@ function kopfHtml(k) {
       '<div class="name"><div class="zeile"><h2 id="kon-name">' + esc(kontaktName(k)) + '</h2>' + pille('kunde') + '</div>' +
         '<span class="sub">' + esc([k.kundennummer, kOrt(k), k.erstellt_am ? uebersetze('seit') + ' ' + datum(ortsTag(k.erstellt_am)) : ''].filter(Boolean).join(' · ')) + '</span></div>' +
       '<div class="kon-taten">' +
+        // M1: Belege nur mit Modul Abrechnung.
+        (!modulAktiv('abrechnung') ? '' :
         '<a class="knopf klein" href="#/beleg/neu?art=angebot&amp;kontakt=' + k.id + '">' + esc(uebersetze('+ Angebot')) + '</a>' +
-        '<a class="knopf klein" href="#/beleg/neu?art=rechnung&amp;kontakt=' + k.id + '">' + esc(uebersetze('+ Rechnung')) + '</a>' +
+        '<a class="knopf klein" href="#/beleg/neu?art=rechnung&amp;kontakt=' + k.id + '">' + esc(uebersetze('+ Rechnung')) + '</a>') +
         '<button type="button" class="knopf klein geist kon-loeschen" data-aktion="k-loeschen-frage" data-wert="' + k.id + '">' + esc(uebersetze('Löschen')) + '</button>' +
       '</div></div>' +
     '<div class="kon-kpis">' +
@@ -599,7 +601,7 @@ function leadAkteHtml(l) {
       '<div class="name"><div class="zeile"><h2 id="kon-name">' + esc(leadName(l)) + '</h2>' + pille(l.status) + '</div>' +
         '<span class="sub">' + esc([l.lead_nr, quelleLabel(l.quelle), uebersetze('seit') + ' ' + datum(ortsTag(l.erstellt_am))].join(' · ')) + '</span></div>' +
       '<div class="kon-taten">' +
-        (offen ? '<a class="knopf klein" href="#/beleg/neu?art=angebot&amp;lead=' + l.id + '">' + esc(uebersetze('+ Angebot')) + '</a>' : '') +
+        (offen && modulAktiv('abrechnung') ? '<a class="knopf klein" href="#/beleg/neu?art=angebot&amp;lead=' + l.id + '">' + esc(uebersetze('+ Angebot')) + '</a>' : '') +
         // Ein verlorener Lead darf noch umgewandelt werden (gewonnen schlaegt verloren).
         (l.status !== 'umgewandelt' ? '<button type="button" class="knopf klein kon-kunde" data-aktion="l-umwandeln-frage" data-wert="' + l.id + '">' + esc(uebersetze('Umwandeln …')) + '</button>' : '') +
         (offen ? '<button type="button" class="knopf klein geist" data-aktion="l-verloren-frage" data-wert="' + l.id + '">' + esc(uebersetze('Verloren …')) + '</button>' : '') +

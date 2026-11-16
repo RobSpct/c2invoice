@@ -13,6 +13,15 @@ const path = require('node:path');
 const echt = path.join(__dirname, '..', 'config.json');
 const kopie = path.join(os.tmpdir(), 'c2invoice-test-' + process.pid + '-config.json');
 fs.copyFileSync(echt, kopie);
+// M1: Tests pruefen alle Module. Die Ansicht dieser Installation (Einstellungen -> Module)
+// gilt hier nicht, sonst wird der Selbsttest rot, sobald jemand Basic waehlt.
+{
+  const c = JSON.parse(fs.readFileSync(kopie, 'utf8'));
+  if (c.oberflaeche && typeof c.oberflaeche === 'object' && 'modus' in c.oberflaeche) {
+    delete c.oberflaeche.modus;
+    fs.writeFileSync(kopie, JSON.stringify(c, null, 2) + '\n', 'utf8');
+  }
+}
 const norm = (p) => (typeof p === 'string' || p instanceof URL ? path.resolve(String(p)).toLowerCase() : null);
 const um = (p) => (norm(p) === echt.toLowerCase() ? kopie : norm(p) === (echt + '.tmp').toLowerCase() ? kopie + '.tmp' : p);
 for (const name of ['readFileSync', 'writeFileSync', 'existsSync', 'rmSync', 'statSync']) {

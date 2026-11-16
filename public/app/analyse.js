@@ -105,7 +105,8 @@ const REITER = [
   ['arbeitszeit', 'Arbeitszeit', 'Arbeitszeit und manuelle Zeit'],
   ['werkzeuge', 'Werkzeuge', 'Werkzeugbetrieb — ändert keine Abrechnung'],
 ];
-const anaReiter = () => REITER;
+// M1: Arbeitszeit liest die Zeiterfassung (/api/zeit/analyse), ohne Modul Zeit fehlt der Reiter.
+const anaReiter = () => REITER.filter((r) => r[0] !== 'arbeitszeit' || modulAktiv('zeit'));
 const anaZustand = { mcp: null, schnitt: 'werkzeug', modell: null, alleSkills: false };
 aktion('ana-skills', () => { anaZustand.alleSkills = !anaZustand.alleSkills; zeichneAnsicht(); });
 

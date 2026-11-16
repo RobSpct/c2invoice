@@ -24,10 +24,12 @@ const sprache = {
   aktiv() { return !!(this.aufnahme || this.erkennt || this.audio || this.utter || this.quelle); },
   async lade() {
     clearTimeout(this.nachladen);
+    // M1: Stimme gehoert zum Assistenten; ausgeschaltet antwortet die Route 409, kein Nachladen im 5-s-Takt.
+    if (!modulAktiv('assistent')) { this.status = null; spracheKnoepfe(); return null; }
     try { this.status = await hole('/api/sprache/status'); } catch (e) {
       // Beim Server-Neustart blieben die Knoepfe sonst bis zum Neuladen verborgen.
       console.error('/api/sprache/status:', e.message);
-      this.nachladen = setTimeout(() => this.lade(), 5000);
+      if (e.status !== 409) this.nachladen = setTimeout(() => this.lade(), 5000);
     }
     spracheKnoepfe();
     return this.status;

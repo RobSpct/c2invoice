@@ -607,7 +607,7 @@ module.exports = ({ dbmod, openDbs, configGeschuetzt }) => {
     const nr = scharf(db, '2026-0001');
     db.prepare("UPDATE invoices SET kontakt_id = ?, erstellt_am = '2026-09-17T10:00:00.000Z'").run(kid);
     const aktionen = opt.aktionen || flows.erzeugeAktionen({ db, mahnDienst, mailDienst });
-    const d = flows.erzeugeDienst({ db, aktionen, jetzt: JETZT, mail: mailDienst, cfg: () => ({ mahnwesen: CFG, mail: st.cfg, jira: st.jira }) });
+    const d = flows.erzeugeDienst({ db, aktionen, jetzt: JETZT, mail: mailDienst, cfg: () => ({ mahnwesen: CFG, mail: st.cfg, jira: st.jira, flows: opt.flows }) });
     d.vorlagenAnlegen();
     const f = Object.fromEntries(db.prepare('SELECT id, vorlage FROM flow').all().map((r) => [r.vorlage, r.id]));
     let n = 0;
@@ -1663,6 +1663,132 @@ module.exports = ({ dbmod, openDbs, configGeschuetzt }) => {
     assert.deepStrictEqual(sv.einstellungSofort({ stundensatz: 90 }), {}, 'andere Felder: kein Hinweis');
   }
 
+  // ---- C11e: Restpunkte vor Release 3.2 ----
+  const HINWEIS = (wann) => ' · Probelauf, nichts gesendet. Gesendet wird beim Scan (' + wann + ') oder mit „Jetzt ausführen“';
+
+  // Testmodus: Lauf und Probelauf nennen die Testadresse, an die die Mail wirklich geht (wiki leerer-probelauf-braucht-grund-je-fall, Punkt 2).
+  async function testadresseInMeldung() {
+    await mitAktionen({ umleitenAn: TESTADR }, async ({ db, d, st, f, eingang, lauf }) => {
+      // Die Testadresse aendert sich waehrend des SMTP-Gespraechs: die Meldung nennt trotzdem die, an die die Mail ging (Versandzeile).
+      st.halte = { then(weiter) { st.cfg.umleitenAn = 'neu@example.org'; st.halte = null; weiter(); } };
+      d.setzeAktiv(f.ueberfaellig_mahnung, true);
+      const p = await d.lauf(f.ueberfaellig_mahnung, eingang(), { test: true });
+      assert.strictEqual(meldungVon(db, p, 2), 'Zahlungserinnerung an die Testadresse ' + TESTADR + ' (statt an ' + KUNDE + ') über 1.190,00 EUR' + HINWEIS('werktags ab 9 Uhr'));
+      const id = await mahnLauf(d, eingang());
+      assert.strictEqual(lauf(id).status, 'ok', lauf(id).fehler);
+      assert.strictEqual(meldungVon(db, id, 2), 'Test: Zahlungserinnerung ging an die Testadresse ' + TESTADR + ' statt an ' + KUNDE + ', zählt nicht als Stufe');
+    });
+    await mitAktionen({ umleitenAn: TESTADR }, async ({ db, d, f }) => {
+      angebotMit(db, { versand: false });
+      angebotVersand(db, TESTADR, '2026-10-08T10:00:00', { test: 1, original: KUNDE });
+      d.setzeAktiv(f.angebot_nachfassen, true);
+      const p = await d.lauf(f.angebot_nachfassen, { nr: 'AN-2026-0001', tage: 1 }, { test: true });
+      assert.strictEqual(meldungVon(db, p, 2), 'Nachfassen zu AN-2026-0001 an die Testadresse ' + TESTADR + ' (statt an ' + KUNDE + ')' + HINWEIS('werktags ab 9 Uhr'));
+      const id = (await d.ausloesen('angebot_laeuft_ab', { nr: 'AN-2026-0001', tage: 1, bezug: 'angebot:AN-2026-0001', schluessel: 'n1' }))[0];
+      assert.strictEqual(meldungVon(db, id, 2), 'Test: Nachfassen ging an die Testadresse ' + TESTADR + ' statt an ' + KUNDE);
+    });
+  }
+
+  // Probelauf sagt, dass nichts rausging und wann es rausgeht (Versandzeit aus der Config); scharf ohne Testadresse; f3 ohne Scan-Hinweis.
+  async function probelaufHinweis() {
+    await mitAktionen({ flows: { abStunde: 7, wochenende: 1 } }, async ({ db, d, st, f, eingang }) => {
+      const pausiert = await d.lauf(f.ueberfaellig_mahnung, eingang(), { test: true });
+      assert.strictEqual(meldungVon(db, pausiert, 2), 'Zahlungserinnerung an ' + KUNDE + ' über 1.190,00 EUR · Probelauf, nichts gesendet. Der Flow ist pausiert: gesendet wird erst nach dem Scharfschalten');
+      d.setzeAktiv(f.ueberfaellig_mahnung, true);
+      const p = await d.lauf(f.ueberfaellig_mahnung, eingang(), { test: true });
+      assert.strictEqual(meldungVon(db, p, 2), 'Zahlungserinnerung an ' + KUNDE + ' über 1.190,00 EUR' + HINWEIS('täglich ab 7 Uhr'));
+      const e = await d.lauf(f.rechnung_entwurf, { key: 'ABC-1', vorgang: 'ABC-1', kat: 'done' }, { test: true });
+      assert.ok(!/Probelauf/.test(meldungVon(db, e, 2) || ''), 'f3 sendet nie: kein Scan-Hinweis');
+      assert.strictEqual(st.mails.length, 0);
+    });
+  }
+
+  // f2: je offenem Angebot Kandidat oder Grund, aus einer Regel (angebot.urteil); Kandidatenliste unveraendert.
+  async function nachfassenGruende() {
+    const o = { testmodus: false, tageVorAblauf: 3 };
+    const db = neueDb();
+    angebotMit(db, { nr: 'AN-2026-0001', versand: false });                                         // nie per Mail
+    angebotMit(db, { nr: 'AN-2026-0002', versand: false }); versandZeile(db, 'AN-2026-0002', { art: 'angebot', test: 1 }); // nur Test
+    angebotMit(db, { nr: 'AN-2026-0003' }); versandZeile(db, 'AN-2026-0003', { art: 'nachfassen' });   // schon nachgefasst
+    angebotMit(db, { nr: 'AN-2026-0004', bis: '2026-10-30T12:00:00' });                               // abgelaufen
+    angebotMit(db, { nr: 'AN-2026-0005', bis: '2026-11-20T12:00:00' });                               // erst spaeter
+    angebotMit(db, { nr: 'AN-2026-0006', bis: '2026-11-15T12:00:00' });                               // So: Freitag davor (13.)
+    angebotMit(db, { nr: 'AN-2026-0007' });                                                           // Kandidat
+    angebotMit(db, { nr: 'AN-2026-0008', status: 'angenommen' });                                    // nicht offen: nicht gelistet
+    assert.deepStrictEqual(angebot.ausgeschlossen(db, '2026-11-02', o), [
+      { nr: 'AN-2026-0004', grund: 'abgelaufen am 2026-10-30' },
+      { nr: 'AN-2026-0001', grund: 'nie per Mail aus c2invoice versendet' },
+      { nr: 'AN-2026-0002', grund: 'nur als Test versendet, Testmodus ist aus' },
+      { nr: 'AN-2026-0003', grund: 'Nachfassen schon gesendet' },
+      { nr: 'AN-2026-0006', grund: 'Nachfassen erst ab 2026-11-12' },
+      { nr: 'AN-2026-0005', grund: 'Nachfassen erst ab 2026-11-17' },
+    ]);
+    assert.deepStrictEqual(angebot.ausgeschlossen(db, '2026-11-02', { ...o, tageVorAblauf: 1 }).find((x) => x.nr === 'AN-2026-0006'),
+      { nr: 'AN-2026-0006', grund: 'Nachfassen erst ab 2026-11-13' }, 'Freitagsregel: Ablauf Sonntag, nachgefasst am Freitag');
+    assert.deepStrictEqual(angebot.kandidaten(db, '2026-11-02', o), [{ nr: 'AN-2026-0007', tage: 3 }], 'Kandidatenregel unveraendert');
+    const tm = angebot.ausgeschlossen(db, '2026-11-02', { ...o, testmodus: true });
+    assert.ok(!tm.some((x) => x.nr === 'AN-2026-0002'), 'im Testmodus zaehlt der Testversand');
+    // Erst-ab-Datum ist der erste Tag, an dem kandidaten() das Angebot liefert (eine Regel, kein zweiter Ausdruck).
+    assert.deepStrictEqual(angebot.kandidaten(db, '2026-11-16', o).map((k) => k.nr), [], '16.: AN-0005 noch nicht');
+    assert.ok(angebot.kandidaten(db, '2026-11-17', o).some((k) => k.nr === 'AN-2026-0005'), '17.: AN-0005 dran');
+    // Unlesbares Datum: ein Grund statt einer Endlosschleife (ohne Schutz haengt dieser Test, deshalb keine Mutante dafuer).
+    const kaputt = neueDb(); angebotMit(kaputt, { bis: '' });
+    assert.deepStrictEqual(angebot.ausgeschlossen(kaputt, '2026-11-02', o), [{ nr: 'AN-2026-0001', grund: 'Gültigkeitsdatum unlesbar' }]);
+    kaputt.prepare("UPDATE angebote SET gueltig_bis = 'kaputt1234'").run();
+    assert.deepStrictEqual(angebot.ausgeschlossen(kaputt, '2026-11-02', o), [{ nr: 'AN-2026-0001', grund: 'Gültigkeitsdatum unlesbar' }], '10 Zeichen, kein Datum');
+    kaputt.prepare("UPDATE angebote SET gueltig_bis = '9999-12-31'").run();
+    const t0 = Date.now();
+    assert.deepStrictEqual(angebot.ausgeschlossen(kaputt, '2026-11-02', o), [{ nr: 'AN-2026-0001', grund: 'Nachfassen erst ab 9999-12-28' }]);
+    assert.ok(Date.now() - t0 < 200, 'ferner Ablauf zaehlt nicht Tag fuer Tag');
+    // Probelauf f2 ohne Kandidat nennt die Gruende; ein Angebot mit kein_retry-Karte ist gesperrt (R17).
+    await mitAktionen({}, async ({ db: db2, d, f }) => {
+      angebotMit(db2, { nr: 'AN-2026-0001', bis: '2026-11-20T12:00:00' });
+      angebotMit(db2, { nr: 'AN-2026-0002' });
+      require('../../freigaben').anlegen(db2, { art: 'flow_fehler', bezug: 'angebot:AN-2026-0002', titel: 't', text: 'x', nutzlast: { lauf_id: 1, ab_schritt: 2, kein_retry: true }, quelle: 'cira' });
+      db2.prepare("UPDATE freigabe SET status = 'erledigt'").run();
+      await mitHttp(d, async (ruf) => {
+        const r = await ruf('POST', '/api/flows/' + f.angebot_nachfassen + '/test', {});
+        assert.strictEqual(r.json.status, 'skip', r.text);
+        assert.strictEqual(meldungVon(db2, r.json.id, 1), 'Kein Kandidat: AN-2026-0001 Nachfassen erst ab 2026-11-17; AN-2026-0002 gesperrt durch eine Fehlerkarte (Nachfassen nur einmal)');
+      });
+    });
+  }
+
+  // Wochenende als Schalter: true/false (Oberflaeche) und 0/1 (API, alte Config) werden 0/1; GET beschreibt das Feld als Schalter;
+  // die echte Route POST /api/einstellungen liefert scan_sofort mit (Verdrahtung einstellungSofort).
+  async function wochenendeSchalterUndRoute() {
+    // configGeschuetzt stellt synchron zurueck; hier laeuft HTTP dazwischen, also eigener Schnappschuss (Datei schreibt config-kopie weg).
+    const config = require('../../config.json');
+    const vorher = JSON.parse(JSON.stringify(config));
+    try {
+      const sv = require('../../server');
+      assert.strictEqual(sv.EINSTELLUNGEN.flowsWochenende.typ, 'schalter');
+      sv.setzeEinstellungen({ flowsWochenende: true });
+      assert.strictEqual(config.flows.wochenende, 1);
+      sv.setzeEinstellungen({ flowsWochenende: false });
+      assert.strictEqual(config.flows.wochenende, 0);
+      sv.setzeEinstellungen({ flowsWochenende: 1 });
+      assert.strictEqual(config.flows.wochenende, 1, '0/1 per API weiter gueltig');
+      for (const w of ['ja', 2, 'true']) assert.throws(() => sv.setzeEinstellungen({ flowsWochenende: w }), /Wochenende/, JSON.stringify(w));
+      assert.throws(() => sv.setzeEinstellungen({ flowsAbStunde: true }), /Automatische Schreiben ab/, 'nur Schalter nehmen true/false');
+      await new Promise((ok) => sv.server.listen(0, '127.0.0.1', ok));
+      const basis = 'http://127.0.0.1:' + sv.server.address().port;
+      const kopf = { 'content-type': 'application/json', 'sec-fetch-site': 'same-origin', origin: basis };
+      try {
+        const g = await (await fetch(basis + '/api/einstellungen')).json();
+        assert.deepStrictEqual([g.werte.flowsWochenende.typ, g.werte.flowsWochenende.wert], ['schalter', 1]);
+        assert.strictEqual(g.werte.flowsAbStunde.typ, undefined, 'Zahlfeld bleibt Zahlfeld');
+        const r = await fetch(basis + '/api/einstellungen', { method: 'POST', headers: kopf, body: JSON.stringify({ flowsWochenende: false }) });
+        const j = await r.json();
+        assert.strictEqual(r.status, 200, JSON.stringify(j));
+        assert.strictEqual(j.geaendert.flowsWochenende, 0);
+        assert.strictEqual(typeof j.scan_sofort, 'boolean', 'Route ohne scan_sofort');
+        const s = await (await fetch(basis + '/api/einstellungen', { method: 'POST', headers: kopf, body: JSON.stringify({ stundensatz: 90 }) })).json();
+        assert.ok(!('scan_sofort' in s), 'andere Felder: kein Hinweis');
+      } finally { sv.server.closeAllConnections(); await new Promise((ok) => sv.server.close(ok)); }
+    } finally { for (const k of Object.keys(config)) delete config[k]; Object.assign(config, vorher); }
+  }
+
   return [
     ['C11c: Lauf mit zwei Schritten', laufZweiSchritte],
     ['C11c: cond verzweigt', condVerzweigt],
@@ -1747,5 +1873,9 @@ module.exports = ({ dbmod, openDbs, configGeschuetzt }) => {
     ['C11c: R17 Kartentext Nachfassen', r17Kartentext],
     ['C11c: Jetzt ausfuehren ignoriert Uhr (M7)', jetztIgnoriertUhr],
     ['C11c: scanSofort nach Einstellung', scanSofortNachEinstellung],
+    ['C11e: Testadresse in Lauf- und Probelauf-Meldung', testadresseInMeldung],
+    ['C11e: Probelauf sagt nichts gesendet', probelaufHinweis],
+    ['C11e: Nachfassen Gruende im Probelauf', nachfassenGruende],
+    ['C11e: Wochenende als Schalter, Route mit scan_sofort', wochenendeSchalterUndRoute],
   ];
 };

@@ -159,6 +159,9 @@ const state = {
   summary: null,          // /api/summary im gewaehlten Zeitraum
   vorher: null,           // /api/summary der Vorperiode (nur mit Vergleich)
   live: null,
+  // M1: { modus, module, aktiv } aus /api/summary. Vorab der Stand vom letzten Besuch, damit Skripte,
+  // die beim Laden abrufen (sprache.js), kein ausgeschaltetes Modul fragen. liesJson faengt fehlenden Speicher ab.
+  oberflaeche: liesJson('oberflaeche', null),
   zeitraumArt: 'monat',
   frei: {},
   vergleich: true,
@@ -324,12 +327,36 @@ function registriere(name, def) { ANSICHTEN[name] = def; }
 // Ohne gemerkte Wahl oeffnet das Cockpit (Masterplan 3.0, C3).
 const START_STANDARD = 'cockpit';
 
+/* M1 Module (Owner 09.11.2026): welche Seite zu welchem Modul gehoert. Was
+   hier fehlt, ist Kern und immer an. Eine Quelle fuer Navigation, Startseite
+   und Leerzustand; der Server sperrt dieselben Module ueber ihre Routen. */
+const SEITE_MODUL = {
+  zeit: 'zeit',
+  hub: 'abrechnung', angebote: 'abrechnung', rechnungen: 'abrechnung', beleg: 'abrechnung',
+  strecke: 'abrechnung', wiederkehrend: 'abrechnung', steuer: 'abrechnung',
+  kontakte: 'kontakte', postfach: 'kontakte',
+  flows: 'flows',
+  cockpit: 'assistent', briefings: 'assistent', gedaechtnis: 'assistent',
+};
+// Liste der eingeschalteten Module aus /api/summary; null = noch nicht geladen (nichts ausblenden).
+const modulListe = () => (state.oberflaeche && Array.isArray(state.oberflaeche.aktiv) ? state.oberflaeche.aktiv : null);
+function modulAktiv(m) { const l = modulListe(); return !m || !l || l.includes(m); }
+const START_JE_MODUS = { basic: 'analyse', advanced: 'hub', full: 'cockpit', modular: 'cockpit' };
+// Startseite ohne Ziel im Hash: die gemerkte, wenn sichtbar, sonst die der Ansicht.
+function startseite(modus, sichtbar, gemerkt) {
+  if (modus === 'wahl') return 'start';
+  for (const k of [gemerkt, START_JE_MODUS[modus], 'cockpit', 'analyse']) if (k && sichtbar(k)) return k;
+  return 'analyse';
+}
+
 function route() {
   const roh = location.hash.replace(/^#\/?/, '');
   const teile = roh.split('/').filter(Boolean).map((x) => { try { return decodeURIComponent(x); } catch { return x; } });
+  const modus = state.oberflaeche ? state.oberflaeche.modus : 'full';
+  // Erststart (M1): bis eine Ansicht gewaehlt ist, nur die Strecke.
+  if (modus === 'wahl' && ANSICHTEN.start) return { name: 'start', teile: [] };
   if (ANSICHTEN[teile[0]]) return { name: teile[0], teile: teile.slice(1) };
-  const start = lies('start', START_STANDARD);
-  return { name: ANSICHTEN[start] ? start : 'hub', teile: [] };
+  return { name: startseite(modus, (k) => !!ANSICHTEN[k] && modulAktiv(SEITE_MODUL[k]), lies('start', START_STANDARD)), teile: [] };
 }
 
 /* Freie Kachelgroesse aus dem Browser-Speicher: { w, h } in px, jede Achse
@@ -398,9 +425,22 @@ function bewegungAus(roh) {
 
 /* Bereiche spaeterer Bloecke (`block`) stehen nur mit config
    oberflaeche.geplanteBereiche === true in der Navigation (Owner 21.10.):
-   oeffentlich aus, in der eigenen Installation als Erinnerung an. */
-function navSeiten(seiten, geplant) {
-  return seiten.filter((s) => !s.block || geplant === true);
+   oeffentlich aus, in der eigenen Installation als Erinnerung an.
+   M1: `aktiv` (Liste eingeschalteter Module, null = alle) blendet Seiten
+   ausgeschalteter Module aus (SEITE_MODUL). Faellt die erste Seite einer
+   Gruppe weg, traegt die naechste sichtbare den Gruppenkopf. */
+function navSeiten(seiten, geplant, aktiv) {
+  const aus = [];
+  let gruppe = null, gezeigt = null;
+  for (const s of seiten) {
+    if (s.gruppe) gruppe = s.gruppe;
+    if (s.block && geplant !== true) continue;
+    const m = SEITE_MODUL[s.k];
+    if (m && Array.isArray(aktiv) && !aktiv.includes(m)) continue;
+    aus.push(gruppe && gruppe !== gezeigt && s.gruppe !== gruppe ? { ...s, gruppe } : s);
+    gezeigt = gruppe;
+  }
+  return aus;
 }
 
 // Googles vorbefuelltes Termin-Formular (R22, Zwischenloesung statt OAuth): der
@@ -414,4 +454,4 @@ function googleVorlageUrl({ titel, start, ende, details, gaeste }) {
   return 'https://calendar.google.com/calendar/render?' + p.toString().replace(/\+/g, '%20');
 }
 
-if (typeof module !== 'undefined') module.exports = { zeitraum, isoTag, kachelGroesse, verschiebe, betragAus, entwuerfeAus, bewegungAus, navSeiten, googleVorlageUrl };
+if (typeof module !== 'undefined') module.exports = { zeitraum, isoTag, kachelGroesse, verschiebe, betragAus, entwuerfeAus, bewegungAus, navSeiten, googleVorlageUrl, startseite, SEITE_MODUL };

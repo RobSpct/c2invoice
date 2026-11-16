@@ -186,7 +186,26 @@ const ZEITRAUM_LABEL = {
 const proAktiv = () => true;
 // Seiten ohne die noch nicht gebauten Pro-Seiten.
 const geplantSichtbar = () => !!(state.summary && state.summary.config && state.summary.config.geplanteBereiche === true);
-const sichtbareSeiten = () => navSeiten(SEITEN, geplantSichtbar()).filter((s) => !(s.pro && proAktiv()));
+const sichtbareSeiten = () => navSeiten(SEITEN, geplantSichtbar(), modulListe()).filter((s) => !(s.pro && proAktiv()));
+// M1: Name eines Moduls fuer Leerzustand und Hinweise.
+const MODUL_NAMEN = { zeit: 'Zeiterfassung', abrechnung: 'Abrechnung', kontakte: 'Kontakte', flows: 'Flows', assistent: 'Assistent' };
+// Neue Ansicht vom Server: merken (naechster Start ohne Flackern), neu zeichnen
+// und nachladen, was ein gerade eingeschaltetes Modul braucht.
+let ansichtTakt = 0;
+const ansichtNachladen = () => { clearTimeout(ansichtTakt); ansichtTakt = setTimeout(ladeSummary, 300); };
+function oberflaecheGeaendert(ob) {
+  if (!ob || JSON.stringify(ob) === JSON.stringify(state.oberflaeche)) return false;
+  state.oberflaeche = ob;
+  merke('oberflaeche', ob);
+  // Dock zuerst schliessen: zeige() laedt sonst Vorschlaege eines ausgeschalteten Assistenten.
+  if (!modulAktiv('assistent') && cira.dockOffen) oeffneDock(false);
+  // Abschnitte, die mit 409 scheiterten, nach dem Einschalten neu laden.
+  if (typeof ez !== 'undefined') { ez.s.fehler = null; ez.e.fehler = null; }
+  zeige();
+  ladeBelege();
+  if (modulAktiv('assistent')) { ladeCira(); sprache.lade(); }
+  return true;
+}
 
 /* ---------- Zeitraum ---------- */
 state.zeitraumArt = lies('zeitraum', 'monat');
@@ -226,6 +245,8 @@ async function ladeSummary() {
     const navVorher = sichtbareSeiten().length;
     state.summary = jetzt;
     if (sichtbareSeiten().length !== navVorher) zeichneLeiste();
+    // Eigenes try: ein Fehler beim Umbau ist kein "Server nicht erreichbar".
+    try { oberflaecheGeaendert(jetzt && jetzt.config && jetzt.config.oberflaeche); } catch (e) { console.error('Ansicht umbauen:', e); }
     // Erster Tag mit Daten: Beginn von "Gesamt". Aendert er sich, laedt der neue Schluessel nach.
     if (jetzt && jetzt.erster_tag && jetzt.erster_tag !== state.ersterTag) {
       state.ersterTag = jetzt.erster_tag; merke('erster.tag', jetzt.erster_tag);
@@ -245,7 +266,9 @@ async function ladeSummary() {
 async function ladeLive() {
   // Zeit-Hinweise (Blocker-Beginn) im selben Takt; ein Fehler dort laesst den alten Stand stehen.
   // catch hinter then: auch ein Fehler beim Melden darf den Live-Takt nicht reissen.
-  const hw = hole('/api/zeit-hinweise').then((r) => { state.zeitHinweise = r.hinweise; state.fehler.zeitHinweise = null; zHinweiseMelden(); })
+  // M1: ohne Modul Zeit keine Blocker-Hinweise (die Route antwortet 409).
+  if (!modulAktiv('zeit')) state.zeitHinweise = null;
+  const hw = !modulAktiv('zeit') ? Promise.resolve() : hole('/api/zeit-hinweise').then((r) => { state.zeitHinweise = r.hinweise; state.fehler.zeitHinweise = null; zHinweiseMelden(); })
     .catch((e) => { state.fehler.zeitHinweise = e.message; console.error('/api/zeit-hinweise:', e.message); });
   // Badges der Navigation (Shell v2): ein Fehler laesst den alten Stand stehen.
   pruefeKopplung(false);
@@ -260,7 +283,8 @@ async function ladeLive() {
   zeichneMiniTimer();
   zeichneKopf();
   const a = ANSICHTEN[route().name];
-  if (a && a.live) a.live();
+  // M1: Seite eines ausgeschalteten Moduls zeigt den Leerzustand und laedt nichts nach.
+  if (a && a.live && modulAktiv(SEITE_MODUL[route().name])) a.live();
 }
 
 // Dienst-Status im Kopf. Seltener als Live: jede Pruefung darf bis 4 s dauern.
@@ -274,12 +298,15 @@ async function ladeDienste() {
 
 // Belege und Kontakte fuer Suche, Hinweise und Hub. Selten geaendert.
 async function ladeBelege() {
-  const nichts = (pfad) => (e) => { console.error(pfad + ':', e.message); return null; };
+  // 409 = Modul gerade ausgeschaltet (veralteter Stand); der fetch-Wrapper laedt die Ansicht nach.
+  const nichts = (pfad) => (e) => { if (e.status !== 409) console.error(pfad + ':', e.message); return null; };
+  // M1: ausgeschaltetes Modul = leere Liste, nicht "nicht geladen" (die Route antwortet 409).
+  const holeWenn = (m, pfad, feld) => (modulAktiv(m) ? hole(pfad).catch(nichts(pfad)) : Promise.resolve({ [feld]: [] }));
   const [r, a, k, l] = await Promise.all([
-    hole('/api/rechnungen').catch(nichts('/api/rechnungen')),
-    hole('/api/angebote').catch(nichts('/api/angebote')),
-    hole('/api/kontakte').catch(nichts('/api/kontakte')),
-    hole('/api/leads').catch(nichts('/api/leads')),
+    holeWenn('abrechnung', '/api/rechnungen', 'rechnungen'),
+    holeWenn('abrechnung', '/api/angebote', 'angebote'),
+    holeWenn('kontakte', '/api/kontakte', 'kontakte'),
+    holeWenn('kontakte', '/api/leads', 'leads'),
   ]);
   // Ohne ersten Stand bleibt die Liste null: "nicht geladen" ist etwas anderes
   // als "keine Rechnungen". Ein spaeterer Fehler behaelt den alten Stand.
@@ -345,11 +372,13 @@ function zeichneLeiste() {
     '<div class="mini-timer" id="mini-timer" hidden></div>' +
     // Cira-Karte (Handoff §4.1.4). Zeile 1 oeffnet und schliesst das Dock (§5.6).
     '<div class="cira-karte">' +
+      // M1: ohne Modul Assistent kein Orb und kein Dock, Mini-Live bleibt.
+      (!modulAktiv('assistent') ? '' :
       '<button type="button" class="cira-kopf" data-aktion="dock" aria-expanded="' + cira.dockOffen + '" aria-controls="dock" title="' + esc(CIRA_NAME + ' · Strg+Leertaste') + '">' +
         '<cira-orb class="orb-mini" scale="1.2" mode="' + cira.modus + '" state="auto" aria-hidden="true"></cira-orb>' +
         '<span class="wer nur-breit"><b>' + esc(CIRA_NAME) + '</b>' +
           (cira.dockOffen ? '<span>' + esc(uebersetze('Chat offen')) + '</span>' : '<span data-cira-modus>' + esc(uebersetze(CIRA_MODI[cira.modus])) + '</span>') + '</span>' +
-        '<span class="taste nur-breit" aria-hidden="true">Strg+␣</span></button>' +
+        '<span class="taste nur-breit" aria-hidden="true">Strg+␣</span></button>') +
       '<a class="mini-live nur-breit" id="mini-live" href="#/live"></a>' +
     '</div>';
   document.getElementById('leiste').innerHTML = html;
@@ -362,7 +391,8 @@ function zeichneLeiste() {
 // Laufender Timer ueber der Mini-Live-Karte, auf jeder Seite; Stopp bucht (zeit.js).
 function zeichneMiniTimer() {
   const el = document.getElementById('mini-timer');
-  const t = state.live && state.live.timer;
+  // M1: ohne Zeiterfassung kein Timer (Zeit ausschalten verweigert der Server, solange einer laeuft).
+  const t = modulAktiv('zeit') && state.live && state.live.timer;
   const nav = document.getElementById('nav-zeit');
   if (nav) nav.hidden = !t;
   if (el) {
@@ -603,6 +633,7 @@ const EINSTELLUNG_SUCHE = [
   ['Positionsvorlagen', 'Positionsvorlagen', 'vorlagen'], ['IBAN', 'Stammdaten', 'stammdaten'], ['Steuernummer', 'Stammdaten', 'stammdaten'],
   ['Zahlungsziel', 'Stammdaten', 'stammdaten'], ['Kleinunternehmer', 'Stammdaten', 'stammdaten'], ['Lokale Modelle', 'Lokale Modelle', 'lokal'],
   ['Bewegung reduzieren', 'Darstellung', 'darstellung'], ['CSV-Export', 'Daten & Export', 'daten'],
+  ['Ansicht und Module', 'Module', 'module'],
 ];
 const falte = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 const istAbgerechnet = (ticket) => {
@@ -621,15 +652,16 @@ function suchErgebnisse(q) {
     ['⇄', 'Zeitraum: Monat', 'globaler Zeitraum', () => setzeZeitraum('monat')],
     ['⇄', 'Zeitraum: Quartal', 'globaler Zeitraum', () => setzeZeitraum('quartal')],
     ['⇄', 'Zeitraum: Jahr', 'globaler Zeitraum', () => setzeZeitraum('jahr')],
-    ['+', 'Rechnung erstellen', 'Beleg-Editor', () => geheZu('beleg/neu?art=rechnung')],
-    ['+', 'Angebot erstellen', 'Beleg-Editor', () => geheZu('beleg/neu?art=angebot')],
-    ['▶', 'Timer starten', 'Zeiterfassung', () => zeitPicker('timer')],
-    ['+', 'Zeit nachtragen', 'Zeiterfassung', () => zeitNachtrag()],
+    ['+', 'Rechnung erstellen', 'Beleg-Editor', () => geheZu('beleg/neu?art=rechnung'), 'abrechnung'],
+    ['+', 'Angebot erstellen', 'Beleg-Editor', () => geheZu('beleg/neu?art=angebot'), 'abrechnung'],
+    ['▶', 'Timer starten', 'Zeiterfassung', () => zeitPicker('timer'), 'zeit'],
+    ['+', 'Zeit nachtragen', 'Zeiterfassung', () => zeitNachtrag(), 'zeit'],
     ['⇄', 'Sprache wechseln', 'Deutsch / English', () => setzeSprache(istDE() ? 'en' : 'de')],
-  ];
+  ].filter((b) => modulAktiv(b[4]));
   // Leeres Feld: zuletzt Geoeffnetes, sonst die juengsten Vorgaenge — dazu die Befehle.
   if (!qq && !nur) {
-    const gemerkt = [].concat(liesJson('suche.zuletzt', [])).filter((r) => r && typeof r.ziel === 'string');
+    // M1: Ziele in ausgeschalteten Modulen nicht anbieten.
+    const gemerkt = [].concat(liesJson('suche.zuletzt', [])).filter((r) => r && typeof r.ziel === 'string' && modulAktiv(SEITE_MODUL[r.ziel.split(/[/?]/)[0]]));
     const zuletzt = gemerkt.length ? gemerkt.map((r) => ({ ...r, tu: () => geheZu(r.ziel) }))
       : (S.tickets || []).slice().sort((a, b) => String(b.last_day).localeCompare(String(a.last_day))).slice(0, 3).map((t) => ({
         icon: '#', t: t.ticket, sub: t.project || '', meta: uebersetze('Vorgang'), mono: true, tu: () => geheZu('vorgaenge/' + encodeURIComponent(t.ticket)),
@@ -666,7 +698,7 @@ function suchErgebnisse(q) {
         meta: uebersetze(l.status), tu: () => geheZu('kontakte/lead/' + l.id),
       })));
       if (ko.length) G.push(['Kontakte', ko]);
-      const ei = EINSTELLUNG_SUCHE.filter(([l, b]) => passt(uebersetze(l), uebersetze(b), l)).slice(0, 4).map(([l, b, id]) => ({
+      const ei = EINSTELLUNG_SUCHE.filter(([l, b, id]) => abschnittSichtbar(id) && passt(uebersetze(l), uebersetze(b), l)).slice(0, 4).map(([l, b, id]) => ({
         icon: '⚙', t: uebersetze(l), sub: uebersetze(b), meta: uebersetze('Einstellung'), tu: () => geheZu('einstellungen/' + id),
       }));
       if (ei.length) G.push(['Einstellungen', ei]);
@@ -767,6 +799,7 @@ function kontextText() {
   return cira.kontext && cira.kontext.titel ? name + ' · ' + cira.kontext.titel : name;
 }
 function oeffneDock(an = !cira.dockOffen) {
+  if (an && !modulAktiv('assistent')) return;   // M1: Cira ist ausgeschaltet
   // Auf dem Cockpit gibt es kein Dock (README §5.6): Strg+Leertaste fuehrt in dessen Eingabe.
   if (an && route().name === 'cockpit') { const q = document.getElementById('ck-q'); if (q) q.focus(); an = false; }
   cira.dockOffen = an;
@@ -972,6 +1005,7 @@ function pruefeNacht() {
   if (nacht !== cira.nacht) { cira.nacht = nacht; ciraModus(); }
 }
 async function ladeCira() {
+  if (!modulAktiv('assistent')) return;   // M1
   try {
     const r = await hole('/api/cira/einstellungen');
     if (r.name && r.name !== CIRA_NAME) { CIRA_NAME = r.name; zeichneLeiste(); }
@@ -1181,7 +1215,9 @@ function zeige() {
     // Die Farbe einer Szene (Marge, Ueberfaellig) gilt nur, solange sie offen ist.
     if (cira.zustand !== 'auto') { cira.zustand = 'auto'; ciraModus(); }
     // Das Cockpit fuellt den Bereich ohne Rand und ersetzt das Dock.
-    document.getElementById('inhalt').classList.toggle('vollbild', ['cockpit', 'sitzungen', 'gedaechtnis', 'briefings', 'flows', 'beleg'].includes(r.name));
+    document.getElementById('inhalt').classList.toggle('vollbild', ['cockpit', 'sitzungen', 'gedaechtnis', 'briefings', 'flows', 'beleg', 'start'].includes(r.name));
+    // Erststart-Strecke (M1): ohne Leiste und Kopf, nur die Wahl.
+    document.getElementById('rahmen').classList.toggle('erststart', r.name === 'start');
     if (r.name !== 'cockpit') kiosk(false);
     if (r.name === 'cockpit' && cira.dockOffen) oeffneDock(false);
   }
@@ -1197,7 +1233,7 @@ function zeige() {
   }
   // Titel vor dem Zeichnen: Seiten ohne Eintrag in SEITEN (Beleg-Editor) setzen ihren eigenen.
   const s = kopfSeite(r.name);
-  document.title = zTitel((s ? seitenName(s) : uebersetze('Finanzen')) + ' · c2invoice');
+  document.title = zTitel((s ? seitenName(s) : uebersetze(r.name === 'start' ? 'Willkommen' : 'Finanzen')) + ' · c2invoice');
   zeichneAnsicht(neu);
   if (cira.dockOffen) {
     zeichneDock();
@@ -1217,6 +1253,14 @@ function zeichneAnsicht(neu) {
   if (ziehtGerade) { verpasst = !!verpasst || !!neu; return; }
   const r = route();
   const a = ANSICHTEN[r.name];
+  const m = SEITE_MODUL[r.name];
+  // M1: Ziel in einem ausgeschalteten Modul (Link, Lesezeichen, Querverweis) zeigt einen ehrlichen Leerzustand.
+  if (a && m && !modulAktiv(m)) {
+    document.getElementById('ansicht').innerHTML = leer('liste', fuelle('Modul {m} ist ausgeschaltet', { m: uebersetze(MODUL_NAMEN[m]) }),
+      'Die Daten bleiben erhalten. Einschalten unter Einstellungen → Module.',
+      '<a class="knopf primaer" href="#/einstellungen/module">' + esc(uebersetze('Module öffnen')) + '</a>');
+    return;
+  }
   if (a) a.zeichne(document.getElementById('ansicht'), r.teile, !!neu);
 }
 
@@ -1313,6 +1357,8 @@ function start() {
   window.fetch = async (...args) => {
     const r = await echtesFetch(...args);
     if (r.status === 401 && r.headers.get('x-c2invoice-kopplung')) { state.kopplung = false; zeichneBanner(); zeigeKopplung(); }
+    // M1: 409 mit Modul = dieser Tab kennt eine alte Ansicht (anderer Tab, Datei geaendert): Stand nachladen.
+    if (r.status === 409) r.clone().json().then((j) => { if (j && j.modul) ansichtNachladen(); }, () => {});
     return r;
   };
   pruefeKopplung();

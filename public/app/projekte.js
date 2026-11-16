@@ -45,6 +45,11 @@ const PJ_SPALTEN = [
   ['aktiv', 'Aktiv h', true, 'im Zeitraum'], ['api', 'API USD', true, 'im Zeitraum'], ['wert', 'Arbeitswert', true, 'im Zeitraum'], ['verlauf', 'Verlauf', null, 'im Zeitraum'],
   ['offen_n', 'Aufgaben offen', true, 'aktueller Stand'], ['abrechnen', '', null],
 ];
+// M1: Spalten und Filter ausgeschalteter Module fehlen (Kunde ohne Kontakte, Konto und Rechnungen ohne Abrechnung).
+const PJ_SPALTE_MODUL = { kunde: 'kontakte', berechnet_h: 'abrechnung', offen_h: 'abrechnung', rechnungen: 'abrechnung', abrechnen: 'abrechnung' };
+const pjSpalten = () => PJ_SPALTEN.filter(([key]) => modulAktiv(PJ_SPALTE_MODUL[key]));
+const PJ_FILTER = [['alle', 'alle'], ['offen', 'mit offenen Stunden', 'abrechnung'], ['ohnekunde', 'ohne Kunde', 'kontakte']];
+const pjFilter = () => (PJ_FILTER.some((f) => f[0] === pj.filter && modulAktiv(f[2])) ? pj.filter : 'alle');
 if (!PJ_SPALTEN.some(([key, , zahl]) => key === pj.sort.k && zahl != null) || ![1, -1].includes(pj.sort.dir)) pj.sort = { k: 'offen_h', dir: -1 };
 if (!['alle', 'offen', 'ohnekunde'].includes(pj.filter)) pj.filter = 'alle';
 
@@ -64,8 +69,8 @@ function pjAufgaben(name, e) {
 // Abrechnen bis zum letzten Arbeitstag des Kontos: der Rechnungskopf verkuerzt `to` nie, ein spaeteres stuende als
 // leistung_bis auf der unveraenderlichen Rechnung. Das Konto bis dorthin ist dieselbe Zahl wie die angezeigte.
 // from nie hinter to (ISO-Tage, reiner Textvergleich). Die Stunden belegt der Editor selbst vor.
-const pjAbrechnen = (name, k, kontaktId, z) => '<a class="knopf klein" href="#/beleg/neu?' + esc(abfrage({ art: 'rechnung', projekt: name, from: z.von > k.letzter_tag ? k.letzter_tag : z.von, to: k.letzter_tag, quelle: 'projekte', kontakt: kontaktId })) +
-  '" title="' + esc(uebersetze('Projekt in Rechnung stellen')) + '">' + esc(uebersetze('Abrechnen')) + '</a>';
+const pjAbrechnen = (name, k, kontaktId, z) => (!modulAktiv('abrechnung') ? '' : '<a class="knopf klein" href="#/beleg/neu?' + esc(abfrage({ art: 'rechnung', projekt: name, from: z.von > k.letzter_tag ? k.letzter_tag : z.von, to: k.letzter_tag, quelle: 'projekte', kontakt: kontaktId })) +
+  '" title="' + esc(uebersetze('Projekt in Rechnung stellen')) + '">' + esc(uebersetze('Abrechnen')) + '</a>');
 
 function pjNummern(k) {
   const n = (k && k.nummern) || [];
@@ -77,7 +82,9 @@ function pjNummern(k) {
 
 /* ---------- Detailseite #/projekte/p/<name>/<reiter> ----------
    Alles kommt aus /api/projekt (Zeitraum: von|bis im Schluessel). Summen bildet nur der Server. */
-const PJ_DREITER = [['vorgaenge', 'Vorgänge'], ['aufgaben', 'Aufgaben'], ['zeit', 'Zeit ohne Vorgang'], ['rechnungen', 'Rechnungen'], ['kunde', 'Kunde & Satz']];
+const PJ_DREITER_ALLE = [['vorgaenge', 'Vorgänge'], ['aufgaben', 'Aufgaben'], ['zeit', 'Zeit ohne Vorgang'], ['rechnungen', 'Rechnungen', 'abrechnung'], ['kunde', 'Kunde & Satz']];
+// M1: Reiter ausgeschalteter Module fehlen (Rechnungen ohne Abrechnung).
+const pjDReiter = () => PJ_DREITER_ALLE.filter((r) => modulAktiv(r[2]));
 
 function pjDetailKopf(d, name, z) {
   const c = (state.summary && state.summary.config) || {};
@@ -107,6 +114,12 @@ function pjKonto(d) {
   const k = d.konto;
   if (!k) return '<div class="karte weit"><span class="hinweis">' + esc(uebersetze('Werkzeugprojekt: kein Konto.')) + '</span></div>';
   const kachel = (l, v) => '<div><small>' + esc(uebersetze(l)) + '</small><b>' + esc(hrs(v)) + '</b></div>';
+  // M1: ohne Abrechnung gibt es nichts Berechnetes oder Offenes, nur die geleistete Zeit.
+  if (!modulAktiv('abrechnung')) {
+    return '<div class="karte weit"><div class="karten-kopf"><h2 class="titel-klein">' + esc(uebersetze('Konto')) + '</h2>' +
+      '<span class="hinweis">' + esc(uebersetze('Stunden ohne Vorgang, bis Zeitraumende')) + '</span></div>' +
+      '<div class="bd-kacheln">' + kachel('geleistet h', k.geleistet_h) + '</div></div>';
+  }
   return '<div class="karte weit"><div class="karten-kopf"><h2 class="titel-klein">' + esc(uebersetze('Konto')) + '</h2>' +
       '<span class="hinweis">' + esc(uebersetze('Stunden ohne Vorgang, bis Zeitraumende')) + '</span></div>' +
     '<div class="bd-kacheln' + (d.konto_bis_heute ? ' vier' : '') + '">' + kachel('geleistet h', k.geleistet_h) + kachel('berechnet h', k.berechnet_h) + kachel('offen h', k.offen_h) +
@@ -167,7 +180,8 @@ function pjKundeKarte(d) {
   ladeSaetze();
   const name = d.name, k = d.kontakt;
   const liste = (state.kontakte || []).slice().sort((a, b) => kontaktName(a).localeCompare(kontaktName(b), istDE() ? 'de' : 'en'));
-  const wahl = state.kontakte
+  // M1: ohne Modul Kontakte keine Kundenwahl (POST /api/kontakt antwortet 409), Satz und Zeitmodell bleiben.
+  const wahl = !modulAktiv('kontakte') ? (k ? '<p class="dim">' + esc(uebersetze('Kunde')) + ': ' + esc(kontaktName(k)) + '</p>' : '') : state.kontakte
     ? '<p><label>' + esc(uebersetze('Kunde')) + ' <select class="eingabe" id="pj-kunde-wahl" aria-label="' + esc(uebersetze('Kunde') + ' · ' + name) + '">' +
       '<option value="">' + esc(uebersetze('Kein Kunde')) + '</option>' +
       liste.map((x) => '<option value="' + esc(String(x.id)) + '"' + (k && k.id === x.id ? ' selected' : '') + '>' + esc(kontaktName(x)) + '</option>').join('') + '</select></label></p>'
@@ -215,7 +229,7 @@ function zeichneProjektDetail(w, name, wunsch) {
   const warte = bereichWarte(e);
   if (warte) { w.innerHTML = '<div class="karte weit">' + zurueck + '</div>' + warte; return; }
   const d = e.d;
-  const gueltig = (k) => PJ_DREITER.some(([x]) => x === k);
+  const gueltig = (k) => pjDReiter().some(([x]) => x === k);
   if (gueltig(wunsch)) merke('projekte.reiter', wunsch);
   const reiter = gueltig(wunsch) ? wunsch : (gueltig(lies('projekte.reiter', '')) ? lies('projekte.reiter', '') : 'vorgaenge');
   // Steht das Board des Reiters schon, ersetzt der Takt der Shell nichts (sonst bricht Ziehen ab): nur nachladen.
@@ -228,7 +242,7 @@ function zeichneProjektDetail(w, name, wunsch) {
   const basis = '#/projekte/p/' + encodeURIComponent(name) + '/';
   w.innerHTML = pjDetailKopf(d, name, z) + pjKonto(d) +
     '<div class="abschnitt-kopf"><div class="links"><div class="segment ana-reiter" role="tablist">' +
-    PJ_DREITER.map(([k, l]) => '<a role="tab" href="' + basis + k + '" aria-selected="' + (k === reiter) + '"' + (k === reiter ? ' aria-current="page"' : '') + '>' + esc(uebersetze(l)) + '</a>').join('') +
+    pjDReiter().map(([k, l]) => '<a role="tab" href="' + basis + k + '" aria-selected="' + (k === reiter) + '"' + (k === reiter ? ' aria-current="page"' : '') + '>' + esc(uebersetze(l)) + '</a>').join('') +
     '</div></div></div>' + pjReiterInhalt(d, reiter);
   if (reiter === 'aufgaben' && d.arbeitsbereich) bdStart(document.getElementById('bd-wurzel'), d.arbeitsbereich.name);
   const pane = w.querySelector('#pj-kunde[data-projekt]');
@@ -281,8 +295,9 @@ function zeichneProjekte(w, teile) {
     alle: () => true,
     offen: (r) => r.k && r.k.offen_h > 0,
     ohnekunde: (r) => !r.p.overhead && !r.p.kontakt,
-  }[pj.filter];
-  const { k: sk, dir } = pj.sort;
+  }[pjFilter()];
+  // Sortierung nach einer ausgeblendeten Spalte faellt auf geleistet h zurueck.
+  const { k: sk, dir } = pjSpalten().some(([key, , zahl]) => key === pj.sort.k && zahl != null) ? pj.sort : { k: 'geleistet_h', dir: -1 };
   const gezeigt = zeilen.filter(passt).sort((a, b) => {
     if (a.p.overhead !== b.p.overhead) return a.p.overhead ? 1 : -1;   // Werkzeug immer unten
     const xv = a[sk], yv = b[sk];
@@ -292,7 +307,7 @@ function zeichneProjekte(w, teile) {
     return (typeof xv === 'string' ? xv.localeCompare(yv, 'de') : xv - yv) * dir || a.p.name.localeCompare(b.p.name, 'de');
   });
 
-  const kopf = PJ_SPALTEN.map(([key, label, zahl, unter]) => {
+  const kopf = pjSpalten().map(([key, label, zahl, unter]) => {
     if (zahl == null) return '<th scope="col">' + (label ? esc(uebersetze(label)) + (unter ? '<span class="unter">' + esc(uebersetze(unter)) + '</span>' : '') : '<span class="nur-sr">' + esc(uebersetze('Abrechnen')) + '</span>') + '</th>';
     const aktiv = sk === key;
     return '<th scope="col"' + (zahl ? ' class="z"' : '') + ' aria-sort="' + (aktiv ? (dir > 0 ? 'ascending' : 'descending') : 'none') + '">' +
@@ -305,27 +320,31 @@ function zeichneProjekte(w, teile) {
     const { p, k, t } = r;
     const a = pjAufgaben(p.name, eb);
     const abr = !p.overhead && k && k.offen_h > 0 && k.letzter_tag ? pjAbrechnen(p.name, k, p.kontakt ? p.kontakt.id : '', z) : '';
-    return '<tr class="klickbar' + (p.overhead ? ' gedaempft' : '') + '" data-aktion="pj-oeffnen" data-wert="' + esc(p.name) + '">' +
-      '<td class="ana-name"><span class="bd-marke"' + (p.arbeitsbereich && p.arbeitsbereich.farbe ? ' style="--ab-farbe:' + esc(p.arbeitsbereich.farbe) + '"' : '') + '>' +
+    const zelle = {
+      name: '<td class="ana-name"><span class="bd-marke"' + (p.arbeitsbereich && p.arbeitsbereich.farbe ? ' style="--ab-farbe:' + esc(p.arbeitsbereich.farbe) + '"' : '') + '>' +
         esc((p.arbeitsbereich && p.arbeitsbereich.kuerzel) || p.name.slice(0, 3).toUpperCase()) + '</span> ' +
         '<a href="#/projekte/p/' + encodeURIComponent(p.name) + '">' + esc(p.name) + '</a>' +
         (p.arbeitsbereich && p.arbeitsbereich.jiraProjekt ? ' <span class="pille">' + esc(p.arbeitsbereich.jiraProjekt) + '</span>' : '') +
-        (p.overhead ? ' <span class="pille">' + esc(uebersetze('Werkzeug')) + '</span>' : '') + '</td>' +
-      '<td class="dim ell">' + esc(p.overhead ? '–' : r.kunde || '–') + '</td>' +
-      '<td class="z">' + h(r.geleistet_h) + '</td><td class="z">' + h(r.berechnet_h) + '</td>' +
-      '<td class="z"' + (k && k.hinweis ? ' title="' + esc(k.hinweis) + '"' : '') + '>' + (k && k.ueber_h > 0 ? '<span class="schlecht">' : '<span>') + h(r.offen_h) + '</span></td>' +
-      '<td class="nowrap">' + (p.overhead ? '<span class="faint">–</span>' : pjNummern(k)) + '</td>' +
-      '<td class="z">' + h(r.aktiv) + '</td><td class="z akzent">' + (r.api == null ? '<span class="faint">–</span>' : nf2.format(r.api)) + '</td>' +
-      '<td class="z">' + (r.wert == null ? '<span class="faint">–</span>' : nf2.format(r.wert)) + '</td>' +
-      '<td>' + (t ? projektSpark(verlauf[p.name], tage) : '<span class="faint">–</span>') + '</td>' +
-      '<td class="z"' + (a.titel ? ' title="' + esc(a.titel) + '"' : '') + '>' + (a.n == null ? '<span class="faint">' + esc(a.text) + '</span>' : esc(a.text)) + '</td>' +
-      '<td class="z">' + abr + '</td></tr>';
+        (p.overhead ? ' <span class="pille">' + esc(uebersetze('Werkzeug')) + '</span>' : '') + '</td>',
+      kunde: '<td class="dim ell">' + esc(p.overhead ? '–' : r.kunde || '–') + '</td>',
+      geleistet_h: '<td class="z">' + h(r.geleistet_h) + '</td>', berechnet_h: '<td class="z">' + h(r.berechnet_h) + '</td>',
+      offen_h: '<td class="z"' + (k && k.hinweis ? ' title="' + esc(k.hinweis) + '"' : '') + '>' + (k && k.ueber_h > 0 ? '<span class="schlecht">' : '<span>') + h(r.offen_h) + '</span></td>',
+      rechnungen: '<td class="nowrap">' + (p.overhead ? '<span class="faint">–</span>' : pjNummern(k)) + '</td>',
+      aktiv: '<td class="z">' + h(r.aktiv) + '</td>', api: '<td class="z akzent">' + (r.api == null ? '<span class="faint">–</span>' : nf2.format(r.api)) + '</td>',
+      wert: '<td class="z">' + (r.wert == null ? '<span class="faint">–</span>' : nf2.format(r.wert)) + '</td>',
+      verlauf: '<td>' + (t ? projektSpark(verlauf[p.name], tage) : '<span class="faint">–</span>') + '</td>',
+      offen_n: '<td class="z"' + (a.titel ? ' title="' + esc(a.titel) + '"' : '') + '>' + (a.n == null ? '<span class="faint">' + esc(a.text) + '</span>' : esc(a.text)) + '</td>',
+      abrechnen: '<td class="z">' + abr + '</td>',
+    };
+    // Dieselbe Spaltenliste wie der Kopf, sonst verrutschen die Zellen.
+    return '<tr class="klickbar' + (p.overhead ? ' gedaempft' : '') + '" data-aktion="pj-oeffnen" data-wert="' + esc(p.name) + '">' +
+      pjSpalten().map(([key]) => zelle[key]).join('') + '</tr>';
   };
 
   w.innerHTML = pjReiter('') + '<div class="karte weit">' +
     '<div class="karten-kopf"><h2 class="titel-klein">' + num(liste.length) + ' ' + esc(uebersetze('Projekte')) + '</h2>' +
       '<span class="hinweis">' + esc(uebersetze('Konto: Stunden ohne Vorgang bis heute. Aktiv h, API USD und Arbeitswert: alle Arbeit im gewählten Zeitraum.')) + '</span>' +
-      '<span class="rechts">' + segment('pj-filter', [['alle', 'alle'], ['offen', 'mit offenen Stunden'], ['ohnekunde', 'ohne Kunde']], pj.filter, 'Filter') + '</span></div>' +
+      '<span class="rechts">' + (PJ_FILTER.filter((f) => modulAktiv(f[2])).length > 1 ? segment('pj-filter', PJ_FILTER.filter((f) => modulAktiv(f[2])), pjFilter(), 'Filter') : '') + '</span></div>' +
     (eb.fehler ? '<p class="hinweis warn" role="alert">' + esc(uebersetze('Aufgaben nicht geladen') + ': ' + eb.fehler) + '</p>' : '') +
     (!liste.length ? leer('liste', 'Noch keine Projekte', 'Sobald Arbeit einem Projekt zugeordnet ist, erscheint es hier.')
       : !gezeigt.length ? leer('liste', 'Kein Projekt passt zum Filter')

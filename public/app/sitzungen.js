@@ -369,8 +369,9 @@ function szMitteHtml(d) {
   return '<section class="sz-mitte" aria-label="' + esc(d.titel || d.arbeitsbereich || d.projekt || d.id) + '">' + szStatusleiste(d) +
     (hinweise || fragen ? '<div class="sz-oben">' + hinweise + fragen + '</div>' : '') +
     (szAnsicht() === 'karten' ? szKartenHtml(d) : szTerminalHtml(d)) + eingabe +
-    '<div class="sz-cira"><cira-orb class="orb-mini" scale="1.2" mode="' + esc(typeof cira !== 'undefined' ? cira.modus : '') + '" state="session" aria-hidden="true"></cira-orb>' +
-      '<button type="button" class="knopf klein geist" data-aktion="sz-cira">' + esc(uebersetze('Cira fragen')) + '</button><span class="mono leise">' + esc(uebersetze('Strg+Leertaste')) + '</span></div>' +
+    // M1: ohne Assistent kein Cira-Streifen.
+    (!modulAktiv('assistent') ? '' : '<div class="sz-cira"><cira-orb class="orb-mini" scale="1.2" mode="' + esc(typeof cira !== 'undefined' ? cira.modus : '') + '" state="session" aria-hidden="true"></cira-orb>' +
+      '<button type="button" class="knopf klein geist" data-aktion="sz-cira">' + esc(uebersetze('Cira fragen')) + '</button><span class="mono leise">' + esc(uebersetze('Strg+Leertaste')) + '</span></div>') +
   '</section>';
 }
 
@@ -429,7 +430,8 @@ function szAktionenHtml(d) {
   const pos = innen('Als Position in Rechnungsentwurf', 'direkt');
   return '<div class="sz-block"><span class="sz-label">' + esc(uebersetze('Aus dieser Sitzung')) + '</span>' +
     zeile(innen('Zusammenfassung ins Vorgangs-Log', 'lokal'), '<button type="button" class="sz-aktion" data-aktion="sz-zusammenfassung" data-wert="' + esc(d.id) + '">' + innen('Zusammenfassung ins Vorgangs-Log', 'lokal') + '</button>', d.vorgang ? null : 'Erst einem Vorgang zuordnen.') +
-    (d.vorgang && /^\d{4}-\d{2}-\d{2}$/.test(tag)
+    // M1: ohne Modul Abrechnung keine Position in einen Rechnungsentwurf.
+    (!modulAktiv('abrechnung') ? '' : d.vorgang && /^\d{4}-\d{2}-\d{2}$/.test(tag)
       ? '<a class="sz-aktion" href="#/beleg/neu?art=rechnung&tickets=' + encodeURIComponent(d.vorgang) + '&from=' + tag + '&to=' + tag + '">' + pos + '</a>'
       : zeile(pos, '', 'Erst einem Vorgang zuordnen.')) +
     zeile(innen('Übergabe für nächste Sitzung', 'Claude', 'akzent'), '<button type="button" class="sz-aktion" data-aktion="sz-uebergabe" data-wert="' + esc(d.id) + '">' + innen('Übergabe für nächste Sitzung', 'Claude', 'akzent') + '</button>', eigen && d.live ? null : 'Nur in einer laufenden Sitzung aus c2invoice.') +

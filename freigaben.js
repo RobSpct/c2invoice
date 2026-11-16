@@ -24,7 +24,11 @@ function protokoll(db, { quelle, art, objekt = null, vorher, nachher }) {
     .run(jetzt(), quelle, art, objekt, alsJson(vorher), alsJson(nachher));
 }
 
-const offenAnzahl = (db) => db.prepare("SELECT COUNT(*) AS n FROM freigabe WHERE status = 'offen'").get().n;
+// M1: Arten ausgeschalteter Module. Der Server setzt die Pruefung (Art -> Modul, server.js),
+// die Freigaben kennen keine Module. Liefert einen Fehler (Status 409) oder null.
+let gesperrt = () => null;
+function setzeSperre(fn) { gesperrt = typeof fn === 'function' ? fn : () => null; }
+const offenAnzahl = (db) => db.prepare("SELECT art FROM freigabe WHERE status = 'offen'").all().filter((r) => !gesperrt(r.art)).length;
 const meldeZaehler = (db) => sende('zaehler', { freigaben: offenAnzahl(db) });
 
 function zeile(r) {
@@ -85,7 +89,7 @@ function liste(db, { status = 'offen' } = {}) {
   const alle = status === 'alle';
   if (!alle && !['offen', 'erledigt', 'abgelehnt', 'fehler'].includes(status)) throw new Error('Status: offen, erledigt, abgelehnt, fehler oder alle.');
   return db.prepare(`SELECT * FROM freigabe ${alle ? '' : 'WHERE status = ?'} ORDER BY id DESC LIMIT 200`)
-    .all(...(alle ? [] : [status])).map(zeile);
+    .all(...(alle ? [] : [status])).filter((r) => !gesperrt(r.art)).map(zeile);
 }
 
 // wahl: ok | ablehnen. Der Statuswechsel offen -> laeuft ist die Sperre gegen
@@ -98,6 +102,9 @@ async function entscheide(db, id, { wahl, hinweis } = {}) {
   const f = db.prepare('SELECT * FROM freigabe WHERE id = ?').get(id);
   if (!f) throw new Error('Freigabe unbekannt.');
   const ausfuehren = REGISTRY.get(f.art);
+  // M1: eine alte Karte eines ausgeschalteten Moduls fuehrt nichts aus; Ablehnen bleibt moeglich.
+  const aus = wahl === 'ok' ? gesperrt(f.art) : null;
+  if (aus) throw aus;
   if (wahl === 'ok' && !ausfuehren) throw Object.assign(new Error('Für diese Art gibt es noch keine Aktion. Nur Ablehnen ist möglich.'), { status: 409 });
   const sperre = db.prepare("UPDATE freigabe SET status = 'laeuft' WHERE id = ? AND status = 'offen'").run(id);
   if (!sperre.changes) throw Object.assign(new Error('Freigabe ist schon entschieden.'), { status: 409 });
@@ -135,4 +142,4 @@ function aufraeumen(db) {
   return db.prepare("UPDATE freigabe SET status = 'fehler', hinweis = 'Server wurde waehrend der Aktion beendet; Ergebnis pruefen.' WHERE status = 'laeuft'").run().changes;
 }
 
-module.exports = { aufraeumen, registriere, anlegen, ersetze, schliesse, liste, entscheide, offenAnzahl, protokoll, REGISTRY };
+module.exports = { aufraeumen, registriere, setzeSperre, anlegen, ersetze, schliesse, liste, entscheide, offenAnzahl, protokoll, REGISTRY };

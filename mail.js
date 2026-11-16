@@ -345,7 +345,7 @@ function erzeuge({
   function status() {
     const m = cfg();
     const grund = grundVon(m);
-    return { bereit: !grund, grund, umgeleitet: !!m.umleitenAn, heute: heute(), grenze: grenzeVon(m) };
+    return { bereit: !grund, grund, umgeleitet: !!m.umleitenAn, umleiten_an: m.umleitenAn || null, heute: heute(), grenze: grenzeVon(m) };
   }
 
   // NULL trifft in SQL nie, deshalb ohne Fallunterscheidung.

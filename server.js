@@ -84,10 +84,17 @@ const mailDienst = mail.erzeuge({ db, mailCfg: () => config.mail, port: config.p
 const mahnDienst = mahnung.erzeugeDienst({ db, mailDienst, mahnCfg: () => config.mahnwesen, mailCfg: () => config.mail, port: config.port });
 // C11c: die Flow-Aktionen nutzen dieselben Instanzen wie der Mahn-Dialog (Sperren gegen doppelten Versand liegen im Speicher dieser Instanzen).
 const flowDienst = flows.erzeugeDienst({ db, aktionen: flows.erzeugeAktionen({ mahnDienst, mailDienst }), mail: mailDienst, cfg: () => config });
+// M1: Tages-Scan und Jira-Ausloeser nur bei eingeschaltetem Modul flows. Probelauf
+// und "Jetzt ausfuehren" laufen ueber /api/flows und sind dort gesperrt.
+const flowHintergrund = {
+  takt: (...a) => (moduleAktiv().has('flows') ? flowDienst.takt(...a) : null),
+  ausloesen: (...a) => (moduleAktiv().has('flows') ? flowDienst.ausloesen(...a) : Promise.resolve([])),
+};
 // Im 30-s-Takt: Index nachziehen, Monatsbericht pruefen. Wirft nie.
 // Derselbe Fehler steht einmal im Protokoll, nicht alle 30 s; in der Oberflaeche zeigt /api/vault ihn.
 const vaultFehler = { index: null, monatsbericht: null };
 function vaultTakt() {
+  if (!moduleAktiv().has('assistent')) return;   // M1: Modul aus, Hintergrund still
   const lauf = (k, fn) => {
     try { fn(); vaultFehler[k] = null; } catch (err) {
       if (vaultFehler[k] !== err.message) console.error('Vault ' + k + ':', err);
@@ -198,7 +205,14 @@ function zeitNachrechnen(seitStunden = Infinity) {
 // fehlgeschlagener Ingest sie nicht auslaesst. Auch ohne Kalenderkonto (lokale
 // Blocker). Wirft nie.
 function erinnern() {
+  if (!moduleAktiv().has('zeit')) return;   // M1: Modul aus, Hintergrund still
   try { kalender.erinnerungen(db); } catch (err) { console.error('Erinnerungen fehlgeschlagen:', err); }
+}
+// Kalender je Konto alle 5 Minuten. Nicht abwarten: ein langsamer Kalender
+// haelt sonst den Ingest auf. takt() wirft nie und laeuft nie doppelt.
+function kalenderTakt() {
+  if (!moduleAktiv().has('zeit')) return null;   // M1
+  return kalender.takt(db).catch((err) => console.error('Kalender-Takt:', err));
 }
 
 async function refreshData() {
@@ -213,9 +227,7 @@ async function refreshData() {
     // Neue Sitzungsdaten koennen Zeiteintraege der letzten 48 h ueberlappen.
     // Ein Fehler hier ist kein Fehler beim Einlesen, aber er bleibt sichtbar.
     const zeitFehler = zeitNachrechnen(48);
-    // Kalender je Konto alle 5 Minuten. Nicht abwarten: ein langsamer Kalender
-    // haelt sonst den Ingest auf. takt() wirft nie und laeuft nie doppelt.
-    kalender.takt(db).catch((err) => console.error('Kalender-Takt:', err));
+    kalenderTakt();
     lastIngest ={ at: new Date().toISOString(), ms: res.ms, events: res.events, error: null, zeit_fehler: zeitFehler };
     // Hat jemand die Oberflaeche offen, rechnet der Takt die Zeit vor, statt
     // den naechsten Klick warten zu lassen (Block L). Ohne neue Daten nur ein
@@ -561,7 +573,8 @@ const EINSTELLUNGEN = {
   nachfassenTageVorAblauf: { min: 1, max: 60, ganz: true, pfad: 'angebot.nachfassenTageVorAblauf', standard: 3, label: 'Nachfassen bei Angeboten: Tage vor Ablauf' },
   // C11c-Nachtrag: Versandzeit des Tages-Scans fuer alle Flows (flows.js versandZeit). Wochenende als 0/1: EINSTELLUNGEN kennt nur Zahlen.
   flowsAbStunde: { min: 0, max: 23, ganz: true, pfad: 'flows.abStunde', standard: 9, label: 'Automatische Schreiben ab (Uhr)' },
-  flowsWochenende: { min: 0, max: 1, ganz: true, pfad: 'flows.wochenende', standard: 0, label: 'Automatische Schreiben auch am Wochenende' },
+  // Schalter in der Oberflaeche (true/false), gespeichert bleibt 0/1: bestehende config.json gelten weiter, 0/1 per API auch.
+  flowsWochenende: { typ: 'schalter', min: 0, max: 1, ganz: true, pfad: 'flows.wochenende', standard: 0, label: 'Automatische Schreiben auch am Wochenende' },
 };
 
 // Gueltigkeit neuer Angebote (1-365, sonst 30) und Nachfass-Abstand: der Abstand muss kleiner sein, sonst waere ein neues Angebot sofort ein Kandidat.
@@ -590,8 +603,9 @@ function setzeEinstellungen(daten) {
   }
 
   for (const [feld, regel] of Object.entries(EINSTELLUNGEN)) {
-    const wert = daten[feld];
-    if (wert === undefined || wert === null || wert === '') continue;
+    const roh = daten[feld];
+    if (roh === undefined || roh === null || roh === '') continue;
+    const wert = regel.typ === 'schalter' && typeof roh === 'boolean' ? (roh ? 1 : 0) : roh;
     const n = alsZahl(wert);
     if (!Number.isFinite(n)) throw new Error(regel.label + ': keine gueltige Zahl.');
     // Manche Felder kennen einen Aus-Wert ausserhalb ihres Gueltigkeitsbereichs:
@@ -838,6 +852,95 @@ function loescheVorlage(db, id) {
   return true;
 }
 
+// M1 Module (Owner 09.11.2026). Der Kern (Verbrauch, Live, Sitzungen,
+// Werkzeuge, Vorgaenge, Projekte, Einstellungen) ist immer an. Ein
+// ausgeschaltetes Modul ist unsichtbar und serverseitig still: seine Routen
+// antworten 409, sein Hintergrund laeuft nicht. Ausschalten loescht nichts.
+// flows braucht abrechnung: jeder Flow mahnt, fasst nach oder stellt einen
+// Rechnungsentwurf. modus "wahl" zeigt die Erststart-Strecke und gilt bis dahin
+// wie full; fehlt der Schluessel (bestehende Installation), ebenfalls full.
+const MODULE = ['zeit', 'abrechnung', 'kontakte', 'flows', 'assistent'];
+const MODI = { basic: [], advanced: ['zeit', 'abrechnung', 'kontakte'], full: MODULE };
+const OBERFLAECHE_MODI = ['wahl', 'basic', 'advanced', 'full', 'modular'];
+function moduleAktiv(o = config.oberflaeche) {
+  const modus = o && typeof o === 'object' ? o.modus : null;
+  const an = modus === 'modular'
+    ? MODULE.filter((m) => o.module && typeof o.module === 'object' && o.module[m] === true)
+    : Object.hasOwn(MODI, modus) ? MODI[modus] : MODULE;   // nie MODI['constructor']
+  return new Set(an.filter((m) => m !== 'flows' || an.includes('abrechnung')));
+}
+// Erstes Pfadstueck bis "-" oder "/": /api/zeit-loeschen -> zeit, /api/zeitmodell
+// bleibt zeitmodell (Kern). Nie startsWith: das nahm zeitmodell mit.
+const ROUTEN_MODUL = {
+  zeit: 'zeit', taetigkeitsart: 'zeit', taetigkeitsarten: 'zeit', termin: 'zeit', termine: 'zeit', kalender: 'zeit',
+  rechnung: 'abrechnung', rechnungen: 'abrechnung', zahlung: 'abrechnung', beleg: 'abrechnung', angebot: 'abrechnung',
+  angebote: 'abrechnung', stammdaten: 'abrechnung', vorlage: 'abrechnung', vorlagen: 'abrechnung', mail: 'abrechnung', mahnung: 'abrechnung',
+  kontakt: 'kontakte', kontakte: 'kontakte', ansprechpartner: 'kontakte', lead: 'kontakte', leads: 'kontakte',
+  flows: 'flows',
+  cira: 'assistent', briefing: 'assistent', briefings: 'assistent', gedaechtnis: 'assistent', sprache: 'assistent',
+  ablauf: 'assistent', ablaeufe: 'assistent', vault: 'assistent',
+};
+function modulVon(p) {
+  // Skills liest die Sitzungen-Seite (Kern), nicht Cira.
+  if (p === '/api/cira/skills') return null;
+  const m = /^\/api\/([a-z]+)(?:[-/]|$)/.exec(p);
+  return m && Object.hasOwn(ROUTEN_MODUL, m[1]) ? ROUTEN_MODUL[m[1]] : null;
+}
+function modulAus(modul) {
+  const err = new Error('Modul „' + modul + '“ ist ausgeschaltet (Einstellungen → Module). Die Daten bleiben erhalten.');
+  err.status = 409;
+  return err;
+}
+// Freigabe-Karten fuehren Aktionen eines Moduls aus; die Freigaben-Route selbst ist Kern.
+// Eine alte Karte eines ausgeschalteten Moduls ist unsichtbar und fuehrt nichts aus (freigaben.setzeSperre).
+// Nicht hier: sitzung_frage und jira_kommentar (Kern).
+const FREIGABE_MODUL = {
+  rechnung: 'abrechnung', flow_fehler: 'flows', mahnung_ausgeschoepft: 'flows',
+  vault_notiz: 'assistent', ablauf: 'assistent', monatsbericht: 'assistent',
+};
+freigaben.setzeSperre((art) => {
+  const m = Object.hasOwn(FREIGABE_MODUL, art) ? FREIGABE_MODUL[art] : null;
+  return m && !moduleAktiv().has(m) ? modulAus(m) : null;
+});
+function oberflaecheAnzeige() {
+  const o = config.oberflaeche && typeof config.oberflaeche === 'object' ? config.oberflaeche : {};
+  const m = o.module && typeof o.module === 'object' ? o.module : {};
+  return {
+    modus: OBERFLAECHE_MODI.includes(o.modus) ? o.modus : 'full',
+    module: Object.fromEntries(MODULE.map((k) => [k, m[k] === true])),
+    aktiv: [...moduleAktiv()],
+  };
+}
+// Einstellungen -> Module und Erststart-Strecke. "wahl" setzt nur die Vorlage.
+function setzeOberflaeche(daten) {
+  for (const k of Object.keys(daten)) if (k !== 'modus' && k !== 'module') throw new Error('Unbekanntes Feld: ' + k);
+  if (!OBERFLAECHE_MODI.includes(daten.modus) || daten.modus === 'wahl') throw new Error('Ansicht: basic, advanced, full oder modular.');
+  const vorher = config.oberflaeche;
+  const alt = vorher && typeof vorher === 'object' ? vorher : {};
+  const module = alt.module && typeof alt.module === 'object' ? { ...alt.module } : {};
+  if (Object.hasOwn(daten, 'module')) {
+    const m = daten.module;
+    if (!m || typeof m !== 'object' || Array.isArray(m)) throw new Error('Module: Objekt erwartet.');
+    for (const [k, v] of Object.entries(m)) {
+      if (!MODULE.includes(k)) throw new Error('Unbekanntes Modul: ' + k);
+      if (typeof v !== 'boolean') throw new Error('Modul ' + k + ': an oder aus (true/false).');
+      module[k] = v;
+    }
+  }
+  // Ein laufender Timer liefe sonst unsichtbar weiter und buchte beim Wiedereinschalten Stunden oder Tage.
+  if (moduleAktiv().has('zeit') && !moduleAktiv({ modus: daten.modus, module }).has('zeit') && zeit.timerAktuell(db)) {
+    throw new Error('Erst den laufenden Timer stoppen, dann die Zeiterfassung ausschalten.');
+  }
+  config.oberflaeche = { ...alt, modus: daten.modus, module };
+  try {
+    schreibeConfig();
+  } catch (err) {
+    if (vorher === undefined) delete config.oberflaeche; else config.oberflaeche = vorher;
+    throw err;
+  }
+  return { oberflaeche: oberflaecheAnzeige() };
+}
+
 // Schluessel, die die Oberflaeche aendern kann und schreibeConfig() deshalb
 // zurueckschreibt. Felder mit `pfad` liegen in einer Gruppe (lokaleModelle) —
 // geschrieben wird die Gruppe, nicht der Feldname. Alles andere in der Datei
@@ -852,6 +955,7 @@ const SCHREIBBAR = [...new Set([
   'hook',              // Geheimnis fuer integration/claude-hook.mjs, beim ersten Start erzeugt (C5)
   'vault',             // Einstellungen -> Vault: nur gruppen und quellen (VAULT_FELDER), briefingsOrdner nur in der Datei
   'mail',              // Einstellungen -> E-Mail & Versand: nur MAIL_FELDER, smtp/absender/transport nur in der Datei
+  'oberflaeche',       // Einstellungen -> Module (M1): nur modus und module, geplanteBereiche nur in der Datei
   ...Object.entries(EINSTELLUNGEN).map(([feld, r]) => (r.pfad ? r.pfad.split('.')[0] : feld)),
 ])];
 
@@ -871,6 +975,7 @@ function schreibeConfig() {
   gruppen.set('cira', (gruppen.get('cira') || []).concat(Object.keys(CIRA_FELDER)));
   gruppen.set('vault', VAULT_FELDER);
   gruppen.set('mail', MAIL_FELDER);
+  gruppen.set('oberflaeche', ['modus', 'module']);
   for (const k of SCHREIBBAR) {
     if (config[k] === undefined) continue;
     if (gruppen.has(k)) {
@@ -1591,6 +1696,17 @@ function handle(req, res) {
     }
   }
 
+  // M1: ein ausgeschaltetes Modul antwortet 409, lesend wie schreibend. Sonst
+  // schriebe ein Umweg (Obsidian, Jarvis, alter Link) still weiter. Steht vor
+  // allen Routen, damit auch die Dienst-Router unten gesperrt sind. Bewusst offen
+  // (Ruling M1-R5): Drucksichten gestellter Belege (/rechnung/…, /mahnung/…),
+  // nur lesend und unveraenderlich.
+  const modul = modulVon(p);
+  if (modul && !moduleAktiv().has(modul)) {
+    req.resume();
+    return sendJson(res, { error: modulAus(modul).message, modul }, 409);
+  }
+
   try {
     if (p === '/api/kopplung/status' && req.method === 'GET') {
       const g = geraeteDienst.geraet(req);
@@ -1635,6 +1751,8 @@ function handle(req, res) {
     if (werkzeugDienst.routen(req, res, p, u, { sendJson, leseKoerper })) return;
     if (gedaechtnisDienst.routen(req, res, p, u, { sendJson, leseKoerper })) return;
     if (briefingDienst.routen(req, res, p, u, { sendJson, leseKoerper })) return;
+    if (p === '/api/oberflaeche' && req.method === 'POST') return antworte(req, res, setzeOberflaeche);
+    if (p === '/api/oberflaeche') return sendJson(res, oberflaecheAnzeige());
     if (p === '/api/vault' && req.method === 'POST') return antworte(req, res, setzeVault);
     if (p === '/api/vault') return sendJson(res, vaultAnzeige());
     if (p === '/api/mail/einstellungen' && req.method === 'POST') return antworte(req, res, setzeMail);
@@ -1758,6 +1876,8 @@ function handle(req, res) {
           jiraProjectKeys: config.jira && config.jira.enabled ? config.jira.projectKeys || [] : [],
           // Navigation zeigt Bereiche spaeterer Bloecke nur damit (kern.js navSeiten).
           geplanteBereiche: !!(config.oberflaeche && config.oberflaeche.geplanteBereiche === true),
+          // M1: Ansicht und eingeschaltete Module (kern.js navSeiten, route).
+          oberflaeche: oberflaecheAnzeige(),
         },
         pricing: pricing.info(),
         lastIngest,
@@ -2022,6 +2142,7 @@ function handle(req, res) {
             ? regel.standard : wert,
           min: regel.min, max: regel.max, label: regel.label,
           ...(regel.aus !== undefined ? { aus: regel.aus } : {}),
+          ...(regel.typ ? { typ: regel.typ } : {}),
         };
       }
       return sendJson(res, { werte, waehrung: config.waehrung, pfad: 'config.json' });
@@ -2648,8 +2769,8 @@ async function main() {
   try { abgebrochen = flowDienst.aufraeumen(); } catch (e) { console.error('Flows aufraeumen:', e); }
   for (const l of abgebrochen) flowDienst.meldeFehler(l.id, l).catch((e) => console.error('Flow-Fehlerkarte ' + l.id + ':', e));
   try { flowDienst.vorlagenAnlegen(); } catch (e) { console.error('Flow-Vorlagen:', e); }
-  flows.verbinde(flowDienst);
-  flows.planeTakt(flowDienst);
+  flows.verbinde(flowHintergrund);
+  flows.planeTakt(flowHintergrund);
   if (!geraeteSchutz) console.warn('WARNUNG: Geraeteschutz ist aus (C2I_GERAETESCHUTZ=aus) — jeder lokale Prozess kann schreiben.');
   // Geheimnis fuer den Hook fremder Sitzungen (C5): einmal erzeugen, steht
   // nur in config.json und geht in keine Antwort.
@@ -2711,4 +2832,7 @@ module.exports = {
   // Tests: Schutz einschalten und einen Dienst mit eigener DB einsetzen.
   setzeGeraeteSchutz: (an) => { geraeteSchutz = !!an; }, setzeGeraeteDienst: (d) => { geraeteDienst = d; },
   setzeSatz, setzeZeitmodell, csvExport,
+  // M1 Module
+  MODULE, moduleAktiv, modulVon, setzeOberflaeche, oberflaecheAnzeige,
+  erinnern, kalenderTakt, vaultTakt, flowHintergrund, flowDienst, gedaechtnisDienst, briefingDienst,
 };

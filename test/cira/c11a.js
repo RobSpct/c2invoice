@@ -393,7 +393,7 @@ module.exports = ({ dbmod, openDbs, configGeschuetzt }) => {
     }
     assert.strictEqual(st({ ...konto, smtp: { ...konto.smtp, passwortEnvVar: 'MEIN_SMTP_PASS' } }, { MEIN_SMTP_PASS: PW }).bereit, true);
     const s = st({ ...konto, umleitenAn: 'test@example.org' }, { C2I_SMTP_PASSWORT: PW });
-    assert.deepStrictEqual(s, { bereit: true, grund: null, umgeleitet: true, heute: 0, grenze: 100 });
+    assert.deepStrictEqual(s, { bereit: true, grund: null, umgeleitet: true, umleiten_an: 'test@example.org', heute: 0, grenze: 100 });
     assert.ok(!JSON.stringify(s).includes(PW));
     assert.strictEqual(st({ ...konto, tagesgrenze: 'viele' }, { C2I_SMTP_PASSWORT: PW }).grenze, 100);
   }

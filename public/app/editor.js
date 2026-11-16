@@ -319,14 +319,14 @@ function oeffne(teile) {
   const k = (state.kontakte || []).find((x) => String(x.id) === p.get('kontakt'));
   if (k) fuelleKontakt(k);
   // Nur wenn die Kontakte geladen sind: sonst existiert er womoeglich und der Hinweis waere falsch.
-  else if (p.get('kontakt') && state.kontakte) toast(uebersetze('Kontakt nicht vorbelegt — bitte im Formular wählen'), 'err');
+  else if (p.get('kontakt') && state.kontakte && modulAktiv('kontakte')) toast(uebersetze('Kontakt nicht vorbelegt — bitte im Formular wählen'), 'err');
   // Direkt geladen: die Kontakte kommen erst nach dem ersten Zeichnen — dann nachbelegen.
   else if (p.get('kontakt')) ed.kontaktWunsch = p.get('kontakt');
   // Aus der Lead-Akte (#/beleg/neu?art=angebot&lead=ID): wie oben, nur fuer Angebote.
   if (art === 'angebot' && p.get('lead')) {
     const l = offeneLeads().find((x) => String(x.id) === p.get('lead'));
     if (l) fuelleLead(l);
-    else if (state.leads) toast(uebersetze('Lead nicht vorbelegt — bitte im Formular wählen'), 'err');
+    else if (state.leads && modulAktiv('kontakte')) toast(uebersetze('Lead nicht vorbelegt — bitte im Formular wählen'), 'err');
     else ed.leadWunsch = p.get('lead');
   }
   // Nur bei einem leeren neuen Beleg anbieten, den letzten Entwurf fortzusetzen.
@@ -635,6 +635,8 @@ function ladeVorlagen() {
 // Offene Eintraege der Zeiterfassung (alle Zeitraeume). Neu geladen je Editor-Oeffnen.
 function ladeZeitDaten() {
   if (ed.zeitDaten) return;
+  // M1: ohne Modul Zeit gibt es keine offenen Eintraege (die Route antwortet 409).
+  if (!modulAktiv('zeit')) { ed.zeitDaten = { d: [], fehler: null }; return; }
   ed.zeitDaten = { d: null, fehler: null };
   hole('/api/zeit?status=offen').then((d) => {
     if (!d || !Array.isArray(d.eintraege)) throw new Error(uebersetze('Antwort ohne Einträge'));

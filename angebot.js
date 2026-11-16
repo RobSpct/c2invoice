@@ -438,19 +438,45 @@ function erzeugePdf(db, nr, port) {
 // und ein Test-Nachfassen sperrt dann.
 // Laeuft es vor dem naechsten Werktag ab (Freitag: Ablauf Samstag/Sonntag), kommt es heute dran. Der Scan folgt der Versandzeit
 // (Einstellungen -> Flows, Standard Mo-Fr); laeuft er auch am Wochenende, faellt das Nachfassen am Freitag nur frueher, nie zweimal.
-function kandidaten(db, heute, { testmodus = false, tageVorAblauf = 3 } = {}) {
-  const t = testmodus ? 1 : 0;
-  const wt = new Date(heute + 'T00:00:00Z').getUTCDay();
+// Ein Urteil je offenem Angebot: Kandidat oder Grund. kandidaten und ausgeschlossen lesen dieselbe Regel (wie mahnung.urteil).
+// Ein reines Datum ist ein Ortstag; new Date('JJJJ-MM-TT') laese UTC-Mitternacht und verschoebe ihn westlich von UTC.
+const tagVon = (s) => (String(s).length === 10 ? String(s) : rechnung.tagNach(s, 0));
+function nachfassenFaellig(tag, bis, tageVorAblauf) {
+  const wt = new Date(tag + 'T00:00:00Z').getUTCDay();
   const bisNaechsterScan = wt === 5 ? 3 : wt === 6 ? 2 : 1;
-  // Ein reines Datum ist ein Ortstag; new Date('JJJJ-MM-TT') laese UTC-Mitternacht und verschoebe ihn westlich von UTC.
-  const tagVon = (s) => (String(s).length === 10 ? String(s) : rechnung.tagNach(s, 0));
-  return db.prepare(`SELECT nr, gueltig_bis FROM angebote WHERE status = 'offen'
-    AND EXISTS (SELECT 1 FROM versand WHERE art = 'angebot' AND bezug = angebote.nr AND status = 'ok' AND (test = 0 OR @t = 1))
-    AND NOT EXISTS (SELECT 1 FROM versand WHERE art = 'nachfassen' AND bezug = angebote.nr AND status = 'ok' AND (test = 0 OR @t = 1))
-    ORDER BY gueltig_bis, nr`).all({ t })
-    .map((r) => ({ nr: r.nr, tage: rechnung.tageZwischen(heute, tagVon(r.gueltig_bis)) }))
-    .filter((r) => r.tage >= 0 && (r.tage <= tageVorAblauf || r.tage < bisNaechsterScan));
+  const tage = rechnung.tageZwischen(tag, bis);
+  return tage >= 0 && (tage <= tageVorAblauf || tage < bisNaechsterScan);
+}
+function urteil(db, a, heute, testmodus, tageVorAblauf) {
+  if (!Number.isInteger(tageVorAblauf) || tageVorAblauf < 1) tageVorAblauf = 3; // NaN liesse die Schleife unten nie enden
+  // MIN(test): 0 = mindestens ein scharfer Versand, 1 = nur Testversand, null = nie per Mail
+  const t = db.prepare("SELECT MIN(test) AS t FROM versand WHERE art = 'angebot' AND bezug = ? AND status = 'ok'").get(a.nr).t;
+  if (t == null) return { grund: 'nie per Mail aus c2invoice versendet' };
+  if (t === 1 && !testmodus) return { grund: 'nur als Test versendet, Testmodus ist aus' };
+  if (db.prepare("SELECT 1 FROM versand WHERE art = 'nachfassen' AND bezug = ? AND status = 'ok' AND (test = 0 OR ? = 1) LIMIT 1").get(a.nr, testmodus ? 1 : 0)) {
+    return { grund: 'Nachfassen schon gesendet' };
+  }
+  const bis = tagVon(a.gueltig_bis);
+  const tage = rechnung.tageZwischen(heute, bis);
+  // Unlesbares Datum: NaN liesse die Schleife unten nie enden (und kandidaten() fiele still aus).
+  if (!Number.isFinite(tage)) return { grund: 'Gültigkeitsdatum unlesbar' };
+  if (tage < 0) return { grund: 'abgelaufen am ' + bis };
+  if (nachfassenFaellig(heute, bis, tageVorAblauf)) return { kandidat: { nr: a.nr, tage } };
+  // Erster Tag, an dem dieselbe Regel greift (Freitagsregel eingeschlossen); spaetestens am Ablauftag.
+  // Vorher greift sie nie: faellig heisst hoechstens max(tageVorAblauf, 2) Tage vor Ablauf (bisNaechsterScan <= 3).
+  // Deshalb dort anfangen, sonst zaehlte ein Ablauf im Jahr 9999 Millionen Tage durch.
+  let ab = rechnung.tageZwischen(heute, bis) > Math.max(tageVorAblauf, 2) ? rechnung.tagNach(bis + 'T00:00:00', -Math.max(tageVorAblauf, 2)) : heute;
+  while (!nachfassenFaellig(ab, bis, tageVorAblauf)) ab = rechnung.tagNach(ab + 'T00:00:00', 1);
+  return { grund: 'Nachfassen erst ab ' + ab };
+}
+const offene = (db) => db.prepare("SELECT nr, gueltig_bis FROM angebote WHERE status = 'offen' ORDER BY gueltig_bis, nr").all();
+function kandidaten(db, heute, { testmodus = false, tageVorAblauf = 3 } = {}) {
+  return offene(db).map((a) => urteil(db, a, heute, testmodus, tageVorAblauf).kandidat).filter(Boolean);
+}
+// Probelauf f2 ohne Kandidat: je offenem Angebot der Grund, warum das Nachfassen heute nicht drankommt.
+function ausgeschlossen(db, heute, { testmodus = false, tageVorAblauf = 3 } = {}) {
+  return offene(db).map((a) => ({ nr: a.nr, grund: urteil(db, a, heute, testmodus, tageVorAblauf).grund })).filter((x) => x.grund);
 }
 
 module.exports = {
-  kandidaten, erstelle, vorschau, lade, liste, setzeStatus, loesche, inRechnung, renderHtml, erzeugePdf };
+  kandidaten, ausgeschlossen, erstelle, vorschau, lade, liste, setzeStatus, loesche, inRechnung, renderHtml, erzeugePdf };

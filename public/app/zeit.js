@@ -501,6 +501,7 @@ function zHeuteKarte() {
    Heute-Rechnung braucht, hoechstens alle 15 s (so oft pollt auch Live). */
 const zHeute = { d: null, zeit: 0, laeuft: false, fehler: null };
 async function zHeuteLaden() {
+  if (!modulAktiv('zeit')) return;   // M1: die Zeit-Routen antworten sonst 409
   if (zHeute.laeuft || Date.now() - zHeute.zeit < 15000) return;
   zHeute.laeuft = true;
   zHeute.zeit = Date.now();
@@ -742,7 +743,8 @@ function zEintraege() {
       segment('zt-filter', [['heute', 'Heute'], ['alle', 'Alle'], ['offen', 'Offen'], ['abgerechnet', 'Abgerechnet'], ['nicht', 'Nicht abrechenbar']], f, 'Einträge') +
       (zf ? '<button type="button" class="chip" aria-pressed="true" data-aktion="zt-zielfilter" data-wert="" aria-label="' + esc(uebersetze('Ziel-Filter entfernen')) + '">' +
         esc(uebersetze('Ziel') + ': ' + zZielVon(zf[0], zf[1], zfName).l) + ' ×</button>' : '') +
-      '<button type="button" class="knopf akzent-rand zt-rechts" data-aktion="gehe" data-wert="' + esc(zAbrechnenLink(zf)) + '">' + esc(uebersetze('Offene abrechnen →')) + '</button></div>' +
+      // M1: ohne Modul Abrechnung kein Rechnungs-Einstieg.
+      (modulAktiv('abrechnung') ? '<button type="button" class="knopf akzent-rand zt-rechts" data-aktion="gehe" data-wert="' + esc(zAbrechnenLink(zf)) + '">' + esc(uebersetze('Offene abrechnen →')) + '</button>' : '') + '</div>' +
     '<div class="zt-tab-huelle"><div class="zt-tab zt-etab"><div class="zt-tkopf">' +
       ['Datum', 'Zeit', 'Ziel', 'Tätigkeit', 'Notiz'].map((x) => '<span>' + esc(uebersetze(x)) + '</span>').join('') +
       '<span class="r">' + esc(uebersetze('Gezählt')) + '</span><span>' + esc(uebersetze('Überlappung')) + '</span><span class="r">' + esc(uebersetze('Betrag')) + '</span><span>' + esc(uebersetze('Status')) + '</span></div>' +

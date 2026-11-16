@@ -62,9 +62,11 @@
   "terminal": {
     "befehl": "wt -d \"{pfad}\" \"{claude}\" --resume {sitzung}"
   },
-  "//oberflaeche": "geplanteBereiche: true zeigt Bereiche, die erst mit einer spaeteren Version kommen (Briefings, Postfach, Flows, ...), als leere Seiten in der Navigation. Standard: aus.",
+  "//oberflaeche": "geplanteBereiche: true zeigt Bereiche, die erst mit einer spaeteren Version kommen (Briefings, Postfach, Flows, ...), als leere Seiten in der Navigation. Standard: aus. modus: Ansicht (wahl = beim ersten Start fragen, basic = nur Verbrauch und Analyse, advanced = dazu Zeit, Angebote, Rechnungen, Kontakte, full = alles, modular = nur die Module unter module). Fehlt modus, gilt full. Ein ausgeschaltetes Modul ist unsichtbar und still, seine Daten bleiben. flows braucht abrechnung. Aenderbar unter Einstellungen -> Module.",
   "oberflaeche": {
-    "geplanteBereiche": false
+    "geplanteBereiche": false,
+    "modus": "wahl",
+    "module": { "zeit": true, "abrechnung": true, "kontakte": true, "flows": true, "assistent": true }
   },
   "//hook": "Geheimnis fuer integration/claude-hook.mjs (meldet 'wartet auf dich' aus Sitzungen im eigenen Terminal). Leer lassen: c2invoice erzeugt es beim ersten Start und traegt es hier ein. Nie weitergeben.",
   "hook": {

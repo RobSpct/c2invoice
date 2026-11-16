@@ -7,3 +7,4 @@ config.json
 design/werkzeuge/probe.db*
 design/werkzeuge/probe-config.json
 design/werkzeuge/probe-geraet.txt
+design/werkzeuge/probe-smtp-kaputt

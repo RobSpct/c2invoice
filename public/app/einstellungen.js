@@ -186,7 +186,7 @@ Object.assign(EN, {
   'Tage vor Ablauf der Gültigkeit · einmal je Angebot · muss unter der Gültigkeit neuer Angebote liegen': 'days before the validity ends · once per quote · must be below the validity of new quotes',
   'Flows': 'Flows', 'gilt für alle Flows · Ortszeit dieses Rechners': 'applies to all flows · local time of this computer',
   'Automatische Schreiben ab (Uhr)': 'Automatic letters from (hour)', 'Automatische Schreiben auch am Wochenende': 'Automatic letters on weekends too',
-  'volle Stunde 0 bis 23 · Standard 9': 'full hour 0 to 23 · default 9', '0 = nur Montag bis Freitag · 1 = auch Samstag und Sonntag': '0 = Monday to Friday only · 1 = Saturday and Sunday too',
+  'volle Stunde 0 bis 23 · Standard 9': 'full hour 0 to 23 · default 9', 'aus = nur Montag bis Freitag · an = auch Samstag und Sonntag': 'off = Monday to Friday only · on = Saturday and Sunday too',
   'So wirkt die Versandzeit': 'How the sending time works',
   'Gilt sofort: der heutige Scan startet binnen einer Minute': 'Applies at once: today’s scan starts within a minute',
   'Ab dieser Stunde prüft der tägliche Scan offene Rechnungen und Angebote und sendet, was fällig ist; läuft c2invoice zu der Zeit nicht, holt er es nach, sobald es läuft. Ohne Wochenende läuft er nur Montag bis Freitag. „Jetzt ausführen“ im Flow wartet auf keins von beiden. Eine Änderung gilt sofort: liegt die neue Stunde schon hinter dir und lief der Scan heute noch nicht, startet er binnen einer Minute. Gesetzliche Feiertage kennt der Scan nicht.':
@@ -201,27 +201,29 @@ const E_ABSCHNITTE = [
     felder: ['stundensatz', 'selbstkostenStunde', 'aboPreisMonat', 'usdToEur', 'gapMinutes', 'vergleichsFaktor'] },
   { id: 'projekte', l: 'Stundensätze je Projekt', g: '', sub: 'Satz, Rabatt, Zeitmodell und Rundung · auch in der Kontakt-Akte', kw: 'satz rabatt zeitmodell rundung projekt rate discount rounding' },
   // Rundung als Segment, nicht als Feld: speichern wie das Zeitmodell (e-rundung).
-  { id: 'taet', l: 'Tätigkeitsarten & Rundung', g: '', sub: 'für manuelle Zeit · eigener Satz optional', kw: 'tätigkeit meeting konzept review rundung activity rounding' },
-  { id: 'vorlagen', l: 'Positionsvorlagen', g: '', sub: 'füllen eine Position im Beleg-Editor vor', kw: 'vorlage position template' },
-  { id: 'stammdaten', l: 'Stammdaten', g: 'Belege', sub: 'stehen auf jedem Beleg · Name und Anschrift sind Pflicht', stamm: true },
+  { id: 'taet', modul: 'zeit', l: 'Tätigkeitsarten & Rundung', g: '', sub: 'für manuelle Zeit · eigener Satz optional', kw: 'tätigkeit meeting konzept review rundung activity rounding' },
+  { id: 'vorlagen', modul: 'abrechnung', l: 'Positionsvorlagen', g: '', sub: 'füllen eine Position im Beleg-Editor vor', kw: 'vorlage position template' },
+  { id: 'stammdaten', modul: 'abrechnung', l: 'Stammdaten', g: 'Belege', sub: 'stehen auf jedem Beleg · Name und Anschrift sind Pflicht', stamm: true },
   // C11a: Konto (smtp, absender) nur in config.json; hier Testmodus, Grenze, Vorlagen.
-  { id: 'versand', l: 'E-Mail & Versand', g: 'Belege', sub: 'Testmodus, Tagesgrenze, Vorlagen · Konto nur in config.json', kw: 'mail e-mail versand smtp gmail google vorlage test umleitung email sending template' },
+  { id: 'versand', modul: 'abrechnung', l: 'E-Mail & Versand', g: 'Belege', sub: 'Testmodus, Tagesgrenze, Vorlagen · Konto nur in config.json', kw: 'mail e-mail versand smtp gmail google vorlage test umleitung email sending template' },
   // C11b: Fristen und Gebuehr der Mahnstufen; die Texte stehen unter E-Mail & Versand.
   // C11c: Nachfassen vor Ablauf eines Angebots (Flow f2); Abstand als Feld, Mailtext darunter.
-  { id: 'nachfassen', l: 'Nachfassen', g: 'Belege', sub: 'Angebote kurz vor Ablauf · Abstand und Mailtext', kw: 'nachfassen angebot ablauf erinnerung follow-up quote expiry reminder', felder: ['nachfassenTageVorAblauf'] },
-  { id: 'mahnwesen', l: 'Mahnwesen', g: 'Belege', sub: 'Fristen je Mahnstufe und Mahngebühr · Texte unter E-Mail & Versand', kw: 'mahnung erinnerung mahngebühr frist zahlungserinnerung dunning reminder fee',
+  { id: 'nachfassen', modul: 'abrechnung', l: 'Nachfassen', g: 'Belege', sub: 'Angebote kurz vor Ablauf · Abstand und Mailtext', kw: 'nachfassen angebot ablauf erinnerung follow-up quote expiry reminder', felder: ['nachfassenTageVorAblauf'] },
+  { id: 'mahnwesen', modul: 'abrechnung', l: 'Mahnwesen', g: 'Belege', sub: 'Fristen je Mahnstufe und Mahngebühr · Texte unter E-Mail & Versand', kw: 'mahnung erinnerung mahngebühr frist zahlungserinnerung dunning reminder fee',
     felder: ['erinnerungNachTagen', 'mahnung1NachTagen', 'mahnung2NachTagen', 'neueFristTage', 'gebuehrStufe2Eur'] },
   // C11c-Nachtrag: Versandzeit des Tages-Scans fuer alle Flows (flows.js versandZeit); Wochenende als 0/1 (EINSTELLUNGEN kennt nur Zahlen).
-  { id: 'flows', l: 'Flows', g: 'Belege', sub: 'gilt für alle Flows · Ortszeit dieses Rechners', kw: 'flows scan uhrzeit stunde wochenende samstag sonntag automatisch versandzeit time hour weekend automatic', felder: ['flowsAbStunde', 'flowsWochenende'] },
+  { id: 'flows', modul: 'flows', l: 'Flows', g: 'Belege', sub: 'gilt für alle Flows · Ortszeit dieses Rechners', kw: 'flows scan uhrzeit stunde wochenende samstag sonntag automatisch versandzeit time hour weekend automatic', felder: ['flowsAbStunde', 'flowsWochenende'] },
   // Cira (C2): Stufen T1/T2, Claude-Limit, Nicht stoeren. claude.exe nur in config.json.
-  { id: 'cira', l: 'Cira', g: 'Assistent', sub: 'Antwortstufen, Claude-Limit, Nicht stören', kw: 'cira assistent ollama claude limit modell anrede nicht stören stimme sprache mikrofon vorlesen elevenlabs whisper assistant model quiet voice speech microphone' },
+  { id: 'cira', modul: 'assistent', l: 'Cira', g: 'Assistent', sub: 'Antwortstufen, Claude-Limit, Nicht stören', kw: 'cira assistent ollama claude limit modell anrede nicht stören stimme sprache mikrofon vorlesen elevenlabs whisper assistant model quiet voice speech microphone' },
   { id: 'darstellung', l: 'Darstellung', g: 'System', sub: 'Sprache, Theme und Bewegung', kw: 'sprache englisch deutsch bewegung animation language motion theme hell dunkel light dark' },
+  // M1: Ansicht und Module, dieselbe Auswahl wie beim ersten Start.
+  { id: 'module', l: 'Module', g: '', sub: 'Ansicht und Bereiche · Ausschalten löscht nichts', kw: 'module modul ansicht basic advanced full modular bereiche ausblenden einschalten modules view areas' },
   // Geraetekopplung (S1): nur gekoppelte Geraete schreiben.
   { id: 'geraete', l: 'Geräte', g: '', sub: 'Gekoppelte Browser und Programme · nur sie dürfen schreiben', kw: 'gerät geräte koppeln kopplung sicherheit browser device pairing security' },
   // Masterplan 3.0: Ordner fuer Sitzungen, Board, Werkzeuge. Pfade nur in config.json (Ruling R-Pfade).
   { id: 'arbeitsbereiche', l: 'Arbeitsbereiche', g: '', sub: 'Ordner für Sitzungen, Board und Werkzeuge · Pfade nur in config.json', kw: 'arbeitsbereich ordner kürzel farbe projekt jira workspace folder' },
   // Dieselbe Ansicht wie der Kalender-Dialog der Zeiterfassung (zeit.js, zKalZeichnen).
-  { id: 'kalender', l: 'Kalender', g: '', sub: 'Termine aus Google, Outlook, Apple · nur lesen', kw: 'kalender ics caldav google outlook apple nextcloud termine abo calendar events' },
+  { id: 'kalender', modul: 'zeit', l: 'Kalender', g: '', sub: 'Termine aus Google, Outlook, Apple · nur lesen', kw: 'kalender ics caldav google outlook apple nextcloud termine abo calendar events' },
   { id: 'lokal', l: 'Lokale Modelle', g: '', sub: 'Gegenwert, Modellordner, Modelle laden', kw: 'ollama modell laden download ordner speicherort ollama_models festplatte model folder pull', felder: ['lokalEurProMioTokens', 'lokalSelbstkostenStunde', 'lokalZuordnungsfenster'] },
   { id: 'daten', l: 'Daten & Export', g: '', sub: 'Export, Abgleich und Speicherort', kw: 'csv export jira datenbank database' },
 ];
@@ -240,7 +242,7 @@ const E_HINWEIS = {
   gebuehrStufe2Eur: 'nur auf der 2. Mahnung · 0 = keine Gebühr · höchstens 40 € · Gegenüber Unternehmen bis 40 € Pauschale (§ 288 Abs. 5 BGB), gegenüber Verbrauchern nur tatsächliche Kosten.',
   nachfassenTageVorAblauf: 'Tage vor Ablauf der Gültigkeit · einmal je Angebot · muss unter der Gültigkeit neuer Angebote liegen',
   limit5hTokens: 'Cira-Karte: Tokens, die du je 5-h-Fenster von Claude erwartest · deine Schätzung · 0 blendet aus',
-  flowsAbStunde: 'volle Stunde 0 bis 23 · Standard 9', flowsWochenende: '0 = nur Montag bis Freitag · 1 = auch Samstag und Sonntag',
+  flowsAbStunde: 'volle Stunde 0 bis 23 · Standard 9', flowsWochenende: 'aus = nur Montag bis Freitag · an = auch Samstag und Sonntag',
 };
 const E_EINHEIT = {
   stundensatz: 'EUR/h', selbstkostenStunde: 'EUR/h', zielmargeProzent: '%', aboPreisMonat: 'EUR', gapMinutes: 'Min', vergleichsFaktor: '×',
@@ -292,6 +294,7 @@ function eAnzeige(f, stamm) {
   const r = (stamm ? sWerte() : eWerte())[f];
   if (!r) return '';
   if (Array.isArray(r.wert)) return r.wert.join('\n');
+  if (r.typ === 'schalter') return String(!!r.wert);   // wie der Entwurf ('true'/'false'), auch wenn der Server 0/1 speichert
   return typeof r.wert === 'number' ? zahlText(r.wert) : String(r.wert == null ? '' : r.wert);
 }
 const eWert = (f, stamm) => (kz.entwurf[eKey(f)] != null ? kz.entwurf[eKey(f)] : eAnzeige(f, stamm));
@@ -447,16 +450,19 @@ aktion('e-zeitmodell', async (m, el) => {
   if (neu && el) neu.focus();
 });
 // Der Schalter ist ein Entwurf wie jedes Feld; scheitert das Speichern an ihm, springt er zurueck.
-const schalterAn = (f) => (kz.entwurf[eKey(f)] != null ? kz.entwurf[eKey(f)] === 'true' : !!(sWerte()[f] || {}).wert);
+// Schalter gibt es in den Stammdaten (Kleinunternehmer) und in den Einstellungen (Wochenende, dort 0/1 gespeichert).
+const schalterRegel = (f) => sWerte()[f] || eWerte()[f];
+const schalterAn = (f) => (kz.entwurf[eKey(f)] != null ? kz.entwurf[eKey(f)] === 'true' : !!(schalterRegel(f) || {}).wert);
 aktion('e-schalter', (f) => {
-  const r = sWerte()[f];
+  const r = schalterRegel(f);
   if (!r || r.typ !== 'schalter') return;
   kz.entwurf[eKey(f)] = String(!schalterAn(f));
   zeichneAnsicht();
-  const a = E_ABSCHNITTE.find((x) => x.stamm);
-  speichereAbschnitt(a).then(() => {
+  const a = abschnittVon(f);
+  // Wirft das Speichern ausserhalb seines try, springt der Schalter ebenfalls zurueck (sonst zeigte er "an", gespeichert waere 0).
+  speichereAbschnitt(a).catch((e) => { console.error(e); kz.fehler[eKey(f)] = e.message; }).then(() => {
     // Scheitert der Abschnitt (an welchem Feld auch immer), springt der Schalter zurueck.
-    if (Object.keys(sWerte()).some((x) => kz.fehler[eKey(x)])) delete kz.entwurf[eKey(f)];
+    if ((a.stamm ? Object.keys(sWerte()) : a.felder).some((x) => kz.fehler[eKey(x)])) delete kz.entwurf[eKey(f)];
     zeichneAnsicht();
     const k = document.querySelector('[data-aktion="e-schalter"][data-wert="' + f + '"]');
     if (k) k.focus();
@@ -685,9 +691,9 @@ function darstellungHtml() {
         '<span class="spur"></span>' + esc(uebersetze(reduziert ? 'an' : 'aus')) + '</button></div></div></div>' +
     // Startseite (Handoff §4.3): gilt, wenn die Adresse keinen Bereich nennt. Je Browser.
     '<div class="einst-feld"><span class="l">' + esc(uebersetze('Startseite')) + '<small>' + esc(uebersetze('öffnet ohne Adresse eines Bereichs')) + '</small></span>' +
-      '<div class="w"><div class="zeile">' + segment('e-start', STARTSEITEN.map((k) => [k, seitenName(seiteVon(k))]), lies('start', START_STANDARD).replace(/^board$/, 'projekte'), 'Startseite') + '</div></div></div>';
+      '<div class="w"><div class="zeile">' + segment('e-start', STARTSEITEN.filter((k) => modulAktiv(SEITE_MODUL[k])).map((k) => [k, seitenName(seiteVon(k))]), lies('start', START_STANDARD).replace(/^board$/, 'projekte'), 'Startseite') + '</div></div></div>';
 }
-const STARTSEITEN = ['cockpit', 'sitzungen', 'werkzeuge', 'projekte', 'hub'];
+const STARTSEITEN = ['cockpit', 'sitzungen', 'werkzeuge', 'projekte', 'hub', 'analyse'];
 aktion('e-start', (k) => {
   if (!STARTSEITEN.includes(k)) return;
   merke('start', k);
@@ -712,6 +718,152 @@ aktion('e-bewegung', () => {
   zeichneAnsicht();
   const k = document.querySelector('[data-aktion="e-bewegung"]');
   if (k) k.focus();
+});
+
+/* ---------- Module (M1) ----------
+   Ansicht waehlen: beim ersten Start als eigene Seite (#/start, ohne Leiste),
+   danach unter Einstellungen -> Module. Gespeichert wird erst mit
+   „Übernehmen“, ueber POST /api/oberflaeche; der Server sperrt dann die Routen
+   ausgeschalteter Module und haelt ihren Hintergrund an. Ausschalten loescht
+   nichts. Die Vorschau ist eine schematische Leiste, kein Screenshot: sie
+   altert nicht und zeigt keine Daten. */
+Object.assign(EN, {
+  'Module': 'Modules', 'Ansicht und Module': 'View and modules', 'Ansicht und Bereiche · Ausschalten löscht nichts': 'View and areas · switching off deletes nothing',
+  'Modul {m} ist ausgeschaltet': 'Module {m} is switched off', 'Module öffnen': 'Open modules',
+  'Die Daten bleiben erhalten. Einschalten unter Einstellungen → Module.': 'The data is kept. Switch it on under Settings → Modules.',
+  'Token-Verbrauch messen und auswerten: Kosten, Arbeitszeit, Vorgänge und Projekte.': 'Measure and analyse token usage: costs, working time, jobs and projects.',
+  'Für alle, die wissen wollen, was ihre KI-Arbeit kostet.': 'For anyone who wants to know what their AI work costs.',
+  'Dazu Zeiterfassung, Angebote, Rechnungen und Kontakte.': 'Plus time tracking, quotes, invoices and contacts.',
+  'Für Solo-Entwickler, die KI-Arbeit beim Kunden abrechnen.': 'For solo developers who bill AI work to clients.',
+  'Alles: dazu Flows, die mahnen und nachfassen, und Cira mit Briefings und Gedächtnis.': 'Everything: plus flows that send reminders and follow-ups, and Cira with briefings and memory.',
+  'Für alle, die c2invoice als ganzes Arbeits-CRM nutzen.': 'For anyone using c2invoice as a complete work CRM.',
+  'Du wählst selbst, welche Bereiche du siehst.': 'You choose which areas you see.',
+  'Für alle, die genau wissen, was sie brauchen.': 'For anyone who knows exactly what they need.',
+  'Finanzen, Angebote, Rechnungen, Versand, Mahnwesen': 'Finances, quotes, invoices, sending, dunning',
+  'Kunden, Leads und Akten': 'Clients, leads and files',
+  'Mahnen und Nachfassen automatisch · braucht Abrechnung': 'Automatic reminders and follow-ups · needs billing',
+  'Cira, Briefings und Gedächtnis': 'Cira, briefings and memory',
+  'Erst Abrechnung einschalten': 'Switch on billing first',
+  'Immer dabei: Verbrauch, Live, Sitzungen, Werkzeuge, Vorgänge, Projekte und Einstellungen.': 'Always included: usage, live, sessions, tools, jobs, projects and settings.',
+  'Übernehmen und loslegen': 'Apply and get started',
+  'Zum Speichern koppelst du diesen Browser einmal. Der Code erscheint als Fenster auf deinem Desktop.': 'To save, pair this browser once. The code appears as a window on your desktop.',
+  'Jederzeit änderbar unter Einstellungen → Module. Ausgeschaltete Bereiche behalten ihre Daten.': 'Change it any time under Settings → Modules. Areas you switch off keep their data.',
+  'Willkommen bei c2invoice': 'Welcome to c2invoice', 'Willkommen': 'Welcome',
+  'Wie willst du c2invoice nutzen? Wähle eine Ansicht, den Rest blenden wir aus.': 'How do you want to use c2invoice? Pick a view, we hide the rest.',
+  'Ansicht gespeichert': 'View saved',
+});
+const M_ALLE = ['zeit', 'abrechnung', 'kontakte', 'flows', 'assistent'];
+const M_ANSICHTEN = [
+  { id: 'basic', l: 'Basic', satz: 'Token-Verbrauch messen und auswerten: Kosten, Arbeitszeit, Vorgänge und Projekte.',
+    wer: 'Für alle, die wissen wollen, was ihre KI-Arbeit kostet.', module: [] },
+  { id: 'advanced', l: 'Advanced', satz: 'Dazu Zeiterfassung, Angebote, Rechnungen und Kontakte.',
+    wer: 'Für Solo-Entwickler, die KI-Arbeit beim Kunden abrechnen.', module: ['zeit', 'abrechnung', 'kontakte'] },
+  { id: 'full', l: 'Full', satz: 'Alles: dazu Flows, die mahnen und nachfassen, und Cira mit Briefings und Gedächtnis.',
+    wer: 'Für alle, die c2invoice als ganzes Arbeits-CRM nutzen.', module: M_ALLE },
+  { id: 'modular', l: 'Modular', satz: 'Du wählst selbst, welche Bereiche du siehst.',
+    wer: 'Für alle, die genau wissen, was sie brauchen.', module: null },
+];
+const M_INFO = {
+  zeit: ['Zeiterfassung', 'Timer, Nachträge, Kalender'],
+  abrechnung: ['Abrechnung', 'Finanzen, Angebote, Rechnungen, Versand, Mahnwesen'],
+  kontakte: ['Kontakte', 'Kunden, Leads und Akten'],
+  flows: ['Flows', 'Mahnen und Nachfassen automatisch · braucht Abrechnung'],
+  assistent: ['Assistent', 'Cira, Briefings und Gedächtnis'],
+};
+// Zeilen der Vorschau-Leiste: Kern immer, die uebrigen je Modul.
+const M_VORSCHAU = [['Verbrauch'], ['Sitzungen'], ['Vorgänge'], ['Projekte'], ['Zeiterfassung', 'zeit'], ['Finanzen', 'abrechnung'],
+  ['Rechnungen', 'abrechnung'], ['Kontakte', 'kontakte'], ['Flows', 'flows'], ['Cira', 'assistent']];
+// Entwurf bis „Übernehmen“: null = noch nichts geaendert, es gilt der Stand vom Server.
+const mz = { wahl: null, module: null, sendet: false };
+const abschnittSichtbar = (id) => { const a = E_ABSCHNITTE.find((x) => x.id === id); return !!a && modulAktiv(a.modul); };
+function mStand() {
+  const o = state.oberflaeche || { modus: 'full', module: {}, aktiv: M_ALLE };
+  const wahl = mz.wahl || (o.modus === 'wahl' ? null : o.modus);
+  const module = mz.module || (o.modus === 'modular' ? { ...o.module }
+    : Object.fromEntries(M_ALLE.map((k) => [k, (o.aktiv || M_ALLE).includes(k)])));
+  return { o, wahl, module };
+}
+// Was eine Ansicht einschaltet; flows nur mit abrechnung (wie moduleAktiv im Server).
+function mAn(wahl, module) {
+  const v = M_ANSICHTEN.find((x) => x.id === wahl);
+  const an = v && v.module ? v.module : M_ALLE.filter((k) => module[k] === true);
+  return an.filter((k) => k !== 'flows' || an.includes('abrechnung'));
+}
+function mVorschau(an, frei) {
+  return '<div class="m-vorschau' + (frei ? ' frei' : '') + '" aria-hidden="true">' + M_VORSCHAU.map(([l, m]) =>
+    '<span class="' + (!m || an.includes(m) ? 'an' : 'aus') + '"><i></i>' + esc(uebersetze(l)) + '</span>').join('') + '</div>';
+}
+function moduleHtml(erststart) {
+  const { o, wahl, module } = mStand();
+  const karten = M_ANSICHTEN.map((v) => {
+    const an = v.module || (wahl === 'modular' ? mAn('modular', module) : M_ALLE);
+    return '<button type="button" class="m-karte" data-aktion="m-wahl" data-wert="' + v.id + '" aria-pressed="' + (wahl === v.id) + '">' +
+      mVorschau(an, !v.module) +
+      '<span class="m-text"><b>' + esc(v.l) + '</b><span>' + esc(uebersetze(v.satz)) + '</span><small>' + esc(uebersetze(v.wer)) + '</small></span></button>';
+  }).join('');
+  const schalter = wahl !== 'modular' ? '' : '<div class="m-schalter">' + M_ALLE.map((k) => {
+    const gesperrt = k === 'flows' && !module.abrechnung;
+    const an = module[k] === true && !gesperrt;
+    return '<div class="einst-feld"><span class="l">' + esc(uebersetze(M_INFO[k][0])) + '<small>' + esc(uebersetze(M_INFO[k][1])) + '</small></span>' +
+      '<div class="w"><div class="zeile"><button type="button" class="kippschalter" role="switch" data-aktion="m-modul" data-wert="' + k + '" aria-checked="' + an + '"' +
+        (gesperrt ? ' disabled title="' + esc(uebersetze('Erst Abrechnung einschalten')) + '"' : '') + ' aria-label="' + esc(uebersetze(M_INFO[k][0])) + '">' +
+        '<span class="spur"></span>' + esc(uebersetze(an ? 'an' : 'aus')) + '</button></div></div></div>';
+  }).join('') + '<p class="faint">' + esc(uebersetze('Immer dabei: Verbrauch, Live, Sitzungen, Werkzeuge, Vorgänge, Projekte und Einstellungen.')) + '</p></div>';
+  // Unveraendert gegenueber dem Server: nichts zu uebernehmen (ausser beim ersten Start).
+  const gleich = !erststart && wahl === o.modus && (wahl !== 'modular' || M_ALLE.every((k) => !!module[k] === !!(o.module || {})[k]));
+  const knopf = '<button type="button" class="knopf primaer" data-aktion="m-speichern"' + (!wahl || gleich || mz.sendet ? ' disabled' : '') + '>' +
+    esc(uebersetze(mz.sendet ? 'Speichert …' : erststart ? 'Übernehmen und loslegen' : 'Übernehmen')) + '</button>';
+  const koppeln = state.kopplung === false ? '<p class="faint">' + esc(uebersetze('Zum Speichern koppelst du diesen Browser einmal. Der Code erscheint als Fenster auf deinem Desktop.')) + '</p>' : '';
+  return '<div class="m-karten" role="group" aria-label="' + esc(uebersetze('Ansicht')) + '">' + karten + '</div>' + schalter +
+    '<div class="m-fuss">' + knopf + '<span class="faint">' + esc(uebersetze('Jederzeit änderbar unter Einstellungen → Module. Ausgeschaltete Bereiche behalten ihre Daten.')) + '</span></div>' + koppeln;
+}
+registriere('start', {
+  zeichne(w) {
+    w.innerHTML = '<div class="m-start"><div class="m-start-kopf">' + LOGO + '<h1>' + esc(uebersetze('Willkommen bei c2invoice')) + '</h1>' +
+      '<p class="dim">' + esc(uebersetze('Wie willst du c2invoice nutzen? Wähle eine Ansicht, den Rest blenden wir aus.')) + '</p></div>' + moduleHtml(true) + '</div>';
+  },
+});
+aktion('m-wahl', (w) => {
+  if (!M_ANSICHTEN.some((v) => v.id === w)) return;
+  if (w === 'modular' && !mz.module) mz.module = mStand().module;
+  mz.wahl = w;
+  zeichneAnsicht();
+  const el = document.querySelector('[data-aktion="m-wahl"][data-wert="' + w + '"]');
+  if (el) el.focus();
+});
+aktion('m-modul', (k) => {
+  if (!M_ALLE.includes(k)) return;
+  const { module } = mStand();
+  mz.module = { ...module, [k]: !module[k] };
+  // Ohne Abrechnung keine Flows: sonst stuende ein Schalter auf an, der nichts tut.
+  if (!mz.module.abrechnung) mz.module.flows = false;
+  mz.wahl = 'modular';
+  zeichneAnsicht();
+  const el = document.querySelector('[data-aktion="m-modul"][data-wert="' + k + '"]');
+  if (el) el.focus();
+});
+aktion('m-speichern', async () => {
+  const { wahl, module } = mStand();
+  if (!wahl || mz.sendet) return;
+  mz.sendet = true;
+  zeichneAnsicht();
+  try {
+    const r = await sende('/api/oberflaeche', wahl === 'modular' ? { modus: wahl, module } : { modus: wahl });
+    mz.wahl = null; mz.module = null;
+    // Von der Strecke zur Startseite der neuen Ansicht, nicht zurueck auf #/start.
+    const warStart = route().name === 'start';
+    if (warStart) history.replaceState(null, '', location.pathname + location.search);
+    toast(uebersetze('Ansicht gespeichert'), 'ok');
+    mz.sendet = false;
+    // Hat der 60-s-Takt die neue Ansicht schon geholt, aendert sich nichts: dann selbst neu aufbauen,
+    // sonst bliebe die Strecke ohne Leiste stehen.
+    try { if (!oberflaecheGeaendert(r.oberflaeche) && warStart) zeige(); } catch (e) { console.error('Ansicht umbauen:', e); }
+  } catch (e) {
+    toast(e.message, 'err');
+  } finally {
+    mz.sendet = false;
+    zeichneAnsicht();
+  }
 });
 
 /* ---------- Arbeitsbereiche ----------
@@ -1079,7 +1231,7 @@ function suchTreffer(q) {
   const qq = falte(q.trim());
   if (!qq) return [];
   const T = [];
-  for (const a of E_ABSCHNITTE) {
+  for (const a of E_ABSCHNITTE.filter((x) => abschnittSichtbar(x.id))) {
     const W = a.stamm ? sWerte() : eWerte();
     for (const f of a.stamm ? Object.keys(W) : a.felder || []) {
       const r = W[f];
@@ -1248,7 +1400,9 @@ window.addEventListener('c2-gekoppelt', () => { egZ.d = null; if (route().name =
 /* ---------- Seite ---------- */
 function zeichneEinstellungen(w, teile) {
   const gemerkt = lies('einstellungen.abschnitt', 'allgemein');
-  const A = E_ABSCHNITTE.find((a) => a.id === teile[0]) || E_ABSCHNITTE.find((a) => a.id === gemerkt) || E_ABSCHNITTE[0];
+  // M1: Abschnitte ausgeschalteter Module fehlen; ein alter Link fuehrt zum ersten sichtbaren.
+  const sichtbar = E_ABSCHNITTE.filter((a) => abschnittSichtbar(a.id));
+  const A = sichtbar.find((a) => a.id === teile[0]) || sichtbar.find((a) => a.id === gemerkt) || sichtbar[0];
   merke('einstellungen.abschnitt', A.id);
   // Hintergrund-Nachladen unterbricht keine Eingabe; die Entwuerfe stehen im Zustand.
   const a = document.activeElement;
@@ -1256,13 +1410,17 @@ function zeichneEinstellungen(w, teile) {
   w.dataset.abschnitt = A.id;
   if (!ez.e.d && !ez.e.fehler) ladeEinst();
   // Beide immer: die Suche reicht ueber alle Abschnitte.
-  if (!ez.s.d && !ez.s.fehler) ladeStamm();
+  // M1: Stammdaten gehoeren zur Abrechnung, die Route antwortet sonst 409.
+  if (!ez.s.d && !ez.s.fehler && modulAktiv('abrechnung')) ladeStamm();
   if (A.id === 'projekte') ladeSaetze();
   const suche = sucheVorher('e-suche');
   const fv = fokusMerken(w);
-  let gruppe = null;
+  // Gruppenkopf auch dann, wenn der erste Abschnitt der Gruppe ausgeblendet ist.
+  let gruppe = null, gezeigt = null;
   const nav = '<nav aria-label="' + esc(uebersetze('Einstellungen')) + '">' + E_ABSCHNITTE.map((x) => {
-    const g = x.g !== '' && x.g !== gruppe ? (gruppe = x.g, '<span class="g">' + esc(uebersetze(x.g)) + '</span>') : '';
+    if (x.g !== '') gruppe = x.g;
+    if (!abschnittSichtbar(x.id)) return '';
+    const g = gruppe && gruppe !== gezeigt ? (gezeigt = gruppe, '<span class="g">' + esc(uebersetze(gruppe)) + '</span>') : '';
     return g + '<a href="#/einstellungen/' + x.id + '"' + (x.id === A.id && !ez.q ? ' aria-current="page"' : '') + '>' + esc(uebersetze(x.l)) + '</a>';
   }).join('') + '</nav>';
 
@@ -1288,6 +1446,7 @@ function zeichneEinstellungen(w, teile) {
     } else if (A.id === 'vorlagen') k = vorlagenHtml();
     else if (A.id === 'taet') k = taetHtml();
     else if (A.id === 'darstellung') k = darstellungHtml();
+    else if (A.id === 'module') k = moduleHtml(false);
     else if (A.id === 'arbeitsbereiche') k = arbeitsbereicheHtml();
     else if (A.id === 'geraete') k = geraeteHtml();
     else if (A.id === 'cira') k = ciraHtml();

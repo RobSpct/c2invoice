@@ -137,7 +137,8 @@ function bdKarte(k) {
   const wert = esc(JSON.stringify({ schluessel: k.schluessel, bereich: k.bereich }));
   const name = k.id || k.titel || k.schluessel;
   const tat = k.spalte === 'offen' ? '<button type="button" class="bd-tat" data-aktion="bd-claude" data-wert="' + wert + '" aria-label="' + esc(uebersetze('▶ in Claude') + ': ' + name) + '">' + esc(uebersetze('▶ in Claude')) + '</button>'
-    : k.spalte === 'erledigt' ? '<button type="button" class="bd-tat ok" data-aktion="bd-abrechnen" data-wert="' + wert + '" aria-label="' + esc(uebersetze('abrechnen') + ': ' + name) + '">' + esc(uebersetze('abrechnen')) + '</button>' : '';
+    // M1: „abrechnen“ fragt Cira nach einem Rechnungsentwurf, braucht also Abrechnung und Assistent.
+    : k.spalte === 'erledigt' && modulAktiv('abrechnung') && modulAktiv('assistent') ? '<button type="button" class="bd-tat ok" data-aktion="bd-abrechnen" data-wert="' + wert + '" aria-label="' + esc(uebersetze('abrechnen') + ': ' + name) + '">' + esc(uebersetze('abrechnen')) + '</button>' : '';
   return '<div class="bd-karte' + (an ? ' an' : '') + (k.sitzung_laeuft ? ' laeuft' : '') + '" draggable="true" data-aktion="bd-karte" data-wert="' + wert + '">' +
     '<span class="bd-zeile1">' + verweis(bd && bd.projekt ? '#/projekte/p/' + encodeURIComponent(bd.projekt) : '', 'Projekt öffnen', '<span class="bd-marke"' + bdFarbe(k.bereich) + '>' + esc(bdKuerzel(k.bereich)) + '</span>') +
       (k.id ? verweis(k.hat_daten && BD_VORGANG.test(k.schluessel) ? '#/vorgaenge/' + encodeURIComponent(k.schluessel) : '', 'Vorgang öffnen', '<span class="bd-id">' + esc(k.id) + '</span>') : '<span class="bd-id ohne">' + esc(uebersetze('ohne ID')) + '</span>') + bdQuelleMarke(k.quelle) +
@@ -221,7 +222,7 @@ function bdDetail() {
         (d.ort ? '<button type="button" class="knopf klein" data-aktion="bd-ort">' + esc(uebersetze('Ort kopieren')) + '</button>' : '') +
       '</div><div class="bd-aktionen">' +
         '<button type="button" class="knopf klein primaer" data-aktion="bd-claude" data-wert="' + esc(JSON.stringify({ schluessel: k.schluessel, bereich: k.bereich })) + '">' + esc(uebersetze('▶ Sitzung starten')) + '</button>' +
-        '<button type="button" class="knopf klein" data-aktion="bd-cira">' + esc(uebersetze('Cira fragen')) + '</button>' +
+        (modulAktiv('assistent') ? '<button type="button" class="knopf klein" data-aktion="bd-cira">' + esc(uebersetze('Cira fragen')) + '</button>' : '') +
         (k.quelle === 'md' && bdBereichJira(k.bereich) ? '<button type="button" class="knopf klein" data-aktion="bd-als-jira">' + esc(uebersetze('Als Jira-Ticket anlegen')) + '</button>' : '') +
       '</div></div>' +
   '</aside>';

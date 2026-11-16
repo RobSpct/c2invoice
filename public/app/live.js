@@ -107,6 +107,7 @@ function werkzeugZeile(L) {
 // Karte „Du“ (Mockup Z. 904–922): Timer, Arbeitszeit heute, als Naechstes heute und
 // Restkapazitaet (zNaechsteHeute in zeit.js, Zahl vom Server).
 function liveDu() {
+  if (!modulAktiv('zeit')) return '';   // M1: Timer und Arbeitszeit heute kommen aus der Zeiterfassung
   zHeuteLaden();
   const t = zTimer();
   const v = t && zHeute.d && zHeute.d.timer && zHeute.d.timer.vorschau;

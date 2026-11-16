@@ -87,7 +87,7 @@ const SPALTEN_V = [
   ['ticket', 'Vorgang', false], ['verlauf', 'Verlauf', null], ['active_hours', 'Aktiv', true], ['agent_hours', 'Agent', true],
   ['api_gegenwert_usd', 'API USD', true], ['arbeitswert', 'Arbeitswert', true],
   ['marge', 'Marge im Zeitraum', true, 'nach Sachkosten + eigener Zeit'], ['zeitmodell', 'Zeitmodell', null],
-  ['status', 'Status', null], ['budget', 'Budget', true, 'verbraucht, ganzer Vorgang'],
+  ['status', 'Status', null, undefined, 'abrechnung'], ['budget', 'Budget', true, 'verbraucht, ganzer Vorgang'],
 ];
 // Weitere Spalten der bisherigen Tabelle, hinter "Mehr Spalten": fest eingebaut
 // liefe die Tabelle schon bei 1024 px ueber.
@@ -95,7 +95,8 @@ const SPALTEN_MEHR = [
   ['requests', 'Requests', true], ['total_tokens', 'Tokens', true], ['abo_anteil_usd', 'Abo-Anteil USD', true],
   ['lokal_tokens', 'Tokens lokal', true], ['first_day', 'Zeitraum', false],
 ];
-const spaltenV = () => [...SPALTEN_V, ...(vz.mehr ? SPALTEN_MEHR : [])];
+// M1: Spalten ausgeschalteter Module fehlen (Status abgerechnet/offen ohne Abrechnung).
+const spaltenV = () => [...SPALTEN_V, ...(vz.mehr ? SPALTEN_MEHR : [])].filter((s) => modulAktiv(s[4]));
 // Gemerkte Sortierung aus dem Browser-Speicher nur uebernehmen, wenn sie passt.
 if (!spaltenV().some(([key, , zahl]) => key === vz.sort.k && zahl != null) || ![1, -1].includes(vz.sort.dir)) vz.sort = { k: 'arbeitswert', dir: -1 };
 const sortWert = (t, k) => (k === 'marge' ? (t.wert ? t.wert.marge_prozent : null) : k === 'budget' ? (budgetVon(t.ticket) || {}).prozent : t[k]);
@@ -142,7 +143,7 @@ function zeichneTabelle(w) {
     offen: (t) => !abr[t.ticket],
     abgerechnet: (t) => !!abr[t.ticket],
     ohne: (t) => !t.wert || t.wert.marge_prozent == null,
-  }[vz.filter] || (() => true);
+  }[modulAktiv('abrechnung') || !['offen', 'abgerechnet'].includes(vz.filter) ? vz.filter : 'alle'] || (() => true);
   const { k, dir } = vz.sort;
   const zeilen = alle.filter(passt).sort((a, b) => {
     const x = sortWert(a, k), y = sortWert(b, k);
@@ -154,7 +155,9 @@ function zeichneTabelle(w) {
   const tage = (S.days || []).map((d) => d.day);
   const z = aktuellerZeitraum();
 
-  const kopf = '<th scope="col" class="wahl"><span class="nur-sr">' + esc(uebersetze('Auswahl')) + '</span></th>' + spaltenV().map(([key, label, zahl, unter]) => {
+  // Haken und Status nur mit Abrechnung: beide dienen dem Weg in den Beleg-Editor.
+  const abrAn = modulAktiv('abrechnung');
+  const kopf = (abrAn ? '<th scope="col" class="wahl"><span class="nur-sr">' + esc(uebersetze('Auswahl')) + '</span></th>' : '') + spaltenV().map(([key, label, zahl, unter]) => {
     if (zahl == null) return '<th scope="col">' + esc(uebersetze(label)) + '</th>';
     const aktiv = k === key;
     return '<th scope="col"' + (zahl ? ' class="z"' : '') + ' aria-sort="' + (aktiv ? (dir > 0 ? 'ascending' : 'descending') : 'none') + '">' +
@@ -167,8 +170,8 @@ function zeichneTabelle(w) {
     return '<tr class="klickbar" data-aktion="v-oeffnen" data-wert="' + esc(t.ticket) + '">' +
       // Haken fuer den Schnellweg in den Beleg-Editor. Eigene Aktion, damit der
       // Klick nicht die Zeile oeffnet.
-      '<td class="wahl"><input type="checkbox" name="v-wahl" data-aktion="v-wahl" data-wert="' + esc(t.ticket) + '"' + (vz.wahl.has(t.ticket) ? ' checked' : '') +
-        ' aria-label="' + esc(uebersetze('Für Beleg auswählen') + ' ' + t.ticket) + '"></td>' +
+      (!abrAn ? '' : '<td class="wahl"><input type="checkbox" name="v-wahl" data-aktion="v-wahl" data-wert="' + esc(t.ticket) + '"' + (vz.wahl.has(t.ticket) ? ' checked' : '') +
+        ' aria-label="' + esc(uebersetze('Für Beleg auswählen') + ' ' + t.ticket) + '"></td>') +
       '<td><a class="mono vorgang-link" href="#/vorgaenge/' + encodeURIComponent(t.ticket) + '"><b>' + esc(t.ticket) + '</b></a>' +
         '<span class="unter faint">' + esc(t.project || '–') + ' · ' + esc(anzahl(t.sessions, 'Sitzung', 'Sitzungen')) + '</span></td>' +
       '<td title="' + esc(uebersetze('API-Gegenwert je Tag im Zeitraum')) + '">' + sparkline((S.ticket_verlauf || {})[t.ticket], tage) + '</td>' +
@@ -178,8 +181,8 @@ function zeichneTabelle(w) {
       '<td class="z">' + nf2.format(t.arbeitswert) + '</td>' +
       '<td class="z">' + margeZelle(t.wert) + '</td>' +
       '<td><span class="pille">' + esc(zmName(t.zeitmodell)) + '</span></td>' +
-      '<td><span class="pille status' + (ist ? ' ok' : '') + '"' + (ist ? ' title="' + esc(abr[t.ticket].nummern.join(', ') + ' · ' + eur(abr[t.ticket].betrag_eur)) + '"' : '') + '>' +
-        esc(uebersetze(ist ? 'abgerechnet' : 'offen')) + '</span></td>' +
+      (!abrAn ? '' : '<td><span class="pille status' + (ist ? ' ok' : '') + '"' + (ist ? ' title="' + esc(abr[t.ticket].nummern.join(', ') + ' · ' + eur(abr[t.ticket].betrag_eur)) + '"' : '') + '>' +
+        esc(uebersetze(ist ? 'abgerechnet' : 'offen')) + '</span></td>') +
       '<td>' + budgetBand(budgetVon(t.ticket), true) + '</td>' +
       (vz.mehr ? '<td class="z">' + num(t.requests) + '</td><td class="z">' + num(t.total_tokens) + '</td>' +
         '<td class="z">' + nf2.format(t.abo_anteil_usd || 0) + '</td><td class="z">' + num(t.lokal_tokens || 0) + '</td>' +
@@ -196,7 +199,7 @@ function zeichneTabelle(w) {
     '<div class="karten-kopf"><h2 class="titel-klein">' + num(alle.length) + ' ' + esc(uebersetze(alle.length === 1 ? 'Vorgang im Zeitraum' : 'Vorgänge im Zeitraum')) + '</h2>' +
       '<span class="hinweis">' + esc(uebersetze('Spaltenkopf klicken zum Sortieren, Zeile für Details')) + '</span>' +
       '<span class="rechts">' +
-        (gewaehlt.length ? '<a class="knopf primaer klein" href="' + esc(belegLink) + '">' + esc(uebersetze('Beleg erstellen')) + ' (' + num(gewaehlt.length) + ')</a>' : '') + segment('v-filter', [['alle', 'alle'], ['offen', 'offen'], ['abgerechnet', 'abgerechnet'], ['ohne', 'ohne Marge']], vz.filter, 'Filter') +
+        (gewaehlt.length && modulAktiv('abrechnung') ? '<a class="knopf primaer klein" href="' + esc(belegLink) + '">' + esc(uebersetze('Beleg erstellen')) + ' (' + num(gewaehlt.length) + ')</a>' : '') + segment('v-filter', [['alle', 'alle'], ['offen', 'offen', 'abrechnung'], ['abgerechnet', 'abgerechnet', 'abrechnung'], ['ohne', 'ohne Marge']].filter((o) => modulAktiv(o[2])), abrAn || !['offen', 'abgerechnet'].includes(vz.filter) ? vz.filter : 'alle', 'Filter') +
         '<button type="button" class="knopf klein' + (vz.mehr ? ' an' : '') + '" data-aktion="v-mehr" aria-pressed="' + vz.mehr + '">' + esc(uebersetze('Mehr Spalten')) + '</button>' +
         '<a class="knopf klein" href="/api/export.csv?' + esc(abfrage({ from: z.von, to: z.bis })) + '">' + esc(uebersetze('CSV exportieren')) + '</a></span></div>' +
     (!alle.length ? leer('liste', 'Noch keine Vorgänge im Zeitraum', 'Sobald ein Vorgangsschlüssel (z. B. ABC-123) in Branch oder Sitzung auftaucht, erscheint er hier.')
@@ -319,7 +322,8 @@ function kopfKarte(d) {
       (d.budget ? '<button type="button" class="textknopf" data-aktion="v-budget-weg" data-wert="' + esc(d.ticket) + '">' + esc(uebersetze('Entfernen')) + '</button>' : '') +
       budgetBand(d.budget, false) +
       '<span class="hinweis">' + esc(uebersetze('Verbraucht = Arbeitswert des ganzen Vorgangs mit manueller Zeit.')) + '</span></div>' +
-  '</div>' + zeitstrahl(d);
+  // M1: Angebot, Rechnung, Bezahlt nur mit Abrechnung.
+  '</div>' + (modulAktiv('abrechnung') ? zeitstrahl(d) : '');
 }
 
 function zeitstrahl(d) {

@@ -762,7 +762,8 @@ function zeichneHub(w, teile, neu) {
     hubHilfe() +
     katalogHtml('inst', INSTRUMENTE, inst.sicht) +
     '<div class="raster-kacheln inst" data-raster="inst">' + instHtml + (inst.sicht.length ? '' : leer('liste', 'Keine Instrumente ausgewählt', 'Über Bearbeiten hinzufügen.')) + '</div>' +
-    zeitReihe(S.kennzahlen) +
+    // M1: die Reihe liest die Zeiterfassung, ohne Modul Zeit faellt sie weg.
+    (modulAktiv('zeit') ? zeitReihe(S.kennzahlen) : '') +
     rasterKopf('meine', 'Meine Metriken', 'deine Schnellansicht ohne Soll — Kennzahlen, Diagramme, Belege', wst.angepasst) +
     katalogHtml('meine', WIDGETS, wst.sicht) +
     '<div class="raster-kacheln meine" data-raster="meine">' + widHtml +

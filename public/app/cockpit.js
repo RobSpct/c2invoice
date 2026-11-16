@@ -761,6 +761,8 @@ aktion('ck-freigabe', async (wert, el) => {
 function zeichneTimerKachel() {
   const el = document.getElementById('ck-timer');
   if (!el) return;
+  // M1: ohne Zeiterfassung keine Timer-Kachel (die Zeit-Routen antworten 409).
+  el.hidden = !modulAktiv('zeit');
   const t = state.live && state.live.timer;
   el.dataset.aktion = t ? 'zeit-stopp' : 'ck-timer-start';
   el.innerHTML = t

@@ -6,6 +6,7 @@
    Server-Texte (Meldungen, Kartentitel) laufen fuer Englisch durch fxServer(). */
 
 Object.assign(EN, {
+  'Vorschau': 'Preview', 'Drei mitgelieferte Flows zum Ein- und Ausschalten. Eigene Flows bauen kommt mit dem Flow-Editor in 3.3.': 'Three bundled flows to switch on and off. Building your own flows comes with the flow editor in 3.3.',
   'Flows': 'Flows', 'Alle Läufe': 'All runs', 'Läufe': 'Runs', 'Aufbau': 'Setup', 'Ansicht': 'View', 'Flow': 'Flow', 'Filter': 'Filter',
   'Fehler und Warnungen': 'Errors and warnings', '{n} Fehler': '{n} errors', '1 Fehler': '1 error', 'offene Fehlerkarten unter „Braucht dich“': 'open error cards under “Needs you”',
   'aktiv': 'active', 'pausiert': 'paused', '{n} Schritte': '{n} steps', '1 Schritt': '1 step', '{n} Läufe': '{n} runs', '1 Lauf': '1 run', '200+ Läufe': '200+ runs',
@@ -58,6 +59,13 @@ Object.assign(EN, {
 
 // Server-Texte (Schritt-Meldungen, Fehler, Kartentitel) fuer Englisch. Unbekanntes bleibt Deutsch.
 const FX_SERVER = [
+  // Probelauf eines Scan-Flows (flows.js probeHinweis): Meldung + Hinweis, beide Teile einzeln uebersetzt.
+  [/^(.+) · Probelauf, nichts gesendet\. Gesendet wird beim Scan \((werktags|täglich) ab (\d+) Uhr\) oder mit „Jetzt ausführen“$/s,
+    (m) => fxServer(m[1]) + ' · Test run, nothing sent. Sending happens at the scan (' + fuelle(m[2] + ' ab {h} Uhr', { h: m[3] }) + ') or with “' + uebersetze('Jetzt ausführen') + '”'],
+  [/^(.+) · Probelauf, nichts gesendet\. Der Flow ist pausiert: gesendet wird erst nach dem Scharfschalten$/s,
+    (m) => fxServer(m[1]) + ' · Test run, nothing sent. The flow is paused: sending starts only after switching it on'],
+  [/^(Zahlungserinnerung|1\. Mahnung|2\. Mahnung) an die Testadresse (\S+) \(statt an (.+?)\) über (.+)$/, (m) => uebersetze(m[1]) + ' to the test address ' + m[2] + ' (instead of ' + m[3] + ') for ' + m[4]],
+  [/^Nachfassen zu (.+?) an die Testadresse (\S+) \(statt an (.+)\)$/, 'Follow-up for $1 to the test address $2 (instead of $3)'],
   [/^Keine Empfängeradresse für Rechnung (.+?) \(Ansprechpartner oder Kontakt ohne E-Mail\)$/, 'No recipient address for invoice $1 (contact person or contact without e-mail)'],
   [/^Keine Empfängeradresse für Angebot (.+)$/, 'No recipient address for quote $1'],
   [/^Tagesgrenze erreicht \((\d+) Mails\), morgen wieder$/, 'Daily limit reached ($1 e-mails), again tomorrow'],
@@ -69,11 +77,11 @@ const FX_SERVER = [
   [/^Nachfassen für (.+) ist schon gesendet$/, 'Follow-up for $1 has already been sent'],
   [/^Ein früheres Nachfassen zu (.+) ist unklar zugestellt — erst unter Gesendet prüfen$/, 'An earlier follow-up for $1 has unclear delivery — check under Sent first'],
   [/^Nachfassen gesendet an (.+)$/, 'Follow-up sent to $1'], [/^Nachfassen zu (.+?) an (.+)$/, 'Follow-up for $1 to $2'],
-  [/^Test: Nachfassen ging an die Testadresse statt an (.+)$/, 'Test: follow-up went to the test address instead of $1'],
+  [/^Test: Nachfassen ging an die Testadresse (\S+) statt an (.+)$/, 'Test: follow-up went to the test address $1 instead of $2'],
   [/^PDF fehlt: (.+)$/, 'PDF missing: $1'], [/^Versand fehlgeschlagen$/, 'Sending failed'], [/^Unbekannte Aktion: (.+)$/, 'Unknown action: $1'],
   [/^Rechnungsentwurf für (.+)$/, 'Invoice draft for $1'], [/^Das Ereignis nennt keinen Vorgang$/, 'The event names no job'],
   [/^Mail ging raus, Status nicht gespeichert — nicht erneut senden, nicht als Post markieren$/, 'E-mail went out, status not saved — do not send again, do not mark as post'],
-  [/^Test: (.+?) ging an die Testadresse statt an (.+), zählt nicht als Stufe$/, (m) => 'Test: ' + uebersetze(m[1]) + ' went to the test address instead of ' + m[2] + ', does not count as a level'],
+  [/^Test: (.+?) ging an die Testadresse (\S+) statt an (.+), zählt nicht als Stufe$/, (m) => 'Test: ' + uebersetze(m[1]) + ' went to the test address ' + m[2] + ' instead of ' + m[3] + ', does not count as a level'],
   [/^(Zahlungserinnerung|1\. Mahnung|2\. Mahnung) gesendet an (.+)$/, (m) => uebersetze(m[1]) + ' sent to ' + m[2]],
   [/^(Zahlungserinnerung|1\. Mahnung|2\. Mahnung) an (.+?) über (.+)$/, (m) => uebersetze(m[1]) + ' to ' + m[2] + ' for ' + m[3]],
   [/^Flow „(.+)“ fehlgeschlagen(?:: (.+))?$/, (m) => 'Flow “' + uebersetze(m[1]) + '” failed' + (m[2] ? ': ' + fxServer(m[2]) : '')],
@@ -102,6 +110,12 @@ const FX_GRUND = [
   [/^Mahnpause bis (\S+)$/, 'dunning paused until $1'],
   [/^wartet auf die offene Fehlerkarte \(erst prüfen, dann bestätigen\)$/, 'waiting for the open error card (check first, then confirm)'],
   [/^Rechnung nicht lesbar \(siehe Protokoll\)$/, 'invoice not readable (see log)'],
+  // f2 (angebot.js ausgeschlossen)
+  [/^Nachfassen schon gesendet$/, 'follow-up already sent'],
+  [/^abgelaufen am (\S+)$/, 'expired on $1'],
+  [/^Nachfassen erst ab (\S+)$/, 'follow-up from $1'],
+  [/^Gültigkeitsdatum unlesbar$/, 'validity date unreadable'],
+  [/^gesperrt durch eine Fehlerkarte \(Nachfassen nur einmal\)$/, 'blocked by an error card (follow-up only once)'],
 ];
 function fxGrund(teil) {
   const m = /^(\S+) (.+)$/.exec(teil);
@@ -205,7 +219,8 @@ function fxListe() {
   return '<nav class="fx-zeilen" aria-label="' + esc(uebersetze('Flows')) + '">' +
     '<a class="fx-zeile" href="#/flows/alle"' + (fx.flowId === 'alle' ? ' aria-current="page"' : '') + '><span class="t">' + esc(uebersetze('Alle Läufe')) + '</span>' +
       (offen ? '<span class="pille bad" title="' + esc(uebersetze('offene Fehlerkarten unter „Braucht dich“')) + '">' + esc(offen === 1 ? uebersetze('1 Fehler') : fuelle('{n} Fehler', { n: offen })) + '</span>' : '') + '</a>' +
-    '<div class="fx-gruppe">' + esc(uebersetze('Flows')) + '</div>' +
+    '<div class="fx-gruppe">' + esc(uebersetze('Flows')) + ' <span class="pille warn" title="' +
+      esc(uebersetze('Drei mitgelieferte Flows zum Ein- und Ausschalten. Eigene Flows bauen kommt mit dem Flow-Editor in 3.3.')) + '">' + esc(uebersetze('Vorschau')) + '</span></div>' +
     fx.flows.map((f) => '<a class="fx-zeile" href="#/flows/' + f.id + '"' + (fx.flowId === f.id ? ' aria-current="page"' : '') + '>' +
       '<span class="fx-punkt' + (f.aktiv ? ' an' : '') + '" role="img" aria-label="' + esc(uebersetze(f.aktiv ? 'aktiv' : 'pausiert')) + '"></span>' +
       '<span class="t">' + esc(uebersetze(f.titel)) + '</span>' +
@@ -319,7 +334,7 @@ function fxDetail() {
       (l.kein_retry ? '<p class="faint">' + esc(uebersetze('Die Mail ist vermutlich raus. Nicht erneut senden: im Gesendet-Ordner und unter Gesendet in c2invoice prüfen. Die Karte unter „Braucht dich“ bestätigt nur.')) + '</p>'
         : !l.wiederholbar ? '<p class="faint">' + esc(uebersetze('Dieser Lauf wurde schon wiederholt, der neuere Lauf zählt.')) + '</p>' : '') +
       '<div class="fx-knoepfe">' + (!l.wiederholbar ? '' : '<button type="button" class="knopf klein primaer" data-aktion="fx-wdh">' + esc(fuelle('Ab Schritt {n} wiederholen', { n: l.fehler_schritt })) + '</button>') +
-        '<button type="button" class="knopf klein" data-aktion="fx-cira">' + esc(uebersetze('Cira fragen')) + '</button></div></section>' : '';
+        (modulAktiv('assistent') ? '<button type="button" class="knopf klein" data-aktion="fx-cira">' + esc(uebersetze('Cira fragen')) + '</button>' : '') + '</div></section>' : '';
   const meta = [['Start', fxZeit(l.start)], ['Dauer', l.ende ? fxDauer(l.start, l.ende) : uebersetze('läuft')], ['Auslöser', uebersetze(FX_ART[(l.ausloeser && l.ausloeser.art) || (fxFlow(l.flow_id) && fxAusloeserArt(fxFlow(l.flow_id)))] || '–')],
     ['Bezug', l.bezug || '–']];
   return '<article class="fx-artikel"><div class="fx-dkopf">' + fxStPille(l.status) + '<h3>' + esc(fxServer(l.betreff) || uebersetze(fxName(l.flow_id))) + '</h3></div>' +
