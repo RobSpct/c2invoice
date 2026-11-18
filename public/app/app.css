@@ -1005,7 +1005,7 @@ button.pille { cursor: pointer; }
 .wochen-balken .t { font-size: 10.5px; color: var(--text-faint); text-align: center; }
 .balken-duenn { display: block; height: 5px; border-radius: var(--r-pille); background: var(--line-soft); overflow: hidden; }
 .balken-duenn > span { display: block; height: 100%; border-radius: inherit; transition: width var(--zeit-lang) var(--kurve-aus); }
-.instr-link { display: flex; align-items: baseline; gap: 6px; font-size: 12px; color: var(--text-dim); margin-top: auto; padding-top: 8px; border-top: 1px solid var(--line-soft); }
+.instr-link { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; font-size: 12px; color: var(--text-dim); margin-top: auto; padding-top: 8px; border-top: 1px solid var(--line-soft); }
 .instr-link b { color: var(--accent-text); font-weight: 500; }
 .instr-link span:last-child { margin-left: auto; }
 .ziel-feld { display: flex; align-items: center; gap: 6px; }
