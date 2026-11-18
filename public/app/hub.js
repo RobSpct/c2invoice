@@ -75,7 +75,7 @@ Object.assign(EN, {
   'Ring + Anteile': 'Ring + shares', 'nur Werkzeugdaten': 'tool data only', 'USD je aktive h': 'USD per active h', 'noch nicht abgerechnet · abgerechnet': 'not yet invoiced · invoiced',
   'Heatmap + Serie': 'Heatmap + streak', 'Anteil API-Gegenwert': 'Share of API equivalent', 'Status & Betrag': 'Status & amount', 'offen / angenommen': 'open / accepted',
   'gegenüber der gleich langen Vorperiode': 'vs. the previous period of equal length', 'Erklärung': 'Explanation',
-  'Claude: Eigene Zeit': 'Claude: own time', 'Min um Eingaben': 'min around inputs',
+  'Claude: Eigene Zeit': 'Claude: own time', 'Min um Eingaben': 'min around inputs', 'Interaktionszeit bis': 'interaction time up to',
   'Liegst du über deiner Zielmarge? Für Preis- und Rabattentscheidungen.': 'Are you above your target margin? For pricing and discount decisions.',
   'Lohnt sich das Abo? Zeigt, wie viel Listenpreis es deckt.': 'Is the subscription worth it? Shows how much list price it covers.',
   'Welche Modelle den Verbrauch treiben — für Kostensteuerung.': 'Which models drive consumption — for cost control.',
@@ -738,6 +738,8 @@ function zeichneHub(w, teile, neu) {
     const unter = id === 'stunden'
       ? (S.config.zeitmodell === 'aktivitaet' ? uebersetze('Claude: Aktivität')
         : uebersetze('Claude: Eigene Zeit') + ' · ±' + nf1.format(S.config.gapMinutes / 2) + ' ' + uebersetze('Min um Eingaben'))
+        // Issue #2: Zeit nach einer Uebergabe an dich zaehlt bis interaktionMinuten.
+        + (S.config.interaktionMinuten > 0 ? ' · ' + uebersetze('Interaktionszeit bis') + ' ' + Math.round(S.config.interaktionMinuten) + ' Min' : '')
       : INSTRUMENT_UNTER[id];
     return kachel('inst', id, m[1], unter, pro ? '<div class="platzhalter"></div><div class="platzhalter kurz"></div>' : instrumentInhalt(id, D),
       inst.breite[id] || 1, { rechts, pro, proText: 'Zahlungseingänge erfassen und offene Posten verfolgen.' });

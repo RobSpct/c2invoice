@@ -293,6 +293,13 @@ function migrate(db) {
   addColumn(db, 'activity', 'eingabe', 'INTEGER');
   db.exec('CREATE INDEX IF NOT EXISTS idx_activity_eingabe ON activity(ts) WHERE eingabe = 1');
 
+  // Wartet der Agent nach dieser Zeile auf den Menschen? Davon haengt ab, ob
+  // die Luecke bis zur naechsten eigenen Eingabe als Interaktionszeit zaehlt (Issue #2,
+  // metrics.zeitAbschnitte). NULL = unbekannt (eingelesen vor dieser Spalte),
+  // 0 = Arbeit, 1 = neutral (Systemzeile, laesst die Interaktionszeit offen),
+  // 2 = Uebergabe (Zug-Ende, Rueckfrage, Plan zur Freigabe).
+  addColumn(db, 'activity', 'warte', 'INTEGER');
+
   // Ansprechpartner je Kontakt (R11, Block 4c). Die E-Mail am Kontakt bleibt —
   // die E-Rechnung liest sie weiter. Beim Umstieg wird sie einmal als
   // Ansprechpartner uebernommen, danach nie wieder: sonst kaeme ein geloeschter

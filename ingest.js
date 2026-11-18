@@ -214,11 +214,19 @@ const UPSERT_EVENT = `
 // die Zuordnung zum Vorgang kann inzwischen von Hand gebucht sein und darf
 // beim erneuten Einlesen nicht zurueckfallen. MAX, weil zwei Logzeilen
 // denselben Zeitstempel tragen koennen — ist eine davon eine Eingabe, zaehlt sie.
+// Bei der Warte-Kennung gewinnt die Uebergabe, dann die Arbeit, zuletzt neutral:
+// Arbeit auf demselben Zeitstempel beendet eine Interaktionszeit, eine neutrale Zeile
+// darf das nicht verdecken.
 const UPSERT_ACTIVITY = `
-  INSERT INTO activity (session_id, ts, project, branch, ticket, day, ticket_quelle, eingabe)
-  VALUES (?,?,?,?,?,?,?,?)
+  INSERT INTO activity (session_id, ts, project, branch, ticket, day, ticket_quelle, eingabe, warte)
+  VALUES (?,?,?,?,?,?,?,?,?)
   ON CONFLICT(session_id, ts) DO UPDATE SET
-    eingabe = MAX(COALESCE(activity.eingabe, 0), excluded.eingabe)
+    eingabe = MAX(COALESCE(activity.eingabe, 0), excluded.eingabe),
+    warte = CASE
+      WHEN activity.warte = 2 OR excluded.warte = 2 THEN 2
+      WHEN activity.warte = 0 OR excluded.warte = 0 THEN 0
+      ELSE COALESCE(excluded.warte, activity.warte)
+    END
 `;
 
 // Was Claude Code selbst als Nutzerzeile schreibt, ohne dass jemand tippt.
@@ -249,6 +257,34 @@ function istEingabe(o) {
     ? inhalt
     : (teile.find((b) => b && b.type === 'text') || {}).text || '';
   return !KEINE_EINGABE_RE.test(text);
+}
+
+// Uebergibt die Logzeile an den Menschen? Danach schreibt Claude Code keine
+// Zeilen, bis jemand antwortet — die Luecke ist Lese-, Antwort- oder Testzeit
+// (Issue #2). 2 = Uebergabe: Zug-Ende, Rueckfrage (AskUserQuestion), Plan zur
+// Freigabe (ExitPlanMode). 1 = neutral: Zeilen, die Claude Code auch waehrend
+// des Wartens schreibt (Zusammenfassung "away_summary" nach etwa drei Minuten,
+// Zugdauer, Anhaenge, Warteschlange); sie lassen die Interaktionszeit offen. 0 = Arbeit:
+// alles andere, auch jeder unbekannte Zeilentyp — eine Interaktionszeit endet dann,
+// und es gilt die Rechnung von vorher. Neutral ist nur, was an echten Logs
+// (Stand 11/2026) als Begleitzeile belegt ist. Rechteanfragen stehen nicht im
+// Log; sie bleiben Arbeit.
+const UEBERGABE_WERKZEUGE = new Set(['AskUserQuestion', 'ExitPlanMode']);
+const NEUTRAL_TYPEN = new Set(['attachment', 'queue-operation', 'frame-link', 'file-history-snapshot', 'summary',
+  'custom-title', 'ai-title', 'last-prompt', 'permission-mode', 'tag', 'agent-name']);
+const NEUTRAL_SYSTEM = new Set(['stop_hook_summary', 'turn_duration', 'away_summary', 'compact_boundary',
+  'local_command', 'informational', 'bridge_status']);
+function warteArt(o) {
+  if (!o || o.isSidechain) return 0;
+  if (o.type === 'assistant') {
+    const m = o.message || {};
+    const teile = Array.isArray(m.content) ? m.content : [];
+    if (teile.some((b) => b && b.type === 'tool_use' && UEBERGABE_WERKZEUGE.has(b.name))) return 2;
+    return m.stop_reason === 'end_turn' ? 2 : 0;
+  }
+  if (o.type === 'user') return o.isMeta ? 1 : 0;
+  if (o.type === 'system') return NEUTRAL_SYSTEM.has(o.subtype) ? 1 : 0;
+  return NEUTRAL_TYPEN.has(o.type) ? 1 : 0;
 }
 
 // Geschrieben wird in Bloecken, je Block eine Transaktion ohne await dazwischen.
@@ -333,7 +369,7 @@ async function ingestFile(db, filePath, fromOffset, stmts, { nurAktivitaet = fal
     // Jede Zeile ist ein Aktivitaetssignal, unabhaengig vom Typ. Ob sie eine
     // eigene Eingabe ist, entscheidet spaeter ueber die abgerechnete Zeit.
     puffere(db, puffer, stmts.activity, [sessionId, ts, project, branch, ticket, day, ticketQuelle,
-      istEingabe(o) ? 1 : 0]);
+      istEingabe(o) ? 1 : 0, warteArt(o)]);
 
     if (nurAktivitaet) continue;
     if (o.type !== 'assistant' || !o.message || !o.message.usage) continue;
@@ -418,7 +454,7 @@ async function ingestLokalFile(db, filePath, fromOffset, stmts) {
 
     // Jede Anfrage an ein lokales Modell gilt als eigene Eingabe: der Proxy
     // sieht nur, was jemand abgeschickt hat, keine selbstlaufenden Agenten.
-    puffere(db, puffer, stmts.activity, [sessionId, ts, LOKAL_PROJEKT, null, null, day, null, 1]);
+    puffere(db, puffer, stmts.activity, [sessionId, ts, LOKAL_PROJEKT, null, null, day, null, 1, 0]);
 
     puffere(db, puffer, stmts.event, [
       requestId, ts, sessionId, LOKAL_PROJEKT, null, null, null,
@@ -523,30 +559,44 @@ function neuBepreisen(db) {
   return n;
 }
 
-// Einmaliger Nachtrag: Zeilen aus der Zeit vor der Eingabe-Kennung tragen
-// NULL. Solange ihre Logdatei noch liegt, laesst sich die Kennung nachholen —
-// dafuer wird jede Datei einmal von vorn gelesen. Was danach noch NULL ist,
-// stammt aus geloeschten Logs und bleibt beim alten Zeitmass (siehe metrics.js).
+// Einmaliger Nachtrag: Zeilen aus der Zeit vor einer Kennung tragen NULL.
+// Solange ihre Logdatei noch liegt, laesst sich die Kennung nachholen — dafuer
+// wird jede Datei einmal von vorn gelesen. Was danach noch NULL ist, stammt aus
+// geloeschten Logs und rechnet wie vor der Kennung (siehe metrics.js).
 // Der Merker verhindert, dass dieser Rest jeden Lauf erneut alles liest.
-const NACHTRAG_MERKER = 'eingabe_nachgetragen';
+// Stehen beide Nachtraege aus, genuegt ein Lesedurchgang: er schreibt beide
+// Spalten.
+const NACHTRAEGE = [
+  // Der Proxy der lokalen Modelle schreibt nur abgeschickte Anfragen.
+  { merker: 'eingabe_nachgetragen', spalte: 'eingabe', name: 'Eingabe-Kennung', lokal: 1,
+    rest: 'Ihre Zeilen behalten das Zeitmass "aktivitaet".' },
+  // Lokale Modelle warten auf niemanden.
+  { merker: 'warte_nachgetragen', spalte: 'warte', name: 'Warte-Kennung', lokal: 0,
+    rest: 'Ihre Interaktionszeit zaehlt wie vor der Kennung.' },
+];
 
 // Wie oft ein unvollstaendiger Nachtrag wiederholt wird, bevor er als erledigt
 // gilt. Ohne Grenze laese ein dauerhaft unlesbares Log jeden Lauf alles neu.
 const NACHTRAG_VERSUCHE = 3;
 
-async function trageEingabenNach(db, files, stmts, verbose) {
-  if (dbmod.getMeta(db, NACHTRAG_MERKER)) return;
-  const fertig = () => dbmod.setMeta(db, NACHTRAG_MERKER, new Date().toISOString());
-  const offen = db.prepare('SELECT 1 FROM activity WHERE eingabe IS NULL LIMIT 1').get();
-  if (!offen) { fertig(); return; }
+async function trageKennungenNach(db, files, stmts, verbose) {
+  const fertig = (n) => dbmod.setMeta(db, n.merker, new Date().toISOString());
+  const offen = [];
+  for (const n of NACHTRAEGE) {
+    if (dbmod.getMeta(db, n.merker)) continue;
+    if (db.prepare(`SELECT 1 FROM activity WHERE ${n.spalte} IS NULL LIMIT 1`).get()) offen.push(n);
+    else fertig(n);
+  }
+  if (!offen.length) return;
 
   // Ohne lesbare Logs ist nichts nachgetragen — also auch nichts vermerken.
   // Ein falscher Pfad oder ein nicht eingehaengtes Laufwerk beim ersten Lauf
   // nach dem Update liesse den Altbestand sonst fuer immer ohne Kennung, und
-  // die Stunden blieben beim alten, hoeheren Zeitmass.
+  // die Stunden blieben beim alten Zeitmass.
   const logs = files.filter((f) => f.quelle === 'claude');
+  const namen = offen.map((n) => n.name).join(' und ');
   if (logs.length === 0) {
-    console.warn('Nachtrag der Eingabe-Kennung verschoben: keine Logdateien unter jsonlDir gefunden.');
+    console.warn('Nachtrag der ' + namen + ' verschoben: keine Logdateien unter jsonlDir gefunden.');
     return;
   }
 
@@ -562,22 +612,25 @@ async function trageEingabenNach(db, files, stmts, verbose) {
       console.error('Nachtrag: Fehler bei', pfad, err.message);
     }
   }
-  // Der Proxy der lokalen Modelle schreibt nur abgeschickte Anfragen.
-  db.prepare("UPDATE activity SET eingabe = 1 WHERE eingabe IS NULL AND session_id LIKE 'lokal:%'").run();
-  if (verbose) console.log('Nachtrag: Eingabe-Kennung fuer vorhandene Logs ergaenzt');
-
-  if (fehler > 0) {
-    const schluessel = NACHTRAG_MERKER + '_versuche';
-    const versuche = (Number(dbmod.getMeta(db, schluessel)) || 0) + 1;
-    dbmod.setMeta(db, schluessel, versuche);
-    if (versuche < NACHTRAG_VERSUCHE) {
-      console.warn('Nachtrag unvollstaendig: ' + fehler + ' Logdatei(en) nicht lesbar. Wird beim naechsten Lauf wiederholt.');
-      return;
-    }
-    console.warn('Nachtrag nach ' + versuche + ' Versuchen beendet: ' + fehler +
-      ' Logdatei(en) blieben unlesbar. Ihre Zeilen behalten das Zeitmass "aktivitaet".');
+  for (const n of offen) {
+    db.prepare(`UPDATE activity SET ${n.spalte} = ? WHERE ${n.spalte} IS NULL AND session_id LIKE 'lokal:%'`).run(n.lokal);
   }
-  fertig();
+  if (verbose) console.log('Nachtrag: ' + namen + ' fuer vorhandene Logs ergaenzt');
+
+  for (const n of offen) {
+    if (fehler > 0) {
+      const schluessel = n.merker + '_versuche';
+      const versuche = (Number(dbmod.getMeta(db, schluessel)) || 0) + 1;
+      dbmod.setMeta(db, schluessel, versuche);
+      if (versuche < NACHTRAG_VERSUCHE) {
+        console.warn('Nachtrag der ' + n.name + ' unvollstaendig: ' + fehler + ' Logdatei(en) nicht lesbar. Wird beim naechsten Lauf wiederholt.');
+        continue;
+      }
+      console.warn('Nachtrag der ' + n.name + ' nach ' + versuche + ' Versuchen beendet: ' + fehler +
+        ' Logdatei(en) blieben unlesbar. ' + n.rest);
+    }
+    fertig(n);
+  }
 }
 
 async function run({ db, verbose = false } = {}) {
@@ -604,7 +657,7 @@ async function run({ db, verbose = false } = {}) {
     activity: db.prepare(UPSERT_ACTIVITY),
   };
 
-  await trageEingabenNach(db, files, stmts, verbose);
+  await trageKennungenNach(db, files, stmts, verbose);
 
   let totalLines = 0;
   let totalEvents = 0;
@@ -661,7 +714,7 @@ async function run({ db, verbose = false } = {}) {
 module.exports = {
   run, projectOf, ticketOf, extractUsage, listJsonlFiles, PROJECT_ROOTS,
   lokalDir, jsonlDir, LOKAL_PROJEKT, CIRA_ORDNER, CIRA_PROJEKT, TEST_PROJEKT, istTemp, tempWurzeln, TEMP_WURZELN, PROJEKT_ALIAS, pruefeAlias,
-  istEingabe, gleichePreiseAb, loeseHeim,
+  istEingabe, warteArt, gleichePreiseAb, loeseHeim,
 };
 
 if (require.main === module) {

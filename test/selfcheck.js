@@ -7412,6 +7412,7 @@ async function main() {
     ...require('./cira/c12')({ dbmod, openDbs, rechnungsUmgebung, rechnungsDb }),
     ...require('./cira/p')({ dbmod, openDbs }),
     ...require('./cira/m1')({ dbmod, openDbs, configGeschuetzt }),
+    ...require('./cira/w')({ dbmod, openDbs }),
   ]) {
     try {
       await fn();

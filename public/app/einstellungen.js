@@ -94,6 +94,7 @@ Object.assign(EN, {
   'nach Sachkosten und eigener Zeit · steuert die Margen-Ampel': 'after material costs and own time · drives the margin traffic light',
   'deine eigene Zeit als Kosten · Grundlage der Marge': 'your own time as cost · basis of the margin',
   'wird auf die aktive Zeit verteilt': 'spread over the active time', 'Lücke, ab der eine Sitzung als unterbrochen gilt': 'gap after which a session counts as interrupted',
+  'Plan lesen, Rückfrage beantworten, testen: so lange zählt die Zeit nach einer Übergabe an dich ganz · darüber nicht · 0 schaltet ab': 'reading a plan, answering a question, testing: time after a handover to you counts in full up to this · beyond it not at all · 0 turns it off',
   '0 schaltet die Kennzahl ab · höchstens 1,5': '0 switches the metric off · at most 1.5',
   'Erlaubt: {min} bis {max}': 'Allowed: {min} to {max}', 'oder {aus} zum Abschalten': 'or {aus} to switch off', 'Wert fehlt': 'Value missing',
   'Zeitmodell': 'Time model', 'Standard-Stundensatz': 'Default hourly rate', 'Selbstkostensatz je Stunde': 'Cost rate per hour',
@@ -198,7 +199,7 @@ Object.assign(EN, {
 const E_ABSCHNITTE = [
   { id: 'allgemein', l: 'Allgemein', g: '', sub: 'Zeitmodell und Ziel', felder: ['zeitmodell', 'tagessollStunden', 'zielmargeProzent', 'limit5hTokens'] },
   { id: 'saetze', l: 'Sätze & Kosten', g: 'Abrechnung', sub: 'gelten, wenn Projekt oder Kunde nichts Eigenes haben',
-    felder: ['stundensatz', 'selbstkostenStunde', 'aboPreisMonat', 'usdToEur', 'gapMinutes', 'vergleichsFaktor'] },
+    felder: ['stundensatz', 'selbstkostenStunde', 'aboPreisMonat', 'usdToEur', 'gapMinutes', 'interaktionMinuten', 'vergleichsFaktor'] },
   { id: 'projekte', l: 'Stundensätze je Projekt', g: '', sub: 'Satz, Rabatt, Zeitmodell und Rundung · auch in der Kontakt-Akte', kw: 'satz rabatt zeitmodell rundung projekt rate discount rounding' },
   // Rundung als Segment, nicht als Feld: speichern wie das Zeitmodell (e-rundung).
   { id: 'taet', modul: 'zeit', l: 'Tätigkeitsarten & Rundung', g: '', sub: 'für manuelle Zeit · eigener Satz optional', kw: 'tätigkeit meeting konzept review rundung activity rounding' },
@@ -231,7 +232,9 @@ const E_HINWEIS = {
   zeitmodell: 'Eigene Zeit: Fenster um deine Eingaben. Aktivität: Laufzeit des Agenten. Projekte, Vorgänge und Sitzungen können abweichen.',
   zielmargeProzent: 'nach Sachkosten und eigener Zeit · steuert die Margen-Ampel',
   selbstkostenStunde: 'deine eigene Zeit als Kosten · Grundlage der Marge', aboPreisMonat: 'wird auf die aktive Zeit verteilt',
-  gapMinutes: 'Lücke, ab der eine Sitzung als unterbrochen gilt', vergleichsFaktor: '0 schaltet die Kennzahl ab · höchstens 1,5',
+  gapMinutes: 'Lücke, ab der eine Sitzung als unterbrochen gilt',
+  interaktionMinuten: 'Plan lesen, Rückfrage beantworten, testen: so lange zählt die Zeit nach einer Übergabe an dich ganz · darüber nicht · 0 schaltet ab',
+  vergleichsFaktor: '0 schaltet die Kennzahl ab · höchstens 1,5',
   email: 'Kontaktstelle für die E-Rechnung', land: 'zweistelliges Kürzel, z. B. DE', kleinunternehmer: 'Belege ohne Umsatzsteuer, mit Hinweis',
   zahlungszielTage: 'für neue Rechnungen · gestellte behalten ihr Fälligkeitsdatum',
   angebotGueltigTage: 'für neue Angebote · bestehende behalten ihr Datum',
@@ -245,7 +248,7 @@ const E_HINWEIS = {
   flowsAbStunde: 'volle Stunde 0 bis 23 · Standard 9', flowsWochenende: 'aus = nur Montag bis Freitag · an = auch Samstag und Sonntag',
 };
 const E_EINHEIT = {
-  stundensatz: 'EUR/h', selbstkostenStunde: 'EUR/h', zielmargeProzent: '%', aboPreisMonat: 'EUR', gapMinutes: 'Min', vergleichsFaktor: '×',
+  stundensatz: 'EUR/h', selbstkostenStunde: 'EUR/h', zielmargeProzent: '%', aboPreisMonat: 'EUR', gapMinutes: 'Min', interaktionMinuten: 'Min', vergleichsFaktor: '×',
   lokalEurProMioTokens: 'EUR', lokalSelbstkostenStunde: 'EUR/h', lokalZuordnungsfenster: 'Min', ustSatz: '%', zahlungszielTage: 'Tage', angebotGueltigTage: 'Tage',
   tagessollStunden: 'h', limit5hTokens: 'Tokens',
   nachfassenTageVorAblauf: 'Tage', erinnerungNachTagen: 'Tage', mahnung1NachTagen: 'Tage', mahnung2NachTagen: 'Tage', neueFristTage: 'Tage', gebuehrStufe2Eur: 'EUR',

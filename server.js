@@ -528,6 +528,9 @@ const EINSTELLUNGEN = {
   aboPreisMonat: { min: 0, max: 100000, label: 'Abo-Preis je Monat' },
   usdToEur: { min: 0.01, max: 100, label: 'Umrechnungskurs USD zu EUR' },
   gapMinutes: { min: 1, max: 240, label: 'Pausenschwelle in Minuten' },
+  // Issue #2: Luecke nach einer Uebergabe an den Menschen (Plan lesen, Rueckfrage,
+  // testen) zaehlt bis hierhin ganz. 0 schaltet ab; ohne Eintrag gilt metrics.interaktionMinuten().
+  interaktionMinuten: { min: 1, max: 240, aus: 0, ganz: true, standard: 30, label: 'Interaktionszeit in Minuten' },
   // Obergrenze bewusst niedrig: die Studienlage traegt keinen hohen Faktor.
   // Unabhaengige Messungen reichen von langsamer (METR 2025: -19 %) bis
   // deutlich schneller; und selbst der optimistischste Wert misst nur das
@@ -1865,6 +1868,7 @@ function handle(req, res) {
           aboWaehrung: config.aboWaehrung,
           usdToEur: config.usdToEur,
           gapMinutes: config.gapMinutes,
+          interaktionMinuten: metrics.interaktionMinuten(),
           // Bestimmt, wie die Oberflaeche die Zeitkachel beschriftet. Alles
           // ausser "aktivitaet" ist die Vorgabe, genau wie in metrics.js.
           zeitmodell: config.zeitmodell === 'aktivitaet' ? 'aktivitaet' : 'eingaben',
@@ -2138,7 +2142,9 @@ function handle(req, res) {
           : config[feld];
         werte[feld] = {
           // Fehlt der Wert oder ist er ungueltig, rechnet zeit.js mit dem Standard — dann zeigt ihn auch die Oberflaeche.
-          wert: regel.standard !== undefined && !(Number.isFinite(wert) && wert >= regel.min && wert <= regel.max && (!regel.ganz || Number.isInteger(wert)))
+          // Der Abschalt-Wert (aus) ist gueltig, auch wenn er unter min liegt (interaktionMinuten 0).
+          wert: regel.standard !== undefined && wert !== regel.aus
+            && !(Number.isFinite(wert) && wert >= regel.min && wert <= regel.max && (!regel.ganz || Number.isInteger(wert)))
             ? regel.standard : wert,
           min: regel.min, max: regel.max, label: regel.label,
           ...(regel.aus !== undefined ? { aus: regel.aus } : {}),

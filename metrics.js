@@ -37,7 +37,7 @@ function withTotals(row) {
 
 // Aktivzeit: Summe der Abstaende zwischen aufeinanderfolgenden Ereignissen,
 // aber nur solange ein Abstand die Pausenschwelle nicht ueberschreitet.
-// Damit zaehlt Wartezeit auf eine Antwort des Nutzers nicht als Arbeitszeit.
+// Damit zaehlt Interaktionszeit auf eine Antwort des Nutzers nicht als Arbeitszeit.
 function activeSecondsFromTimestamps(timestamps, gapMinutes = config.gapMinutes) {
   if (!Array.isArray(timestamps) || timestamps.length < 2) return 0;
   const limit = gapMinutes * 60 * 1000;
@@ -64,6 +64,12 @@ function activeSecondsFromTimestamps(timestamps, gapMinutes = config.gapMinutes)
 // ein Vorgang oder eine einzelne Sitzung (Tabelle zeitmodell_wahl) kann ihn
 // ueberschreiben. Es gilt die engste Wahl: Sitzung vor Vorgang vor Projekt.
 const ZEITMODELLE = ['eingaben', 'aktivitaet'];
+
+// Wie lange eine Luecke nach einer Uebergabe an den Menschen hoechstens als
+// Interaktionszeit zaehlt (siehe zeitAbschnitte). Fehlt der Wert in config.json, gilt
+// die Vorgabe; 0 schaltet die Regel ab.
+const INTERAKTION_VORGABE = 30;
+const interaktionMinuten = () => (config.interaktionMinuten === undefined ? INTERAKTION_VORGABE : config.interaktionMinuten);
 
 function zeitmodellKarte(db) {
   const sitzung = new Map();
@@ -138,6 +144,16 @@ function zeitRahmen({ from, to, month }) {
 //   Pausenschwelle. Gilt im Modell "aktivitaet" und fuer Zeilen ohne
 //   Eingabe-Kennung, deren Logs laengst geloescht sind.
 //
+// Interaktionszeit (Issue #2): Uebergibt der Agent an den Menschen (Zug-Ende,
+// Rueckfrage, Plan zur Freigabe; activity.warte = 2), schreibt Claude Code bis
+// zur Antwort kaum noch Zeilen. Diese Luecke ist Lese-, Antwort- oder Testzeit.
+// Endet sie mit einer eigenen Eingabe und arbeitet der Agent dazwischen nicht,
+// zaehlt sie bis `interaktionMinuten` ganz: im Modell "aktivitaet" als Luecke, im
+// Modell "eingaben" beginnt das Fenster an der Uebergabe statt eine halbe
+// Pausenschwelle vor der Eingabe. Neutrale Zeilen (warte = 1) lassen die
+// Interaktionszeit offen. Ist sie laenger, rechnet sie wie ohne diese Regel — eine
+// Mittagspause bei offener Sitzung wird nicht gebucht.
+//
 // Gefiltert wird hier nur nach Zeit, und zwar einen Tag weiter als verlangt:
 // Vorgang, Projekt und der genaue Zeitraum werden erst nach dem Verteilen
 // ausgewaehlt. Sonst saehe ein gefilterter Aufruf die parallele Sitzung des
@@ -145,13 +161,28 @@ function zeitRahmen({ from, to, month }) {
 // dieselbe Arbeit truege je nach Ansicht verschiedene Zeiten.
 function zeitAbschnitte(db, rahmen) {
   const karte = zeitmodellKarte(db);
-  const rows = db.prepare(`
-    SELECT session_id, ts, project, ticket, day, eingabe FROM activity
-    WHERE (? IS NULL OR day >= date(?, '-1 day'))
-      AND (? IS NULL OR day <= date(?, '+1 day'))
-      ${karte.nurEingaben ? 'AND (eingabe IS NULL OR eingabe = 1)' : ''}
-    ORDER BY session_id, ts
-  `).all(rahmen.von, rahmen.von, rahmen.bis, rahmen.bis);
+  const interaktionMs = interaktionMinuten() * 60 * 1000;
+  const zeitraum = `(? IS NULL OR day >= date(?, '-1 day')) AND (? IS NULL OR day <= date(?, '+1 day'))`;
+  // Im reinen Modell "eingaben" genuegen die Eingaben und der Altbestand ohne
+  // Kennung. Fuer die Interaktionszeit kommen die Uebergaben dazu und je Uebergabe die
+  // erste Zeile danach, die nicht neutral ist — ist sie Arbeit, endet dort die
+  // Interaktionszeit. Alle uebrigen Zeilen (ueber 90 %) bleiben weiter ungelesen.
+  const sql = !karte.nurEingaben
+    ? `SELECT session_id, ts, project, ticket, day, eingabe, warte FROM activity
+       WHERE ${zeitraum} ORDER BY session_id, ts`
+    : !interaktionMs
+      ? `SELECT session_id, ts, project, ticket, day, eingabe, warte FROM activity
+         WHERE ${zeitraum} AND (eingabe IS NULL OR eingabe = 1) ORDER BY session_id, ts`
+      : `WITH k AS (
+           SELECT session_id, ts, project, ticket, day, eingabe, warte,
+             LAG(warte) OVER (PARTITION BY session_id ORDER BY ts) AS vor
+           FROM activity
+           WHERE ${zeitraum} AND (warte IS NULL OR warte <> 1 OR eingabe IS NOT 0)
+         )
+         SELECT session_id, ts, project, ticket, day, eingabe, warte FROM k
+         WHERE eingabe IS NULL OR eingabe = 1 OR warte = 2 OR vor = 2
+         ORDER BY session_id, ts`;
+  const rows = db.prepare(sql).all(rahmen.von, rahmen.von, rahmen.bis, rahmen.bis);
 
   const limit = config.gapMinutes * 60 * 1000;
   const halb = limit / 2;
@@ -170,9 +201,11 @@ function zeitAbschnitte(db, rahmen) {
   let lauf = null;
   let fenster = null;
   let davor = null;
-  for (const r of rows) {
-    const ms = Date.parse(r.ts);
-    if (!Number.isFinite(ms)) continue;
+  // Eine Zeile nach der bisherigen Regel. `bruecke`: die offene Interaktionszeit, die
+  // diese Eingabe beendet ({ ms, row } der Uebergabe), sonst null. Als Luecke
+  // zaehlt sie nur, wenn die Zeile davor die Uebergabe selbst ist — sonst
+  // enthielte die Luecke Zeit vor der Uebergabe (Modellwechsel dazwischen).
+  function schritt(r, ms, bruecke) {
     erbeProjekt(r, davor);
     // Das Modell haengt am Projekt, deshalb erst nach dem Erben entscheiden.
     r.modell = karte.fuer(r);
@@ -180,36 +213,54 @@ function zeitAbschnitte(db, rahmen) {
     // Im Modell "eingaben" sind Zeilen ohne eigene Eingabe Agentenzeit. Sie
     // fallen ganz heraus, auch als Vorgaenger fuer das Erben: so verhaelt sich
     // die Rechnung wie vorher, als die Abfrage sie gar nicht erst las.
-    if (eingaben && r.eingabe === 0) continue;
+    if (eingaben && r.eingabe === 0) return;
     davor = r;
 
     if (eingaben && r.eingabe === 1) {
+      let start = ms - halb;
+      let gezaehlt = false;
       // Wechselt die Sitzung mitten in der Arbeit von einem Vorgang mit
       // Modell "aktivitaet" hierher, gehoert die Luecke davor noch jenem
       // Vorgang: eine Luecke zaehlt dort, wo sie beginnt. Ohne das ginge sie
       // beim Zuruecksetzen unten verloren.
       if (prev && prev.modell !== 'eingaben' && r.session_id === prev.session_id) {
         const gap = ms - prevMs;
-        if (gap > 0 && gap <= limit) {
+        gezaehlt = gap > 0 && (gap <= limit || Boolean(bruecke && prev === bruecke.row && gap <= interaktionMs));
+        if (gezaehlt) {
           if (lauf && lauf.bis === prevMs && gleich(lauf, prev)) lauf.bis = ms;
           else out.push(neu(prevMs, ms, prev));
         }
       }
+      // Gezaehlt steckt die Interaktionszeit schon in jener Luecke. Sonst beginnt die
+      // Interaktionszeit an der Uebergabe — aber nicht in einem frueheren Fenster
+      // derselben Sitzung, sonst zaehlte die Sitzung dort doppelt. Sie gehoert,
+      // wie jede Luecke, der Zeile, an der sie beginnt: Liegt die Uebergabe an
+      // einem anderen Tag oder bei einem anderen Vorgang, bekommt sie einen
+      // eigenen Abschnitt (Rechnung je Monat, Wechsel des Branches).
+      if (bruecke && !gezaehlt) {
+        const h = bruecke.row;
+        const vorher = fenster && fenster.session === r.session_id && !gleich(fenster, r) ? fenster.bis : -Infinity;
+        const von = Math.max(bruecke.ms, vorher);
+        if (von < start) {
+          if (h.project === r.project && h.ticket === r.ticket && h.day === r.day) start = von;
+          else out.push(neu(von, start, h));
+        }
+      }
       // Fenster derselben Sitzung wachsen zusammen, damit eine Sitzung beim
       // Verteilen als ein Teilnehmer zaehlt und nicht als mehrere.
-      if (fenster && gleich(fenster, r) && ms - halb <= fenster.bis) {
+      if (fenster && gleich(fenster, r) && start <= fenster.bis) {
         fenster.bis = ms + halb;
       } else {
-        fenster = neu(ms - halb, ms + halb, r);
+        fenster = neu(start, ms + halb, r);
         out.push(fenster);
       }
       prev = null;
       lauf = null;
-      continue;
+      return;
     }
 
     const gap = prev && r.session_id === prev.session_id ? ms - prevMs : Infinity;
-    if (gap > 0 && gap <= limit) {
+    if (gap > 0 && (gap <= limit || Boolean(bruecke && prev === bruecke.row && gap <= interaktionMs))) {
       if (lauf && lauf.bis === prevMs && gleich(lauf, prev)) {
         lauf.bis = ms;
       } else {
@@ -222,6 +273,41 @@ function zeitAbschnitte(db, rahmen) {
     prev = r;
     prevMs = ms;
   }
+
+  // Offene Interaktionszeit: { session, ms, row, neutral: [[zeile, ms], ...] }.
+  // Neutrale Zeilen werden zurueckgehalten, bis feststeht, wie die Interaktionszeit
+  // endet. Endet sie anders als mit einer Eingabe innerhalb der Schwelle,
+  // laufen sie nachtraeglich durch die bisherige Regel — die Rechnung ist dann
+  // genau die alte. Endet sie mit der Eingabe, fallen sie weg: die Interaktionszeit
+  // gehoert der Uebergabe, an der sie beginnt.
+  let warten = null;
+  const loese = () => {
+    if (!warten) return;
+    const zurueck = warten.neutral;
+    warten = null;
+    for (const [r, ms] of zurueck) schritt(r, ms, null);
+  };
+  for (const r of rows) {
+    const ms = Date.parse(r.ts);
+    if (!Number.isFinite(ms)) continue;
+    if (warten && warten.session !== r.session_id) loese();
+    if (warten) {
+      if (r.eingabe === 1 && ms - warten.ms <= interaktionMs) {
+        const bruecke = warten;
+        warten = null;
+        schritt(r, ms, bruecke);
+        continue;
+      }
+      if (r.warte === 1 && r.eingabe !== 1) {
+        warten.neutral.push([r, ms]);
+        continue;
+      }
+      loese();
+    }
+    schritt(r, ms, null);
+    if (interaktionMs > 0 && r.warte === 2 && r.eingabe !== 1) warten = { session: r.session_id, ms, row: r, neutral: [] };
+  }
+  loese();
   return out;
 }
 
@@ -314,7 +400,7 @@ function verteile(abschnitte) {
 const ZWISCHEN = new WeakMap();
 function standVon(db) {
   return db.prepare('SELECT total_changes() AS n').get().n + '|' + db.prepare('PRAGMA data_version').get().data_version
-    + '|' + config.gapMinutes + '|' + config.zeitmodell + '|' + JSON.stringify(config.projektSaetze || {});
+    + '|' + config.gapMinutes + '|' + interaktionMinuten() + '|' + config.zeitmodell + '|' + JSON.stringify(config.projektSaetze || {});
 }
 function memo(db, schluessel, rechne) {
   if (db.isTransaction !== false) return rechne();
@@ -554,6 +640,14 @@ if (!Number.isFinite(config.gapMinutes) || config.gapMinutes <= 0) {
   throw new Error(
     'config.json: gapMinutes fehlt oder ist ungueltig. Ohne Pausenschwelle ' +
     'waeren alle Stunden 0. Bitte einen Wert wie 5 eintragen.'
+  );
+}
+if (config.interaktionMinuten !== undefined
+  && !(Number.isInteger(config.interaktionMinuten) && config.interaktionMinuten >= 0 && config.interaktionMinuten <= 240)) {
+  // Ganze Minuten wie in den Einstellungen: sonst zeigte die Oberflaeche einen
+  // anderen Wert als den, mit dem gerechnet wird.
+  throw new Error(
+    'config.json: interaktionMinuten muss eine ganze Zahl von 0 bis 240 sein (0 schaltet die Interaktionszeit ab), nicht "' + config.interaktionMinuten + '".'
   );
 }
 if (config.zeitmodell !== undefined && !['eingaben', 'aktivitaet'].includes(config.zeitmodell)) {
@@ -2219,6 +2313,7 @@ module.exports = {
   vorrechnen,
   zeitmodellKarte,
   ZEITMODELLE,
+  interaktionMinuten,
   summary,
   zeitRahmen,
   zeitAbschnitte,

@@ -155,6 +155,10 @@ function buildComment(t, models) {
               `teils jede Aktivitaet ohne Pausen ueber ${config.gapMinutes} Minuten. `
             : `Arbeitszeit ist die Zeit um die eigenen Eingaben (je ${config.gapMinutes / 2} Minuten davor und danach); ` +
               'die Agentenzeit ist die Laufzeit der KI und wird nicht berechnet. ') +
+        // Issue #2: interaktionMinuten() statt config.interaktionMinuten — ohne Eintrag gilt die Vorgabe.
+        (metrics.interaktionMinuten() > 0
+          ? `Interaktionszeit: Uebergibt die KI an dich (Plan, Rueckfrage, Zug-Ende), zaehlt die Zeit bis zu deiner Antwort bis ${metrics.interaktionMinuten()} Minuten ganz. `
+          : '') +
         'Werkzeuge sind Hintergrunddienste (z. B. claude-mem), die waehrend der ' +
         'Arbeit an diesem Ticket mitliefen und ueber ein Zeitfenster zugeordnet werden. ' +
         `Stand: ${new Date().toLocaleString('de-DE')}`,
