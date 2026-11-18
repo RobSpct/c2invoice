@@ -322,6 +322,12 @@ minutes):
 
 - Two inputs at most 5 minutes apart: the time between them counts in full.
 - The agent then runs alone for 40 minutes: 5 minutes count, not 40.
+- The agent hands over to you (end of a turn, a question, a plan to approve):
+  the window starts at the handover, not shortly before your reply. Reading a
+  plan, answering a question and testing is your time. This **interaction
+  time** counts up to `interaktionMinuten` (default 30, `0` turns it off).
+  Longer gaps count as before, so a lunch break with an open session is not
+  billed. The same threshold applies in the *Activity* time model.
 
 **2. A minute counts at most once.** With several sessions open at the same
 time, their time spans are merged first and then shared: two parallel sessions
